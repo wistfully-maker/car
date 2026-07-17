@@ -10,6 +10,27 @@ ScannerJob = namedtuple(
     ("wall_index", "url", "search_id"),
 )
 ScannerJob.__new__.__defaults__ = (0,)
+FrameToken = namedtuple(
+    "FrameToken",
+    ("generation", "search_id", "wall_index"),
+)
+
+
+class FrameAdapter:
+    def __init__(self, logic, convert):
+        self._logic = logic
+        self._convert = convert
+
+    def handle(self, message):
+        token = self._logic.reserve_frame()
+        if token is None:
+            return False
+        try:
+            image = self._convert(message)
+        except Exception as error:
+            self._logic.fail_reserved_frame(token, str(error))
+            return False
+        return self._logic.process_reserved_frame(token, image)
 
 
 class ScannerLogic:
@@ -42,6 +63,7 @@ class ScannerLogic:
         self._enabled = False
         self._busy = False
         self._decoding = False
+        self._active_token = None
         self._resetting = False
         self._pending_reset = self._NO_RESET
         self._wall_index = -1
@@ -110,6 +132,12 @@ class ScannerLogic:
             self._drain_immediate_resets()
 
     def handle_image(self, image):
+        token = self.reserve_frame()
+        if token is None:
+            return False
+        return self.process_reserved_frame(token, image)
+
+    def reserve_frame(self):
         with self._lock:
             if (
                 not self._enabled
@@ -118,18 +146,37 @@ class ScannerLogic:
                 or self._busy
                 or self._wall_index < 0
             ):
-                return False
+                return None
             self._decoding = True
-            generation = self._generation
-            wall_index = self._wall_index
+            token = FrameToken(
+                self._generation,
+                self._search_id,
+                self._wall_index,
+            )
+            self._active_token = token
+            return token
 
-        decode_error = None
+    def process_reserved_frame(self, token, image):
+        with self._lock:
+            if token != self._active_token:
+                return False
         try:
             url = self._decoder.process(image)
         except Exception as error:
-            url = None
-            decode_error = error
+            return self._complete_reserved_frame(token, None, error)
+        return self._complete_reserved_frame(token, url, None)
 
+    def fail_reserved_frame(self, token, message):
+        with self._lock:
+            if token != self._active_token:
+                return False
+        return self._complete_reserved_frame(
+            token,
+            None,
+            RuntimeError(message),
+        )
+
+    def _complete_reserved_frame(self, token, url, decode_error):
         warning_message = None
         error_payload = None
         accepted = False
@@ -140,16 +187,18 @@ class ScannerLogic:
                     self._pending_reset = self._NO_RESET
                 else:
                     current = (
-                        self._enabled
-                        and self._generation == generation
-                        and self._wall_index == wall_index
+                        token == self._active_token
+                        and self._enabled
+                        and self._generation == token.generation
+                        and self._search_id == token.search_id
+                        and self._wall_index == token.wall_index
                     )
                     if decode_error is not None and current:
                         error_payload = self._payload(
                             ScannerJob(
-                                wall_index,
+                                token.wall_index,
                                 "",
-                                self._search_id,
+                                token.search_id,
                             ),
                             "decode_error",
                             "",
@@ -157,9 +206,9 @@ class ScannerLogic:
                         )
                     elif url and current:
                         job = ScannerJob(
-                            wall_index,
+                            token.wall_index,
                             url,
-                            self._search_id,
+                            token.search_id,
                         )
                         self._busy = True
                         try:
@@ -172,6 +221,7 @@ class ScannerLogic:
                                 "dropping QR observation"
                             )
                     self._decoding = False
+                    self._active_token = None
                     break
             self._run_decoder_reset(reset_kind)
 
@@ -215,15 +265,6 @@ class ScannerLogic:
     def run_worker(self, is_shutdown):
         while not is_shutdown():
             self.work_once(timeout=0.2)
-
-    def publish_decode_error(self, message):
-        with self._lock:
-            job = ScannerJob(
-                self._wall_index,
-                "",
-                self._search_id,
-            )
-        self._safe_publish(self._payload(job, "decode_error", "", message))
 
     def _schedule_reset_locked(self, reset_kind):
         self._pending_reset = max(self._pending_reset, reset_kind)

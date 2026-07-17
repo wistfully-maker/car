@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import Mock
 
 from qr_item_search.qr_payload import InvalidPayload, InvalidQrUrl
-from qr_item_search.scanner_logic import ScannerJob, ScannerLogic
+from qr_item_search.scanner_logic import FrameAdapter, ScannerJob, ScannerLogic
 
 
 class StatefulBlockingDecoder:
@@ -390,6 +390,103 @@ class ScannerLogicTest(unittest.TestCase):
         release.set()
         worker.join(1.0)
 
+        self.publisher.assert_not_called()
+        self.assertFalse(self.logic.busy)
+
+    def test_reserved_conversion_failure_is_discarded_after_wall_change(self):
+        self.logic.set_wall_index(0)
+        self.logic.set_enabled(True)
+        token = self.logic.reserve_frame()
+
+        wall_thread = threading.Thread(
+            target=self.logic.set_wall_index,
+            args=(1,),
+        )
+        wall_thread.start()
+        wall_thread.join(0.2)
+        callback_returned = not wall_thread.is_alive()
+        result = self.logic.fail_reserved_frame(token, "bridge failed")
+
+        self.assertTrue(callback_returned)
+        self.assertFalse(result)
+        self.publisher.assert_not_called()
+        self.assertFalse(self.logic.busy)
+
+    def test_reserved_frame_is_discarded_after_search_reset(self):
+        self.decoder.process.return_value = "https://example.test/item"
+        self.logic.set_wall_index(0)
+        self.logic.set_enabled(True)
+        token = self.logic.reserve_frame()
+        self.logic.reset_search(7)
+
+        result = self.logic.process_reserved_frame(token, object())
+
+        self.assertFalse(result)
+        self.assertEqual(0, self.logic.jobs.qsize())
+        self.assertFalse(self.logic.busy)
+
+    def test_second_frame_is_rejected_during_conversion(self):
+        self.logic.set_wall_index(0)
+        self.logic.set_enabled(True)
+
+        token = self.logic.reserve_frame()
+
+        self.assertIsNotNone(token)
+        self.assertIsNone(self.logic.reserve_frame())
+        self.logic.fail_reserved_frame(token, "bridge failed")
+
+    def test_current_conversion_failure_publishes_one_token_snapshot(self):
+        self.logic.reset_search(5)
+        self.logic.set_wall_index(2)
+        self.logic.set_enabled(True)
+        token = self.logic.reserve_frame()
+
+        self.assertFalse(
+            self.logic.fail_reserved_frame(token, "bridge failed")
+        )
+
+        self.publisher.assert_called_once_with(
+            {
+                "status": "decode_error",
+                "search_id": 5,
+                "wall_index": 2,
+                "url": "",
+                "item_name": "",
+                "message": "bridge failed",
+            }
+        )
+        self.assertFalse(self.logic.busy)
+
+    def test_frame_adapter_releases_token_for_any_conversion_exception(self):
+        bridge = Mock(side_effect=[ValueError("bad frame"), object()])
+        adapter = FrameAdapter(self.logic, bridge)
+        self.logic.set_wall_index(0)
+        self.logic.set_enabled(True)
+        original_fail = self.logic.fail_reserved_frame
+        self.logic.fail_reserved_frame = Mock(wraps=original_fail)
+        self.decoder.process.return_value = None
+
+        self.assertFalse(adapter.handle(object()))
+        self.assertFalse(adapter.handle(object()))
+
+        self.logic.fail_reserved_frame.assert_called_once()
+        self.decoder.process.assert_called_once()
+        self.assertFalse(self.logic.busy)
+
+    def test_frame_adapter_failure_drains_pending_wall_reset(self):
+        self.logic.set_wall_index(0)
+        self.logic.set_enabled(True)
+        self.decoder.reset_wall.reset_mock()
+
+        def changing_bridge(message):
+            self.logic.set_wall_index(1)
+            raise TypeError("conversion failed")
+
+        adapter = FrameAdapter(self.logic, changing_bridge)
+
+        self.assertFalse(adapter.handle(object()))
+
+        self.decoder.reset_wall.assert_called_once_with()
         self.publisher.assert_not_called()
         self.assertFalse(self.logic.busy)
 

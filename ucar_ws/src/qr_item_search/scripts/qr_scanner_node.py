@@ -4,12 +4,12 @@ import threading
 
 from qr_item_search.qr_decode import StableQrDecoder
 from qr_item_search.qr_payload import ItemResolver
-from qr_item_search.scanner_logic import ScannerLogic
+from qr_item_search.scanner_logic import FrameAdapter, ScannerLogic
 
 
 def main():
     import rospy
-    from cv_bridge import CvBridge, CvBridgeError
+    from cv_bridge import CvBridge
     from sensor_msgs.msg import Image
     from std_msgs.msg import Bool, Int32, String
 
@@ -37,14 +37,13 @@ def main():
         warning=rospy.logwarn,
     )
 
+    frame_adapter = FrameAdapter(
+        logic,
+        lambda message: bridge.imgmsg_to_cv2(message, "bgr8"),
+    )
+
     def image_callback(message):
-        if not logic.accepting_images:
-            return
-        try:
-            image = bridge.imgmsg_to_cv2(message, "bgr8")
-            logic.handle_image(image)
-        except (CvBridgeError, UnicodeDecodeError) as error:
-            logic.publish_decode_error(str(error))
+        frame_adapter.handle(message)
 
     rospy.Subscriber(
         "/qr_item_search/scan_enabled",
