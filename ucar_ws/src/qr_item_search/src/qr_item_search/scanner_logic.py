@@ -5,7 +5,11 @@ from collections import namedtuple
 from qr_item_search.qr_payload import InvalidPayload, InvalidQrUrl
 
 
-ScannerJob = namedtuple("ScannerJob", ("wall_index", "url"))
+ScannerJob = namedtuple(
+    "ScannerJob",
+    ("wall_index", "url", "search_id"),
+)
+ScannerJob.__new__.__defaults__ = (0,)
 
 
 class ScannerLogic:
@@ -42,6 +46,7 @@ class ScannerLogic:
         self._pending_reset = self._NO_RESET
         self._wall_index = -1
         self._generation = 0
+        self._search_id = 0
 
     @property
     def busy(self):
@@ -94,9 +99,12 @@ class ScannerLogic:
         if run_reset:
             self._drain_immediate_resets()
 
-    def reset_search(self):
+    def reset_search(self, search_id):
+        if type(search_id) is not int or search_id < 0:
+            raise ValueError("search_id must be a non-negative integer")
         with self._lock:
             self._generation += 1
+            self._search_id = search_id
             run_reset = self._schedule_reset_locked(self._SEARCH_RESET)
         if run_reset:
             self._drain_immediate_resets()
@@ -138,13 +146,21 @@ class ScannerLogic:
                     )
                     if decode_error is not None and current:
                         error_payload = self._payload(
-                            ScannerJob(wall_index, ""),
+                            ScannerJob(
+                                wall_index,
+                                "",
+                                self._search_id,
+                            ),
                             "decode_error",
                             "",
                             str(decode_error),
                         )
                     elif url and current:
-                        job = ScannerJob(wall_index, url)
+                        job = ScannerJob(
+                            wall_index,
+                            url,
+                            self._search_id,
+                        )
                         self._busy = True
                         try:
                             self._jobs.put_nowait(job)
@@ -186,7 +202,10 @@ class ScannerLogic:
                 )
             except Exception as error:
                 payload = self._payload(job, "http_error", "", str(error))
-            self._safe_publish(payload)
+            with self._lock:
+                current = job.search_id == self._search_id
+            if current:
+                self._safe_publish(payload)
         finally:
             with self._lock:
                 self._busy = False
@@ -199,7 +218,11 @@ class ScannerLogic:
 
     def publish_decode_error(self, message):
         with self._lock:
-            job = ScannerJob(self._wall_index, "")
+            job = ScannerJob(
+                self._wall_index,
+                "",
+                self._search_id,
+            )
         self._safe_publish(self._payload(job, "decode_error", "", message))
 
     def _schedule_reset_locked(self, reset_kind):
@@ -245,6 +268,7 @@ class ScannerLogic:
     def _payload(job, status, item_name, message):
         return {
             "status": status,
+            "search_id": job.search_id,
             "wall_index": job.wall_index,
             "url": job.url,
             "item_name": item_name,

@@ -65,6 +65,7 @@ class ScannerLogicTest(unittest.TestCase):
         self.publisher.assert_called_once_with(
             {
                 "status": "success",
+                "search_id": 0,
                 "wall_index": 2,
                 "url": "https://example.test/item",
                 "item_name": "香蕉",
@@ -104,9 +105,15 @@ class ScannerLogicTest(unittest.TestCase):
         self.decoder.reset_wall.assert_called_once_with()
 
     def test_reset_search_clears_decoder_seen_values(self):
-        self.logic.reset_search()
+        self.logic.reset_search(3)
 
         self.decoder.reset_search.assert_called_once_with()
+
+    def test_reset_search_rejects_invalid_search_id(self):
+        for search_id in (-1, True, 1.5, None):
+            with self.subTest(search_id=search_id):
+                with self.assertRaises(ValueError):
+                    self.logic.reset_search(search_id)
 
     def test_busy_scanner_does_not_enqueue_duplicate(self):
         self.decoder.process.return_value = "https://example.test/item"
@@ -316,7 +323,7 @@ class ScannerLogicTest(unittest.TestCase):
         self.assertTrue(decoder.entered.wait(1.0))
 
         logic.set_wall_index(1)
-        reset_thread = threading.Thread(target=logic.reset_search)
+        reset_thread = threading.Thread(target=logic.reset_search, args=(4,))
         reset_thread.start()
         reset_thread.join(0.2)
         callback_returned = not reset_thread.is_alive()
@@ -360,6 +367,31 @@ class ScannerLogicTest(unittest.TestCase):
 
         self.assertFalse(callback_thread.is_alive())
         self.assertTrue(warning_called.is_set())
+
+    def test_reset_search_discards_inflight_resolver_result(self):
+        entered = threading.Event()
+        release = threading.Event()
+
+        def blocking_resolve(url):
+            entered.set()
+            release.wait(1.0)
+            return "stale item"
+
+        self.decoder.process.return_value = "https://example.test/item"
+        self.resolver.resolve.side_effect = blocking_resolve
+        self.logic.set_wall_index(0)
+        self.logic.set_enabled(True)
+        self.logic.handle_image(object())
+        worker = threading.Thread(target=self.logic.work_once)
+        worker.start()
+        self.assertTrue(entered.wait(1.0))
+
+        self.logic.reset_search(1)
+        release.set()
+        worker.join(1.0)
+
+        self.publisher.assert_not_called()
+        self.assertFalse(self.logic.busy)
 
 
 if __name__ == "__main__":

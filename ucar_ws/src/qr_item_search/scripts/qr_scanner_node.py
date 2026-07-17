@@ -11,7 +11,7 @@ def main():
     import rospy
     from cv_bridge import CvBridge, CvBridgeError
     from sensor_msgs.msg import Image
-    from std_msgs.msg import Bool, Empty, Int32, String
+    from std_msgs.msg import Bool, Int32, String
 
     rospy.init_node("qr_scanner")
     bridge = CvBridge()
@@ -58,8 +58,8 @@ def main():
     )
     rospy.Subscriber(
         "/qr_item_search/reset",
-        Empty,
-        lambda message: logic.reset_search(),
+        Int32,
+        lambda message: logic.reset_search(message.data),
     )
     rospy.Subscriber(
         rospy.get_param("~image_topic", "/usb_cam/image_raw"),
