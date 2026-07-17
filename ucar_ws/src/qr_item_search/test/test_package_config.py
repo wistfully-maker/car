@@ -72,6 +72,15 @@ class PackageConfigTest(unittest.TestCase):
             )
         )
 
+    def test_maintainer_email_has_a_qualified_domain(self):
+        root = ET.parse(str(PACKAGE_ROOT / "package.xml")).getroot()
+        email = root.find("maintainer").get("email")
+        local, separator, domain = email.partition("@")
+
+        self.assertTrue(local)
+        self.assertEqual("@", separator)
+        self.assertIn(".", domain)
+
     def test_cmake_installs_scripts_and_launch_with_one_test_block(self):
         cmake = (PACKAGE_ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
         self.assertIn("scripts/qr_scanner_node.py", cmake)
