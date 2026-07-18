@@ -53,6 +53,29 @@ class AngularCommandTest(unittest.TestCase):
         self.assertFalse(positive_reached)
         self.assertFalse(negative_reached)
 
+    def test_applies_minimum_effective_speed_outside_tolerance(self):
+        positive, positive_reached = angular_command(
+            0.0,
+            0.05,
+            kp=1.2,
+            max_speed=0.30,
+            tolerance=0.035,
+            min_speed=0.11,
+        )
+        negative, negative_reached = angular_command(
+            0.0,
+            -0.05,
+            kp=1.2,
+            max_speed=0.30,
+            tolerance=0.035,
+            min_speed=0.11,
+        )
+
+        self.assertEqual(0.11, positive)
+        self.assertEqual(-0.11, negative)
+        self.assertFalse(positive_reached)
+        self.assertFalse(negative_reached)
+
     def test_rejects_invalid_control_parameters(self):
         invalid_parameters = (
             {"kp": 0.0, "max_speed": 1.0, "tolerance": 0.0},

@@ -17,6 +17,7 @@
               subst_value="true">$(arg wall_yaw_offsets)</rosparam>
     <param name="yaw_kp" value="1.2"/>
     <param name="max_angular_speed" value="0.30"/>
+    <param name="min_angular_speed" value="0.11"/>
     <param name="yaw_tolerance" value="0.035"/>
     <param name="settle_seconds" value="0.8"/>
     <param name="scan_timeout" value="4.0"/>

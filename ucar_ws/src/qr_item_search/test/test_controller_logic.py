@@ -101,6 +101,22 @@ class SearchControllerTest(unittest.TestCase):
         self.assertEqual("ERROR", self.controller.state)
         self.assertEqual(0.0, self.outputs.speeds[-1])
 
+    def test_turning_uses_configured_minimum_effective_speed(self):
+        controller = SearchController(
+            wall_yaw_offsets=[0.05],
+            outputs=self.outputs,
+            kp=1.2,
+            max_speed=0.30,
+            min_speed=0.11,
+            tolerance=0.035,
+        )
+        controller.update_yaw(0.0)
+        controller.start(now=0.0)
+
+        controller.tick(now=0.1)
+
+        self.assertEqual(0.11, self.outputs.speeds[-1])
+
     def test_start_without_odometry_enters_error(self):
         controller = SearchController([0.0], self.outputs)
 
@@ -151,6 +167,8 @@ class SearchControllerTest(unittest.TestCase):
             {"wall_yaw_offsets": [math.nan]},
             {"kp": 0.0},
             {"max_speed": 0.0},
+            {"min_speed": -0.1},
+            {"min_speed": 0.31, "max_speed": 0.30},
             {"tolerance": -1.0},
             {"settle_seconds": -1.0},
             {"scan_timeout": 0.0},

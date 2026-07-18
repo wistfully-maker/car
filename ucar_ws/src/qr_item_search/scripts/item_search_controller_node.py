@@ -62,6 +62,7 @@ def main():
         outputs=RosOutputs(),
         kp=rospy.get_param("~yaw_kp", 1.2),
         max_speed=rospy.get_param("~max_angular_speed", 0.30),
+        min_speed=rospy.get_param("~min_angular_speed", 0.11),
         tolerance=rospy.get_param("~yaw_tolerance", 0.035),
         settle_seconds=rospy.get_param("~settle_seconds", 0.8),
         scan_timeout=rospy.get_param("~scan_timeout", 4.0),

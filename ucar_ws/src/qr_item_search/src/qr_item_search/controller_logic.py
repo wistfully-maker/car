@@ -23,6 +23,7 @@ class SearchController:
         outputs,
         kp=1.2,
         max_speed=0.30,
+        min_speed=0.0,
         tolerance=0.035,
         settle_seconds=0.8,
         scan_timeout=4.0,
@@ -34,6 +35,7 @@ class SearchController:
         self._validate_controls(
             kp,
             max_speed,
+            min_speed,
             tolerance,
             settle_seconds,
             scan_timeout,
@@ -46,6 +48,7 @@ class SearchController:
         self._clock = clock if clock is not None else time.monotonic
         self._kp = kp
         self._max_speed = max_speed
+        self._min_speed = min_speed
         self._tolerance = tolerance
         self._settle_seconds = settle_seconds
         self._scan_timeout = scan_timeout
@@ -178,6 +181,7 @@ class SearchController:
                 self._kp,
                 self._max_speed,
                 self._tolerance,
+                self._min_speed,
             )
             if not self._emit_locked("publish_speed", speed) and speed != 0.0:
                 self._machine.fail()
@@ -322,6 +326,7 @@ class SearchController:
         cls,
         kp,
         max_speed,
+        min_speed,
         tolerance,
         settle_seconds,
         scan_timeout,
@@ -330,6 +335,7 @@ class SearchController:
         values = (
             kp,
             max_speed,
+            min_speed,
             tolerance,
             settle_seconds,
             scan_timeout,
@@ -337,7 +343,13 @@ class SearchController:
         )
         if any(not cls._is_finite_number(value) for value in values):
             raise ValueError("controller parameters must be finite numbers")
-        if kp <= 0 or max_speed <= 0 or tolerance < 0:
+        if (
+            kp <= 0
+            or max_speed <= 0
+            or min_speed < 0
+            or min_speed > max_speed
+            or tolerance < 0
+        ):
             raise ValueError("invalid yaw control parameters")
         if settle_seconds < 0 or scan_timeout <= 0 or turn_timeout <= 0:
             raise ValueError("invalid controller timing")

@@ -48,6 +48,7 @@ class PackageConfigTest(unittest.TestCase):
         expected = {
             "yaw_kp": "1.2",
             "max_angular_speed": "0.30",
+            "min_angular_speed": "0.11",
             "yaw_tolerance": "0.035",
             "settle_seconds": "0.8",
             "scan_timeout": "4.0",
