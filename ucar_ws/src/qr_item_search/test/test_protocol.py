@@ -147,6 +147,36 @@ class SearchResultTest(unittest.TestCase):
                 with self.assertRaises(ProtocolError):
                     build_search_result("task", "search", 1, status, [], " ")
 
+    def test_searching_and_not_found_reject_three_items(self):
+        for status in ("searching", "not_found"):
+            with self.subTest(status=status):
+                with self.assertRaises(ProtocolError):
+                    build_search_result("task", "search", 1, status, self._items(), "reason")
+
+    def test_every_status_rejects_more_than_expected_items(self):
+        items = self._items() + [{
+            "order": 4,
+            "item_name": "date",
+            "url": "https://four",
+            "detected_yaw": 4,
+        }]
+        for status in ("searching", "complete", "not_found", "error", "stopped"):
+            with self.subTest(status=status):
+                with self.assertRaises(ProtocolError):
+                    build_search_result("task", "search", 1, status, items, "reason")
+
+    def test_non_complete_statuses_allow_partial_normalized_items(self):
+        for status in ("searching", "not_found", "error", "stopped"):
+            for count in (1, 2):
+                with self.subTest(status=status, count=count):
+                    result = build_search_result(
+                        "task", "search", 1, status, self._items()[:count], " reason "
+                    )
+                    self.assertEqual(count, len(result["items"]))
+                    self.assertEqual("apple", result["items"][0]["item_name"])
+                    self.assertEqual("https://one", result["items"][0]["url"])
+                    self.assertEqual("reason", result["message"])
+
     def test_searching_allows_empty_message_but_rejects_non_string(self):
         result = build_search_result("task", "search", 1, "searching", [], "")
         self.assertEqual("", result["message"])

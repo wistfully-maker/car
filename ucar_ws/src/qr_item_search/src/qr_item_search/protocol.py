@@ -108,6 +108,12 @@ def build_search_result(task_id, search_id, stamp, status, items, message):
     normalized_items = _normalize_items(items)
     if status not in ("searching", "complete", "not_found", "error", "stopped"):
         raise ProtocolError("invalid search status")
+    if len(normalized_items) > EXPECTED_QR_COUNT:
+        raise ProtocolError("result cannot contain more than %d items" % EXPECTED_QR_COUNT)
+    if status in ("searching", "not_found") and len(normalized_items) >= EXPECTED_QR_COUNT:
+        raise ProtocolError("%s result must contain fewer than %d items" % (
+            status, EXPECTED_QR_COUNT
+        ))
     normalized_message = message.strip() if isinstance(message, str) else None
     if normalized_message is None:
         raise ProtocolError("message must be a string")
