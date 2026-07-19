@@ -1,70 +1,66 @@
+ACTIVE = frozenset({"FAST_SWEEP", "WAITING_HTTP", "TARGETED_RESCAN"})
+RESTARTABLE = frozenset({"IDLE", "COMPLETE", "NOT_FOUND", "ERROR", "STOPPED"})
+
+
 class InvalidTransition(RuntimeError):
     pass
 
 
 class SearchMachine:
-    _TERMINAL_STATES = {"SUCCESS", "NOT_FOUND", "ERROR"}
+    __slots__ = ("state",)
 
-    def __init__(self, wall_count):
-        if type(wall_count) is not int or wall_count <= 0:
-            raise ValueError("wall_count must be a positive integer")
-        self.wall_count = wall_count
-        self.wall_index = 0
+    ACTIVE = ACTIVE
+    RESTARTABLE = RESTARTABLE
+
+    def __init__(self):
         self.state = "IDLE"
 
     def start(self):
-        if self.state != "IDLE" and self.state not in self._TERMINAL_STATES:
-            self._invalid("start")
-        self.wall_index = 0
-        self.state = "TURNING"
+        self._transition("start", RESTARTABLE, "FAST_SWEEP")
 
-    def turn_reached(self):
-        self._require("TURNING", "turn_reached")
-        self.state = "SETTLING"
+    def urls_collected(self):
+        self._transition(
+            "urls_collected",
+            frozenset({"FAST_SWEEP", "TARGETED_RESCAN"}),
+            "WAITING_HTTP",
+        )
 
-    def settled(self):
-        self._require("SETTLING", "settled")
-        self.state = "SCANNING"
+    def fast_sweep_finished(self):
+        self._transition(
+            "fast_sweep_finished",
+            frozenset({"FAST_SWEEP"}),
+            "TARGETED_RESCAN",
+        )
 
-    def observation_succeeded(self):
-        self._require("SCANNING", "observation_succeeded")
-        self.state = "WAITING_MATCH"
+    def resume_rescan(self):
+        self._transition(
+            "resume_rescan",
+            frozenset({"WAITING_HTTP"}),
+            "TARGETED_RESCAN",
+        )
 
-    def observation_failed(self):
-        self._require("SCANNING", "observation_failed")
-        self._advance()
+    def items_resolved(self):
+        self._transition("items_resolved", ACTIVE, "COMPLETE")
 
-    def scan_timeout(self):
-        self._require("SCANNING", "scan_timeout")
-        self._advance()
+    def rescan_finished(self):
+        self._transition(
+            "rescan_finished",
+            frozenset({"TARGETED_RESCAN"}),
+            "NOT_FOUND",
+        )
 
-    def match_decision(self, matched):
-        self._require("WAITING_MATCH", "match_decision")
-        if type(matched) is not bool:
-            raise TypeError("matched must be a bool")
-        if matched:
-            self.state = "SUCCESS"
-        else:
-            self._advance()
+    def timeout(self):
+        self._transition("timeout", ACTIVE, "NOT_FOUND")
 
     def stop(self):
-        self.state = "IDLE"
+        self.state = "STOPPED"
 
     def fail(self):
         self.state = "ERROR"
 
-    def _advance(self):
-        if self.wall_index + 1 >= self.wall_count:
-            self.state = "NOT_FOUND"
-        else:
-            self.wall_index += 1
-            self.state = "TURNING"
-
-    def _require(self, expected, event):
-        if self.state != expected:
-            self._invalid(event)
-
-    def _invalid(self, event):
-        raise InvalidTransition(
-            "{} is invalid while in {}".format(event, self.state)
-        )
+    def _transition(self, event, allowed_states, destination):
+        if self.state not in allowed_states:
+            raise InvalidTransition(
+                "{} is invalid while in {}".format(event, self.state)
+            )
+        self.state = destination
