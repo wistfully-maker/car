@@ -86,6 +86,9 @@ class CoverageMap:
             raise ValueError("margin must be non-negative")
         self.sectors = [Sector() for _ in range(self.sector_count)]
 
+    def reset(self):
+        self.sectors = [Sector() for _ in range(self.sector_count)]
+
     @property
     def sector_width(self):
         return math.tau / self.sector_count

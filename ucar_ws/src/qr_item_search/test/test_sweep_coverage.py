@@ -49,6 +49,13 @@ class YawTrackerTest(unittest.TestCase):
 
 
 class CoverageMapTest(unittest.TestCase):
+    def test_reset_clears_all_sector_statistics(self):
+        coverage = CoverageMap(sector_count=2)
+        coverage.record(0, 1, 0, 1, True)
+        coverage.reset()
+        self.assertEqual([0, 0], [sector.frame_count for sector in coverage.sectors])
+        self.assertFalse(any(sector.decoded for sector in coverage.sectors))
+
     def test_uses_specified_default_parameters(self):
         coverage = CoverageMap()
 

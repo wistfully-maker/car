@@ -1,488 +1,433 @@
-import ast
 import json
 import math
-from pathlib import Path
 import threading
 import unittest
 from unittest.mock import Mock
 
 from qr_item_search.controller_logic import SearchController
+from qr_item_search.sweep_coverage import CoverageMap, Interval
 
 
-class RecordingOutputs:
+class Outputs:
     def __init__(self):
-        self.speeds = []
-        self.states = []
-        self.walls = []
-        self.scan_enabled = []
-        self.reset_count = 0
-        self.reset_ids = []
+        self.speeds, self.states, self.controls, self.results = [], [], [], []
+    def publish_speed(self, value): self.speeds.append(value)
+    def publish_state(self, value): self.states.append(value)
+    def publish_scanner_control(self, value): self.controls.append(value)
+    def publish_result(self, value): self.results.append(value)
 
-    def publish_speed(self, value):
-        self.speeds.append(value)
 
-    def publish_state(self, value):
-        self.states.append(value)
+def start_json(task="task", search="search"):
+    return json.dumps({"protocol_version": 1, "task_id": task, "search_id": search, "expected_count": 3})
 
-    def publish_wall(self, value):
-        self.walls.append(value)
 
-    def publish_scan_enabled(self, value):
-        self.scan_enabled.append(value)
-
-    def publish_reset(self, search_id):
-        self.reset_count += 1
-        self.reset_ids.append(search_id)
+def event(kind, **fields):
+    value = {"protocol_version": 1, "task_id": "task", "search_id": "search", "event": kind}
+    value.update(fields)
+    return json.dumps(value)
 
 
 class SearchControllerTest(unittest.TestCase):
     def setUp(self):
-        self.outputs = RecordingOutputs()
-        self.controller = SearchController(
-            wall_yaw_offsets=[0.0, math.pi / 2],
-            outputs=self.outputs,
-            settle_seconds=0.5,
-            scan_timeout=2.0,
-            turn_timeout=3.0,
-        )
-        self.controller.update_yaw(0.0)
-
-    def enter_scanning(self):
-        self.controller.start(now=0.0)
-        self.controller.tick(now=0.0)
-        self.controller.tick(now=0.5)
-        self.assertEqual("SCANNING", self.controller.state)
-
-    def test_first_wall_match_succeeds(self):
-        self.enter_scanning()
-
-        self.controller.handle_observation(
-            json.dumps({"search_id": 1, "wall_index": 0, "status": "success"}),
-            now=0.6,
-        )
-        self.controller.match_decision(True, now=0.7)
-
-        self.assertEqual("SUCCESS", self.controller.state)
-        self.assertEqual(0.0, self.outputs.speeds[-1])
-        self.assertFalse(self.outputs.scan_enabled[-1])
-
-    def test_failed_observation_immediately_turns_to_next_wall(self):
-        self.enter_scanning()
-
-        self.controller.handle_observation(
-            json.dumps(
-                {
-                    "search_id": 1,
-                    "wall_index": 0,
-                    "status": "invalid_payload",
-                }
-            ),
-            now=0.6,
-        )
-
-        self.assertEqual("TURNING", self.controller.state)
-        self.assertEqual(1, self.controller.wall_index)
-        self.assertEqual(0.0, self.outputs.speeds[-1])
-
-    def test_scan_timeout_advances_to_next_wall(self):
-        self.enter_scanning()
-
-        self.controller.tick(now=2.5)
-
-        self.assertEqual("TURNING", self.controller.state)
-        self.assertEqual(1, self.controller.wall_index)
-
-    def test_turn_timeout_enters_error_and_stops(self):
-        self.controller.update_yaw(0.2)
-        self.controller.start(now=0.0)
-
-        self.controller.tick(now=3.0)
-
-        self.assertEqual("ERROR", self.controller.state)
-        self.assertEqual(0.0, self.outputs.speeds[-1])
-
-    def test_turning_uses_configured_minimum_effective_speed(self):
-        controller = SearchController(
-            wall_yaw_offsets=[0.05],
-            outputs=self.outputs,
-            kp=1.2,
-            max_speed=0.30,
-            min_speed=0.11,
-            tolerance=0.035,
-        )
-        controller.update_yaw(0.0)
-        controller.start(now=0.0)
-
-        controller.tick(now=0.1)
-
-        self.assertEqual(0.11, self.outputs.speeds[-1])
-
-    def test_start_without_odometry_enters_error(self):
-        controller = SearchController([0.0], self.outputs)
-
-        controller.start(now=0.0)
-
-        self.assertEqual("ERROR", controller.state)
-        self.assertEqual(0.0, self.outputs.speeds[-1])
-
-    def test_stale_wall_observation_is_ignored(self):
-        self.enter_scanning()
-
-        self.controller.handle_observation(
-            json.dumps({"search_id": 1, "wall_index": 1, "status": "success"}),
-            now=0.6,
-        )
-
-        self.assertEqual("SCANNING", self.controller.state)
-
-    def test_invalid_observation_json_enters_error(self):
-        self.enter_scanning()
-
-        self.controller.handle_observation("{bad json", now=0.6)
-
-        self.assertEqual("ERROR", self.controller.state)
-        self.assertEqual(0.0, self.outputs.speeds[-1])
-
-    def test_stop_returns_idle_with_zero_speed(self):
-        self.controller.update_yaw(0.2)
-        self.controller.start(now=0.0)
-        self.controller.tick(now=0.1)
-
-        self.controller.stop(now=0.2)
-
-        self.assertEqual("IDLE", self.controller.state)
-        self.assertEqual(0.0, self.outputs.speeds[-1])
-
-    def test_start_publishes_scanner_reset(self):
-        self.controller.start(now=0.0)
-
-        self.assertEqual(1, self.outputs.reset_count)
-        self.assertEqual([1], self.outputs.reset_ids)
-        self.assertEqual(0, self.outputs.walls[-1])
-        self.assertEqual("TURNING", self.outputs.states[-1])
-
-    def test_rejects_invalid_configuration(self):
-        invalid = (
-            {"wall_yaw_offsets": []},
-            {"wall_yaw_offsets": [math.nan]},
-            {"kp": 0.0},
-            {"max_speed": 0.0},
-            {"min_speed": -0.1},
-            {"min_speed": 0.31, "max_speed": 0.30},
-            {"tolerance": -1.0},
-            {"settle_seconds": -1.0},
-            {"scan_timeout": 0.0},
-            {"turn_timeout": math.inf},
-        )
-        for override in invalid:
-            parameters = {
-                "wall_yaw_offsets": [0.0],
-                "outputs": self.outputs,
-            }
-            parameters.update(override)
-            with self.subTest(override=override):
-                with self.assertRaises(ValueError):
-                    SearchController(**parameters)
-
-    def test_repeated_start_while_active_is_ignored(self):
-        self.assertTrue(self.controller.start(now=0.0))
-
-        self.assertFalse(self.controller.start(now=0.1))
-
-        self.assertEqual("TURNING", self.controller.state)
-        self.assertEqual(1, self.outputs.reset_count)
-
-    def test_non_finite_time_is_rejected_without_state_change(self):
-        for now in (math.nan, math.inf, -math.inf):
-            with self.subTest(now=now):
-                with self.assertRaises(ValueError):
-                    self.controller.start(now)
-                self.assertEqual("IDLE", self.controller.state)
-
-    def test_time_rollback_enters_error_and_stops(self):
-        self.controller.start(now=2.0)
-
-        self.assertFalse(self.controller.tick(now=1.0))
-
-        self.assertEqual("ERROR", self.controller.state)
-        self.assertEqual(0.0, self.outputs.speeds[-1])
-
-    def test_malformed_current_observation_enters_error(self):
-        malformed = (
-            {"search_id": 1, "wall_index": True, "status": "success"},
-            {"search_id": 1, "wall_index": -1, "status": "success"},
-            {"search_id": 1, "wall_index": 0, "status": 1},
-            {"search_id": 1, "wall_index": 0, "status": "unknown"},
-            {"search_id": True, "wall_index": 0, "status": "success"},
-        )
-        for payload in malformed:
-            with self.subTest(payload=payload):
-                outputs = RecordingOutputs()
-                controller = SearchController(
-                    [0.0], outputs, settle_seconds=0.0
-                )
-                controller.update_yaw(0.0)
-                controller.start(0.0)
-                controller.tick(0.0)
-                controller.tick(0.0)
-
-                controller.handle_observation(json.dumps(payload), 0.1)
-
-                self.assertEqual("ERROR", controller.state)
-
-    def test_stop_serializes_after_inflight_tick(self):
-        entered = threading.Event()
-        release = threading.Event()
-        outputs = RecordingOutputs()
-        original_publish_speed = outputs.publish_speed
-
-        def blocking_speed(value):
-            original_publish_speed(value)
-            if value != 0.0:
-                entered.set()
-                release.wait(1.0)
-
-        outputs.publish_speed = blocking_speed
-        controller = SearchController([0.5], outputs)
-        controller.update_yaw(0.2)
-        controller.start(0.0)
-        tick_thread = threading.Thread(target=controller.tick, args=(0.1,))
-        tick_thread.start()
-        self.assertTrue(entered.wait(1.0))
-        stop_started = threading.Event()
-
-        def stop_controller():
-            stop_started.set()
-            controller.stop(0.2)
-
-        stop_thread = threading.Thread(target=stop_controller)
-        stop_thread.start()
-        self.assertTrue(stop_started.wait(1.0))
-        self.assertTrue(stop_thread.is_alive())
-
-        release.set()
-        tick_thread.join(1.0)
-        stop_thread.join(1.0)
-
-        self.assertEqual("IDLE", controller.state)
-        self.assertEqual(0.0, outputs.speeds[-1])
-
-    def test_nonzero_speed_failure_enters_error_and_attempts_zero(self):
-        class FailingOutputs(RecordingOutputs):
-            def publish_speed(self, value):
-                self.speeds.append(value)
-                if value != 0.0:
-                    raise RuntimeError("motor publisher failed")
-
-        outputs = FailingOutputs()
-        errors = []
-        controller = SearchController([0.5], outputs, error_handler=errors.append)
-        controller.update_yaw(0.2)
-        controller.start(0.0)
-
-        controller.tick(0.1)
-
-        self.assertEqual("ERROR", controller.state)
-        self.assertEqual([0.0, 0.0, 0.3, 0.0], outputs.speeds)
-        self.assertEqual(1, len(errors))
-
-    def test_one_state_publisher_failure_does_not_block_other_outputs(self):
-        class PartlyFailingOutputs(RecordingOutputs):
-            def publish_scan_enabled(self, value):
-                raise RuntimeError("scan publisher failed")
-
-        outputs = PartlyFailingOutputs()
-        errors = []
-        controller = SearchController([0.0], outputs, error_handler=errors.append)
-        initial_error_count = len(errors)
-
-        controller.stop(0.0)
-
-        self.assertEqual("ERROR", outputs.states[-1])
-        self.assertEqual(0, outputs.walls[-1])
-        self.assertEqual(0.0, outputs.speeds[-1])
-        self.assertEqual(initial_error_count + 2, len(errors))
-
-    def test_shutdown_zero_failure_does_not_escape(self):
-        outputs = RecordingOutputs()
-        controller = SearchController([0.0], outputs)
-        outputs.publish_speed = Mock(side_effect=RuntimeError("down"))
-
-        controller.shutdown()
-
-    def test_old_search_observation_is_ignored(self):
-        self.enter_scanning()
-
-        self.controller.handle_observation(
-            json.dumps(
-                {"search_id": 0, "wall_index": 0, "status": "success"}
-            ),
-            0.6,
-        )
-
-        self.assertEqual("SCANNING", self.controller.state)
-
-    def test_reset_publish_failure_prevents_start_and_enters_error(self):
-        class ResetFailingOutputs(RecordingOutputs):
-            def publish_reset(self, search_id):
-                self.reset_ids.append(search_id)
-                raise RuntimeError("reset down")
-
-        outputs = ResetFailingOutputs()
-        controller = SearchController([0.0], outputs)
-        controller.update_yaw(0.0)
-
-        self.assertFalse(controller.start(0.0))
-
-        self.assertEqual("ERROR", controller.state)
-        self.assertEqual(0.0, outputs.speeds[-1])
-        self.assertEqual("ERROR", outputs.states[-1])
-
-    def test_control_plane_failure_during_entry_enters_error(self):
-        for failed_method in (
-            "publish_speed",
-            "publish_scan_enabled",
-            "publish_wall",
+        self.out = Outputs()
+        self.coverage = CoverageMap(sector_count=4, minimum_frames=1, margin=0)
+        self.c = SearchController(self.out, coverage=self.coverage)
+        self.c.update_yaw(0.0, 0.0)
+
+    def start(self):
+        self.assertTrue(self.c.start(start_json(), 0.0))
+
+    def quality(self, now=.1, yaw=.1, decoded=False):
+        return self.c.handle_scanner_event(event("quality", brightness=50., overexposed=0., sharpness=50.,
+                                                 decoded=decoded, detected_yaw=yaw), now)
+
+    def detected(self, order, url=None, yaw=.2, now=.2):
+        return self.c.handle_scanner_event(event("detected", order=order, url=url or "https://%d" % order,
+                                                 detected_yaw=yaw, item_name="", message=""), now)
+
+    def resolved(self, order, url=None, name=None, yaw=.2, now=.3):
+        return self.c.handle_scanner_event(event("resolved", order=order, url=url or "https://%d" % order,
+                                                 detected_yaw=yaw, item_name=name or "item%d" % order, message=""), now)
+
+    def test_initial_outputs_are_safe(self):
+        self.assertEqual([0.0], self.out.speeds)
+        self.assertEqual("IDLE", self.out.states[-1])
+        self.assertFalse(self.out.controls[-1]["enabled"])
+
+    def test_start_then_tick_publishes_fast_speed(self):
+        self.start(); self.c.tick(.1)
+        self.assertEqual("FAST_SWEEP", self.c.state)
+        self.assertEqual(.4, self.out.speeds[-1])
+        self.assertEqual("searching", self.out.results[-1]["status"])
+
+    def test_fast_sweep_uses_configured_380_degree_angle(self):
+        self.start()
+        for index in range(1, 7):
+            self.c.update_yaw(index, index / 10); self.quality(index / 10 + .001)
+        self.assertEqual("FAST_SWEEP", self.c.state)
+        self.c.update_yaw(6.64, .7); self.c.tick(.7)
+        self.assertEqual("TARGETED_RESCAN", self.c.state)
+
+    def test_third_detection_stops_and_waits_http(self):
+        self.start()
+        for order in (1, 2, 3): self.detected(order, now=.1 + order / 100)
+        self.assertEqual("WAITING_HTTP", self.c.state)
+        self.assertEqual(0.0, self.out.speeds[-1])
+        self.assertFalse(self.out.controls[-1]["enabled"])
+
+    def test_reverse_resolution_finishes_sorted(self):
+        self.start()
+        for order in (1, 2, 3): self.detected(order, yaw=order, now=.1 + order / 100)
+        for index, order in enumerate((3, 1, 2)): self.resolved(order, yaw=order, now=.2 + index / 100)
+        self.assertEqual("COMPLETE", self.c.state)
+        self.assertEqual([1, 2, 3], [item["order"] for item in self.out.results[-1]["items"]])
+
+    def test_quality_records_coverage(self):
+        self.start(); self.quality(decoded=True)
+        self.assertEqual(1, self.coverage.sectors[0].frame_count)
+        self.assertTrue(self.coverage.sectors[0].decoded)
+
+    def test_invalid_quality_enters_error(self):
+        self.start()
+        self.c.handle_scanner_event(event("quality", brightness=True, overexposed=0., sharpness=1.,
+                                          decoded=False, detected_yaw=0.), .1)
+        self.assertEqual("ERROR", self.c.state)
+
+    def test_stale_identity_is_ignored(self):
+        self.start()
+        raw = json.loads(event("quality", brightness=1., overexposed=0., sharpness=1., decoded=False, detected_yaw=0.))
+        raw["search_id"] = "old"
+        self.assertFalse(self.c.handle_scanner_event(json.dumps(raw), .1))
+        self.assertEqual("FAST_SWEEP", self.c.state)
+
+    def test_duplicate_detection_is_idempotent(self):
+        self.start(); self.detected(1); self.detected(1, now=.21)
+        self.assertEqual("FAST_SWEEP", self.c.state)
+
+    def test_conflicting_detection_enters_error(self):
+        self.start(); self.detected(1)
+        self.detected(1, url="https://different", now=.21)
+        self.assertEqual("ERROR", self.c.state)
+
+    def test_same_url_different_order_enters_error(self):
+        self.start(); self.detected(1, url="https://same")
+        self.detected(2, url="https://same", now=.21)
+        self.assertEqual("ERROR", self.c.state)
+
+    def test_resolution_requires_detection(self):
+        self.start(); self.resolved(1)
+        self.assertEqual("ERROR", self.c.state)
+
+    def test_resolve_error_in_waiting_resumes_enhanced_retry(self):
+        self.start()
+        for order in (1, 2, 3): self.detected(order, now=.1 + order / 100)
+        self.c.handle_scanner_event(event("resolve_error", order=1, url="https://1", detected_yaw=.2,
+                                          item_name="", message="offline"), .3)
+        self.assertEqual("TARGETED_RESCAN", self.c.state)
+        self.assertTrue(self.out.controls[-1]["enhanced"])
+        self.assertTrue(self.out.controls[-1]["retry_failed"])
+
+    def test_retry_flag_only_on_first_control(self):
+        self.test_resolve_error_in_waiting_resumes_enhanced_retry()
+        self.c.update_yaw(.1, .4)
+        self.assertFalse(self.out.controls[-1]["retry_failed"])
+
+    def test_total_timeout_finishes_not_found(self):
+        self.start(); self.c.tick(40.0)
+        self.assertEqual("NOT_FOUND", self.c.state)
+        self.assertEqual("not_found", self.out.results[-1]["status"])
+
+    def test_heading_timeout_errors(self):
+        self.start(); self.c.tick(1.1)
+        self.assertEqual("ERROR", self.c.state)
+
+    def test_camera_timeout_errors(self):
+        self.start(); self.c.update_yaw(.1, .5); self.c.tick(1.1)
+        self.assertEqual("ERROR", self.c.state)
+
+    def test_waiting_http_does_not_camera_timeout(self):
+        self.start()
+        for order in (1, 2, 3): self.detected(order, now=.1 + order / 100)
+        self.c.tick(10)
+        self.assertEqual("WAITING_HTTP", self.c.state)
+
+    def test_stop_identity_finishes_stopped(self):
+        self.start()
+        raw = json.dumps({"protocol_version": 1, "task_id": "task", "search_id": "search", "reason": "operator"})
+        self.assertTrue(self.c.stop(raw, .2))
+        self.assertEqual("STOPPED", self.c.state)
+        self.assertEqual("stopped", self.out.results[-1]["status"])
+
+    def test_stale_stop_is_ignored(self):
+        self.start()
+        raw = json.dumps({"protocol_version": 1, "task_id": "task", "search_id": "other", "reason": "operator"})
+        self.assertFalse(self.c.stop(raw, .2))
+        self.assertEqual("FAST_SWEEP", self.c.state)
+
+    def test_shutdown_always_stops(self):
+        self.start(); self.c.tick(.1); self.c.shutdown()
+        self.assertEqual(0., self.out.speeds[-1])
+        self.assertFalse(self.out.controls[-1]["enabled"])
+
+    def test_duplicate_active_start_is_idempotent(self):
+        self.start()
+        self.assertFalse(self.c.start(start_json(), .1))
+        self.assertEqual("FAST_SWEEP", self.c.state)
+
+    def test_different_active_start_is_rejected(self):
+        self.start()
+        self.assertFalse(self.c.start(start_json(search="other"), .1))
+        self.assertEqual("FAST_SWEEP", self.c.state)
+
+    def test_new_search_resets_coverage(self):
+        self.start(); self.quality(); self.c.stop(json.dumps(
+            {"protocol_version": 1, "task_id": "task", "search_id": "search", "reason": "done"}), .2)
+        self.c.start(start_json(search="next"), .3)
+        self.assertEqual(0, sum(sector.frame_count for sector in self.coverage.sectors))
+
+    def test_start_without_yaw_errors_safely(self):
+        c = SearchController(Outputs())
+        self.assertFalse(c.start(start_json(), 0))
+        self.assertEqual("ERROR", c.state)
+
+    def test_stale_heading_start_errors(self):
+        c = SearchController(Outputs()); c.update_yaw(0, 0)
+        self.assertFalse(c.start(start_json(), 1.1))
+        self.assertEqual("ERROR", c.state)
+
+    def test_invalid_protocol_start_does_not_move(self):
+        self.assertFalse(self.c.start("bad", .1))
+        self.assertEqual(0., self.out.speeds[-1])
+
+    def test_time_rollback_errors(self):
+        self.start(); self.assertFalse(self.c.tick(-.1))
+        self.assertEqual("ERROR", self.c.state)
+
+    def test_nonfinite_time_and_yaw_rejected(self):
+        with self.assertRaises(ValueError): self.c.update_yaw(True, .1)
+        with self.assertRaises(ValueError): self.c.tick(math.inf)
+
+    def test_invalid_configuration_rejected(self):
+        for kwargs in ({"fast_angular_speed": 0}, {"targeted_angular_speed": True},
+                       {"minimum_effective_speed": .5}, {"fast_sweep_angle": 0},
+                       {"yaw_tolerance": -1}, {"heading_timeout": 0},
+                       {"camera_timeout": math.inf}, {"search_total_timeout": -1}):
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaises(ValueError): SearchController(Outputs(), **kwargs)
+
+    def test_malformed_current_event_errors(self):
+        self.start(); self.c.handle_scanner_event("{bad", .1)
+        self.assertEqual("ERROR", self.c.state)
+
+    def test_targeted_approach_and_sweep(self):
+        coverage = Mock()
+        coverage.reset = Mock()
+        coverage.rescan_intervals.return_value = [Interval(1., 2., 0)]
+        c = SearchController(self.out, coverage=coverage, fast_sweep_angle=.5)
+        c.update_yaw(0, 0); c.start(start_json(), 0); c.update_yaw(.6, .1); c.tick(.1)
+        self.assertEqual("TARGETED_RESCAN", c.state)
+        c.tick(.11); self.assertGreater(self.out.speeds[-1], 0)
+        c.update_yaw(1., .2); c.tick(.2)
+        c.update_yaw(2., .3); c.tick(.3)
+        self.assertEqual("NOT_FOUND", c.state)
+
+    def test_publisher_nonzero_failure_enters_error_and_zero(self):
+        out = Outputs()
+        def speed(value):
+            out.speeds.append(value)
+            if value: raise RuntimeError("motor")
+        out.publish_speed = speed
+        c = SearchController(out); c.update_yaw(0, 0); c.start(start_json(), 0); c.tick(.1)
+        self.assertEqual("ERROR", c.state)
+        self.assertEqual(0., out.speeds[-1])
+
+    def test_clock_error_enters_safe_error(self):
+        c = SearchController(Outputs(), clock=Mock(side_effect=RuntimeError("clock")))
+        self.assertFalse(c.tick())
+        self.assertEqual("ERROR", c.state)
+
+    def test_concurrent_stop_and_tick_leave_zero_speed(self):
+        self.start()
+        stop_raw = json.dumps({"protocol_version": 1, "task_id": "task", "search_id": "search", "reason": "stop"})
+        barrier = threading.Barrier(2)
+        first = threading.Thread(target=lambda: (barrier.wait(), self.c.tick(.2)))
+        second = threading.Thread(target=lambda: (barrier.wait(), self.c.stop(stop_raw, .2)))
+        first.start(); second.start(); first.join(1); second.join(1)
+        self.assertEqual("STOPPED", self.c.state)
+        self.assertEqual(0., self.out.speeds[-1])
+
+    def test_terminal_and_waiting_states_tick_zero(self):
+        self.start()
+        for order in (1, 2, 3): self.detected(order, now=.1 + order / 100)
+        self.c.tick(.5)
+        self.assertEqual(0., self.out.speeds[-1])
+
+    def test_blocking_error_publisher_does_not_hold_state_lock(self):
+        entered, release = threading.Event(), threading.Event()
+        out = Outputs()
+        def result(value): entered.set(); release.wait(1); out.results.append(value)
+        out.publish_result = result
+        c = SearchController(out)
+        worker = threading.Thread(target=c.start, args=(start_json(), 0))
+        worker.start(); self.assertTrue(entered.wait(1))
+        update = threading.Thread(target=c.update_yaw, args=(0, .1))
+        update.start(); update.join(.2)
+        self.assertFalse(update.is_alive())
+        release.set(); worker.join(1)
+
+    def test_initial_control_has_all_protocol_fields(self):
+        self.assertEqual({
+            "protocol_version": 1, "task_id": "", "search_id": "",
+            "enabled": False, "enhanced": False, "detected_yaw": 0.0,
+            "retry_failed": False,
+        }, self.out.controls[0])
+
+    def test_same_search_id_ignores_task_for_active_and_completed_idempotency(self):
+        self.start()
+        self.assertFalse(self.c.start(start_json(task="other"), .1))
+        for order in (1, 2, 3): self.detected(order, yaw=order, now=.11 + order / 100)
+        for index, order in enumerate((1, 2, 3)): self.resolved(order, yaw=order, now=.2 + index / 100)
+        result = self.out.results[-1]
+        self.assertFalse(self.c.start(start_json(task="other"), .4))
+        self.assertIs(result, self.out.results[-1])
+
+    def test_stale_identity_ignores_older_event_and_stop_times(self):
+        self.start(); self.c.tick(.5)
+        stale = json.loads(event("quality", brightness=1., overexposed=0., sharpness=1.,
+                                 decoded=False, detected_yaw=0.))
+        stale["search_id"] = "old"
+        self.assertFalse(self.c.handle_scanner_event(json.dumps(stale), -.1))
+        stop = json.dumps({"protocol_version": 1, "task_id": "task", "search_id": "old", "reason": "old"})
+        self.assertFalse(self.c.stop(stop, -.2))
+        self.assertEqual("FAST_SWEEP", self.c.state)
+
+    def test_target_sector_zero_maps_near_two_pi(self):
+        coverage = Mock(); coverage.reset = Mock()
+        coverage.rescan_intervals.return_value = [Interval(0., .2, 0)]
+        c = SearchController(self.out, coverage=coverage, fast_sweep_angle=5.5)
+        c.update_yaw(0, 0); c.start(start_json(), 0)
+        for index in range(1, 7):
+            c.update_yaw(float(index), index / 10)
+            c.handle_scanner_event(event("quality", brightness=1., overexposed=0., sharpness=50.,
+                                         decoded=False, detected_yaw=index), index / 10 + .001)
+        c.tick(.7)
+        self.assertGreater(c._intervals[0][0], 6.0)
+
+    def test_targeted_approach_can_command_negative_speed(self):
+        coverage = Mock(); coverage.reset = Mock()
+        coverage.rescan_intervals.return_value = [Interval(-1., -.5, 0)]
+        c = SearchController(self.out, coverage=coverage, fast_sweep_angle=.5)
+        c.update_yaw(0, 0); c.start(start_json(), 0); c.update_yaw(.6, .1)
+        c.handle_scanner_event(event("quality", brightness=1., overexposed=0., sharpness=50.,
+                                     decoded=False, detected_yaw=.6), .11)
+        c.tick(.12); c.tick(.13)
+        self.assertLess(self.out.speeds[-1], 0)
+
+    def test_partial_not_found_uses_detection_order_and_renumbers(self):
+        coverage = Mock(); coverage.reset = Mock(); coverage.rescan_intervals.return_value = []
+        c = SearchController(self.out, coverage=coverage, fast_sweep_angle=.5)
+        c.update_yaw(0, 0); c.start(start_json(), 0)
+        for order in (1, 2):
+            c.handle_scanner_event(event("detected", order=order, url="https://%d" % order,
+                                         detected_yaw=float(order)), .1 + order / 100)
+        for index, order in enumerate((2, 1)):
+            c.handle_scanner_event(event("resolved", order=order, url="https://%d" % order,
+                                         detected_yaw=float(order), item_name=str(order), message=""), .2 + index / 100)
+        c.update_yaw(.6, .3)
+        c.handle_scanner_event(event("quality", brightness=1., overexposed=0., sharpness=50.,
+                                     decoded=False, detected_yaw=.6), .31)
+        c.tick(.32); c.tick(.33)
+        self.assertEqual(["https://1", "https://2"], [item["url"] for item in self.out.results[-1]["items"]])
+        self.assertEqual([1, 2], [item["order"] for item in self.out.results[-1]["items"]])
+
+    def test_blocked_nonzero_publish_is_followed_by_stop_zero(self):
+        entered, release = threading.Event(), threading.Event()
+        out = Outputs()
+        def speed(value):
+            out.speeds.append(value)
+            if value: entered.set(); release.wait(1)
+        out.publish_speed = speed
+        c = SearchController(out); c.update_yaw(0, 0); c.start(start_json(), 0)
+        tick = threading.Thread(target=c.tick, args=(.1,)); tick.start(); self.assertTrue(entered.wait(1))
+        raw = json.dumps({"protocol_version": 1, "task_id": "task", "search_id": "search", "reason": "stop"})
+        stop = threading.Thread(target=c.stop, args=(raw, .2)); stop.start()
+        release.set(); tick.join(1); stop.join(1)
+        self.assertEqual(0., out.speeds[-1])
+
+    def test_targeted_rescan_advances_multiple_intervals_in_given_order(self):
+        coverage = Mock(); coverage.reset = Mock()
+        coverage.rescan_intervals.return_value = [Interval(.5, .6, 0), Interval(1., 1.1, 1)]
+        c = SearchController(self.out, coverage=coverage, fast_sweep_angle=.2)
+        c.update_yaw(0, 0); c.start(start_json(), 0); c.update_yaw(.3, .1)
+        c.handle_scanner_event(event("quality", brightness=1., overexposed=0., sharpness=50.,
+                                     decoded=False, detected_yaw=.3), .11)
+        c.tick(.12)
+        self.assertEqual([(.5, .6), (1., 1.1)], c._intervals)
+        c.update_yaw(.5, .2); c.tick(.2)
+        c.update_yaw(.7, .3); c.tick(.3)
+        self.assertEqual(1, c._interval_index)
+        c.update_yaw(1., .4); c.tick(.4)
+        c.update_yaw(1.2, .5); c.tick(.5)
+        self.assertEqual("NOT_FOUND", c.state)
+
+    def test_missing_scanner_identity_is_malformed_current_event(self):
+        for payload in (
+            {"protocol_version": 1, "event": "quality"},
+            {"protocol_version": 1, "task_id": "task", "event": "quality"},
+            {"protocol_version": 1, "search_id": "search", "event": "quality"},
+            {"protocol_version": 1, "task_id": "", "search_id": "search", "event": "quality"},
         ):
-            with self.subTest(failed_method=failed_method):
-                outputs = RecordingOutputs()
-                controller = SearchController([0.0], outputs)
-                controller.update_yaw(0.0)
+            with self.subTest(payload=payload):
+                out = Outputs(); c = SearchController(out)
+                c.update_yaw(0, 0); c.start(start_json(), 0)
+                self.assertFalse(c.handle_scanner_event(json.dumps(payload), .1))
+                self.assertEqual("ERROR", c.state)
+                self.assertEqual(0., out.speeds[-1])
 
-                def fail(*args):
-                    raise RuntimeError("control publisher down")
+    def test_partial_not_found_sorts_by_numeric_detection_order(self):
+        coverage = Mock(); coverage.reset = Mock(); coverage.rescan_intervals.return_value = []
+        out = Outputs(); c = SearchController(out, coverage=coverage, fast_sweep_angle=.5)
+        c.update_yaw(0, 0); c.start(start_json(), 0)
+        for index, order in enumerate((2, 1)):
+            c.handle_scanner_event(event("detected", order=order, url="https://%d" % order,
+                                         detected_yaw=float(order)), .1 + index / 100)
+        for index, order in enumerate((2, 1)):
+            c.handle_scanner_event(event("resolved", order=order, url="https://%d" % order,
+                                         detected_yaw=float(order), item_name=str(order), message=""), .2 + index / 100)
+        c.update_yaw(.6, .3)
+        c.handle_scanner_event(event("quality", brightness=1., overexposed=0., sharpness=50.,
+                                     decoded=False, detected_yaw=.6), .31)
+        c.tick(.32); c.tick(.33)
+        self.assertEqual(["https://1", "https://2"], [item["url"] for item in out.results[-1]["items"]])
+        self.assertEqual([1, 2], [item["order"] for item in out.results[-1]["items"]])
 
-                setattr(outputs, failed_method, fail)
-                self.assertFalse(controller.start(0.0))
-                self.assertEqual("ERROR", controller.state)
-                self.assertEqual(0.0, outputs.speeds[-1])
+    def test_all_terminal_states_finish_with_safe_outputs(self):
+        terminal_outputs = {}
 
-    def test_error_degradation_output_failures_do_not_recurse(self):
-        class AllFailingOutputs(RecordingOutputs):
-            def __init__(self):
-                super().__init__()
-                self.calls = []
+        out = Outputs(); c = SearchController(out); c.update_yaw(0, 0); c.start(start_json(), 0)
+        for order in (1, 2, 3):
+            c.handle_scanner_event(event("detected", order=order, url="https://%d" % order,
+                                         detected_yaw=float(order)), .1 + order / 100)
+        for index, order in enumerate((1, 2, 3)):
+            c.handle_scanner_event(event("resolved", order=order, url="https://%d" % order,
+                                         detected_yaw=float(order), item_name=str(order), message=""), .2 + index / 100)
+        terminal_outputs["COMPLETE"] = out
 
-            def _fail(self, name):
-                self.calls.append(name)
-                raise RuntimeError(name)
+        out = Outputs(); c = SearchController(out); c.update_yaw(0, 0); c.start(start_json(), 0); c.tick(40)
+        terminal_outputs["NOT_FOUND"] = out
 
-            def publish_reset(self, search_id):
-                self._fail("reset")
+        out = Outputs(); c = SearchController(out); c.start(start_json(), 0)
+        terminal_outputs["ERROR"] = out
 
-            def publish_speed(self, value):
-                self._fail("speed")
+        out = Outputs(); c = SearchController(out); c.update_yaw(0, 0); c.start(start_json(), 0)
+        c.stop(json.dumps({"protocol_version": 1, "task_id": "task", "search_id": "search", "reason": "stop"}), .1)
+        terminal_outputs["STOPPED"] = out
 
-            def publish_scan_enabled(self, value):
-                self._fail("enabled")
-
-            def publish_wall(self, value):
-                self._fail("wall")
-
-            def publish_state(self, value):
-                self._fail("state")
-
-        outputs = RecordingOutputs()
-        controller = SearchController([0.0], outputs)
-        controller.update_yaw(0.0)
-        failing = AllFailingOutputs()
-        controller._outputs = failing
-
-        self.assertFalse(controller.start(0.0))
-
-        self.assertEqual(
-            ["reset", "speed", "enabled", "wall", "state"],
-            failing.calls,
-        )
-        self.assertEqual("ERROR", controller.state)
-
-    def test_no_now_calls_sample_clock_in_lock_order(self):
-        first_clock_entered = threading.Event()
-        release_first_clock = threading.Event()
-        calls = []
-
-        def controlled_clock():
-            calls.append(len(calls) + 1)
-            if len(calls) == 1:
-                first_clock_entered.set()
-                release_first_clock.wait(1.0)
-            return float(len(calls))
-
-        outputs = RecordingOutputs()
-        controller = SearchController(
-            [0.5],
-            outputs,
-            clock=controlled_clock,
-        )
-        controller.update_yaw(0.0)
-        first = threading.Thread(target=controller.start)
-        second = threading.Thread(target=controller.tick)
-        first.start()
-        self.assertTrue(first_clock_entered.wait(1.0))
-        second.start()
-        self.assertEqual([1], calls)
-
-        release_first_clock.set()
-        first.join(1.0)
-        second.join(1.0)
-
-        self.assertEqual([1, 2], calls)
-        self.assertNotEqual("ERROR", controller.state)
-
-    def test_clock_failure_or_non_finite_value_enters_safe_error(self):
-        cases = (
-            lambda: math.nan,
-            lambda: math.inf,
-            Mock(side_effect=RuntimeError("clock failed")),
-        )
-        for clock in cases:
-            with self.subTest(clock=clock):
-                outputs = RecordingOutputs()
-                controller = SearchController([0.0], outputs, clock=clock)
-                controller.update_yaw(0.0)
-
-                self.assertFalse(controller.start())
-
-                self.assertEqual("ERROR", controller.state)
-                self.assertEqual(0.0, outputs.speeds[-1])
-
-    def test_reset_publisher_is_latched_in_ros_adapter_ast(self):
-        script = (
-            Path(__file__).resolve().parent.parent
-            / "scripts"
-            / "item_search_controller_node.py"
-        )
-        tree = ast.parse(script.read_text(encoding="utf-8"))
-        matching_calls = []
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            if not (
-                isinstance(node.func, ast.Attribute)
-                and node.func.attr == "Publisher"
-                and node.args
-                and isinstance(node.args[0], (ast.Str, ast.Constant))
-            ):
-                continue
-            topic = (
-                node.args[0].s
-                if isinstance(node.args[0], ast.Str)
-                else node.args[0].value
-            )
-            if topic == "/qr_item_search/reset":
-                matching_calls.append(node)
-
-        self.assertEqual(1, len(matching_calls))
-        latch = next(
-            (
-                keyword.value
-                for keyword in matching_calls[0].keywords
-                if keyword.arg == "latch"
-            ),
-            None,
-        )
-        self.assertIsInstance(latch, (ast.NameConstant, ast.Constant))
-        self.assertIs(True, latch.value)
+        for state, out in terminal_outputs.items():
+            with self.subTest(state=state):
+                self.assertEqual(0., out.speeds[-1])
+                self.assertFalse(out.controls[-1]["enabled"])
+                self.assertFalse(out.controls[-1]["enhanced"])
 
 
 if __name__ == "__main__":
