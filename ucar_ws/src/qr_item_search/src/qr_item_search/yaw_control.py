@@ -1,6 +1,12 @@
 import math
 
 
+def _finite_number(value, name):
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise ValueError("%s must be a finite number" % name)
+    return float(value)
+
+
 def normalize_angle(angle):
     if not math.isfinite(angle):
         raise ValueError("angle must be finite")
@@ -45,3 +51,21 @@ def angular_command(
     if abs(speed) < min_speed:
         speed = math.copysign(min_speed, error)
     return speed, False
+
+
+def directed_angular_command(error, speed, tolerance, min_speed=0.0):
+    """Return a bounded velocity that follows an already-directed error."""
+    error = _finite_number(error, "error")
+    speed = _finite_number(speed, "speed")
+    tolerance = _finite_number(tolerance, "tolerance")
+    min_speed = _finite_number(min_speed, "min_speed")
+    if speed <= 0:
+        raise ValueError("speed must be positive")
+    if tolerance < 0:
+        raise ValueError("tolerance must be non-negative")
+    if min_speed < 0 or min_speed > speed:
+        raise ValueError("min_speed must be between zero and speed")
+    if abs(error) <= tolerance:
+        return 0.0, True
+    magnitude = max(min_speed, min(speed, abs(error)))
+    return math.copysign(magnitude, error), False

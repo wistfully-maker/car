@@ -1,7 +1,11 @@
 import math
 import unittest
 
-from qr_item_search.yaw_control import angular_command, normalize_angle
+from qr_item_search.yaw_control import (
+    angular_command,
+    directed_angular_command,
+    normalize_angle,
+)
 
 
 class NormalizeAngleTest(unittest.TestCase):
@@ -104,6 +108,32 @@ class AngularCommandTest(unittest.TestCase):
                 with self.subTest(name=name, value=value):
                     with self.assertRaises(ValueError):
                         angular_command(**parameters)
+
+
+class DirectedAngularCommandTest(unittest.TestCase):
+    def test_follows_error_sign_and_limits_magnitude(self):
+        self.assertEqual((0.4, False), directed_angular_command(1.0, 0.4, 0.0))
+        self.assertEqual((-0.4, False), directed_angular_command(-1.0, 0.4, 0.0))
+
+    def test_applies_minimum_speed_and_inclusive_tolerance(self):
+        self.assertEqual((0.2, False), directed_angular_command(0.1, 1.0, 0.05, 0.2))
+        self.assertEqual((0.0, True), directed_angular_command(-0.05, 1.0, 0.05))
+
+    def test_rejects_boolean_non_finite_and_invalid_parameters(self):
+        for value in (True, math.nan, math.inf, -math.inf):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    directed_angular_command(value, 1.0, 0.0)
+
+        for parameters in (
+            (0.1, 0.0, 0.0, 0.0),
+            (0.1, 1.0, -0.1, 0.0),
+            (0.1, 1.0, 0.0, 1.1),
+            (0.1, 1.0, 0.0, -0.1),
+        ):
+            with self.subTest(parameters=parameters):
+                with self.assertRaises(ValueError):
+                    directed_angular_command(*parameters)
 
 
 if __name__ == "__main__":
