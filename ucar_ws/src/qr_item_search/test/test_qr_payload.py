@@ -3,10 +3,16 @@ from unittest.mock import Mock
 
 import requests
 
-from qr_item_search.qr_payload import InvalidPayload, InvalidQrUrl, ItemResolver
+from qr_item_search.qr_payload import InvalidPayload, InvalidQrUrl, ItemResolver, validate_url
 
 
 class ItemResolverTest(unittest.TestCase):
+    def test_validate_url_returns_trimmed_http_url_and_rejects_bad_text(self):
+        self.assertEqual("https://example.test/a", validate_url(" https://example.test/a "))
+        for value in ("", "ftp://example.test", "http:///missing", None):
+            with self.subTest(value=value):
+                with self.assertRaises(InvalidQrUrl):
+                    validate_url(value)
     def setUp(self):
         self.session = Mock()
         self.resolver = ItemResolver(session=self.session)
@@ -46,6 +52,13 @@ class ItemResolverTest(unittest.TestCase):
         resolver = ItemResolver(session=self.session, retries=1)
 
         self.assertEqual("苹果", resolver.resolve("https://example.com/item"))
+        self.assertEqual(2, self.session.get.call_count)
+
+    def test_retry_exhaustion_stops_after_configured_attempts(self):
+        self.session.get.side_effect = requests.RequestException("offline")
+        resolver = ItemResolver(session=self.session, retries=1)
+        with self.assertRaises(requests.RequestException):
+            resolver.resolve("https://example.test/item")
         self.assertEqual(2, self.session.get.call_count)
 
     def test_rejects_missing_or_empty_result(self):

@@ -11,6 +11,16 @@ class InvalidPayload(ValueError):
     pass
 
 
+def validate_url(qr_content):
+    if not isinstance(qr_content, str):
+        raise InvalidQrUrl(str(qr_content))
+    normalized = qr_content.strip()
+    parsed = urlparse(normalized)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise InvalidQrUrl(normalized)
+    return normalized
+
+
 class ItemResolver:
     def __init__(
         self,
@@ -26,10 +36,7 @@ class ItemResolver:
         self.timeout = (connect_timeout, read_timeout)
 
     def resolve(self, qr_content):
-        normalized = qr_content.strip()
-        parsed = urlparse(normalized)
-        if parsed.scheme not in ("http", "https") or not parsed.netloc:
-            raise InvalidQrUrl(normalized)
+        normalized = validate_url(qr_content)
 
         for attempt in range(self.retries + 1):
             try:

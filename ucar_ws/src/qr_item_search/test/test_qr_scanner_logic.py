@@ -1,39 +1,10 @@
+import math
 import queue
 import threading
 import unittest
 from unittest.mock import Mock
 
-from qr_item_search.qr_payload import InvalidPayload, InvalidQrUrl
-from qr_item_search.scanner_logic import FrameAdapter, ScannerJob, ScannerLogic
-
-
-class StatefulBlockingDecoder:
-    def __init__(self):
-        self.entered = threading.Event()
-        self.release = threading.Event()
-        self.candidate = None
-        self.events = []
-        self.observed_candidates = []
-        self.block_next = True
-
-    def process(self, image):
-        if self.block_next:
-            self.block_next = False
-            self.entered.set()
-            self.release.wait(1.0)
-            self.candidate = "stale"
-            self.events.append("process_end")
-            return None
-        self.observed_candidates.append(self.candidate)
-        return None
-
-    def reset_wall(self):
-        self.events.append("reset_wall")
-        self.candidate = None
-
-    def reset_search(self):
-        self.events.append("reset_search")
-        self.candidate = None
+from qr_item_search.scanner_logic import ScannerLogic
 
 
 class ScannerLogicTest(unittest.TestCase):
@@ -41,454 +12,253 @@ class ScannerLogicTest(unittest.TestCase):
         self.decoder = Mock()
         self.resolver = Mock()
         self.publisher = Mock()
-        self.logic = ScannerLogic(
-            decoder=self.decoder,
-            resolver=self.resolver,
-            publisher=self.publisher,
-        )
+        self.quality = Mock(return_value={"brightness": 1.0, "overexposed": 0.0, "sharpness": 2.0})
+        self.variants = Mock(side_effect=lambda frame, enhanced: [frame])
+        self.logic = ScannerLogic(self.decoder, self.resolver, self.publisher,
+                                  self.quality, self.variants, worker_count=1)
+        self.logic.reset_search(" task ", " search ")
+        self.logic.set_control(True, False, 1.5)
 
-    def test_disabled_scanner_ignores_images(self):
-        self.logic.handle_image(object())
+    def _process(self, frame="frame"):
+        self.assertTrue(self.logic.submit_frame(frame))
+        return self.logic.process_latest_frame()
 
-        self.decoder.process.assert_not_called()
+    def test_latest_frame_overwrites_and_disabled_rejects(self):
+        self.logic.submit_frame("first")
+        self.logic.submit_frame("latest")
+        self.logic.process_latest_frame()
+        self.quality.assert_called_once_with("latest")
+        self.logic.set_control(False, False, 0)
+        self.assertFalse(self.logic.submit_frame("ignored"))
 
-    def test_success_uses_wall_snapshot_from_enqueue_time(self):
-        self.decoder.process.return_value = "https://example.test/item"
-        self.resolver.resolve.return_value = "香蕉"
-        self.logic.set_wall_index(2)
-        self.logic.set_enabled(True)
+    def test_detects_three_urls_in_order_and_http_pending_allows_next_frame(self):
+        self.decoder.process.side_effect = [["https://a", "https://b", "https://c"], ["https://d"]]
+        self._process("one")
+        self._process("two")
+        self.assertEqual([1, 2, 3, 4], [job.order for job in list(self.logic.jobs.queue)])
+        detected = [call.args[0] for call in self.publisher.call_args_list if call.args[0]["event"] == "detected"]
+        self.assertEqual(["https://a", "https://b", "https://c", "https://d"], [event["url"] for event in detected])
 
-        self.assertTrue(self.logic.handle_image(object()))
-        self.logic.set_wall_index(3)
-        self.assertTrue(self.logic.work_once(block=False))
+    def test_invalid_url_does_not_consume_order(self):
+        self.decoder.process.return_value = ["bad", "https://good"]
+        self._process()
+        self.assertEqual(1, self.logic.jobs.get_nowait().order)
+        events = [call.args[0]["event"] for call in self.publisher.call_args_list]
+        self.assertIn("invalid_url", events)
 
-        self.publisher.assert_called_once_with(
-            {
-                "status": "success",
-                "search_id": 0,
-                "wall_index": 2,
-                "url": "https://example.test/item",
-                "item_name": "香蕉",
-                "message": "",
-            }
-        )
+    def test_duplicate_url_only_uses_one_order(self):
+        self.decoder.process.return_value = ["https://same", "https://same"]
+        self._process()
+        self.assertEqual(1, self.logic.jobs.qsize())
+        self.assertEqual(1, self.logic.jobs.get_nowait().order)
 
-    def test_maps_resolver_exceptions_to_status(self):
-        cases = (
-            (InvalidQrUrl("bad"), "invalid_url"),
-            (InvalidPayload("bad"), "invalid_payload"),
-            (RuntimeError("offline"), "http_error"),
-        )
-        for error, status in cases:
-            with self.subTest(status=status):
-                decoder = Mock()
-                decoder.process.return_value = "https://example.test/item"
-                resolver = Mock()
-                resolver.resolve.side_effect = error
-                publisher = Mock()
-                logic = ScannerLogic(decoder, resolver, publisher)
-                logic.set_wall_index(0)
-                logic.set_enabled(True)
-                logic.handle_image(object())
+    def test_quality_and_enhanced_short_circuit(self):
+        self.logic.set_control(True, True, 2)
+        self.quality.return_value = {"brightness": 1.0, "overexposed": 0.0, "sharpness": 2.0}
+        self.variants.side_effect = None
+        self.variants.return_value = ["one", "two", "three"]
+        self.decoder.process.side_effect = [[], ["https://a"]]
+        self._process()
+        self.assertEqual(["one", "two"], [call.args[0] for call in self.decoder.process.call_args_list])
+        quality = [call.args[0] for call in self.publisher.call_args_list if call.args[0]["event"] == "quality"][0]
+        self.assertEqual("quality", quality["event"])
+        self.assertEqual(1.0, quality["brightness"])
 
-                logic.work_once(block=False)
+    def test_queue_full_warns_without_deadlock(self):
+        jobs = queue.Queue(maxsize=1)
+        jobs.put(object())
+        warning = Mock()
+        logic = ScannerLogic(self.decoder, self.resolver, self.publisher, self.quality,
+                             self.variants, jobs=jobs, warning=warning, worker_count=1)
+        logic.reset_search("task", "search")
+        logic.set_control(True, False, 0)
+        jobs.put_nowait(object())
+        self.decoder.process.return_value = ["https://a"]
+        logic.submit_frame("x")
+        logic.process_latest_frame()
+        warning.assert_called_once()
 
-                payload = publisher.call_args[0][0]
-                self.assertEqual(status, payload["status"])
-                self.assertEqual(str(error), payload["message"])
+    def test_worker_publishes_order_independent_of_completion_and_error(self):
+        self.decoder.process.return_value = ["https://a", "https://b"]
+        self._process()
+        self.resolver.resolve.side_effect = ["A", RuntimeError("offline")]
+        self.logic.work_once(block=False)
+        self.logic.work_once(block=False)
+        events = [call.args[0] for call in self.publisher.call_args_list]
+        self.assertEqual("resolved", events[-2]["event"])
+        self.assertEqual("resolve_error", events[-1]["event"])
+        self.assertEqual([1, 2], [events[-2]["order"], events[-1]["order"]])
 
-    def test_disabling_resets_wall_candidate(self):
-        self.logic.set_enabled(True)
+    def test_reset_discards_stale_decode_and_resolver_results(self):
+        entered, release = threading.Event(), threading.Event()
+        def slow_decode(frame):
+            entered.set(); release.wait(1); return ["https://a"]
+        self.decoder.process.side_effect = slow_decode
+        self.logic.submit_frame("x")
+        thread = threading.Thread(target=self.logic.process_latest_frame)
+        thread.start(); self.assertTrue(entered.wait(1))
+        self.logic.reset_search("new-task", "new-search")
+        release.set(); thread.join(1)
+        self.assertEqual(0, self.logic.jobs.qsize())
 
-        self.logic.set_enabled(False)
-
-        self.decoder.reset_wall.assert_called_once_with()
-
-    def test_reset_search_clears_decoder_seen_values(self):
-        self.logic.reset_search(3)
-
-        self.decoder.reset_search.assert_called_once_with()
-
-    def test_reset_search_rejects_invalid_search_id(self):
-        for search_id in (-1, True, 1.5, None):
-            with self.subTest(search_id=search_id):
-                with self.assertRaises(ValueError):
-                    self.logic.reset_search(search_id)
-
-    def test_busy_scanner_does_not_enqueue_duplicate(self):
-        self.decoder.process.return_value = "https://example.test/item"
-        self.logic.set_wall_index(0)
-        self.logic.set_enabled(True)
-
-        self.assertTrue(self.logic.handle_image(object()))
-        self.assertFalse(self.logic.handle_image(object()))
-
-        self.decoder.process.assert_called_once()
+    def test_retry_failed_once(self):
+        self.decoder.process.return_value = ["https://a"]
+        self._process(); self.resolver.resolve.side_effect = RuntimeError("bad")
+        self.logic.work_once(block=False)
+        self.logic.set_control(True, False, 0, retry_failed=True)
         self.assertEqual(1, self.logic.jobs.qsize())
 
-    def test_full_queue_does_not_raise_and_recovers_busy_state(self):
+    def test_retry_preserves_original_job_without_duplicate_detected_event(self):
+        self.decoder.process.return_value = ["https://a"]
+        self._process(); original = self.logic.jobs.get_nowait(); self.logic.jobs.task_done()
+        self.resolver.resolve.side_effect = RuntimeError("bad")
+        self.logic.jobs.put_nowait(original); self.logic.work_once(block=False)
+        detected_before = len([call for call in self.publisher.call_args_list if call.args[0]["event"] == "detected"])
+        self.logic.set_control(True, False, 99, retry_failed=True)
+        retry = self.logic.jobs.get_nowait(); self.logic.jobs.task_done()
+        self.assertEqual(original, retry)
+        self.assertEqual(detected_before, len([call for call in self.publisher.call_args_list if call.args[0]["event"] == "detected"]))
+        self.logic.set_control(True, False, 99, retry_failed=True)
+        self.assertEqual(0, self.logic.jobs.qsize())
+
+    def test_full_retry_is_deferred_without_changing_original_job(self):
         jobs = queue.Queue(maxsize=1)
-        jobs.put_nowait(ScannerJob(0, "existing"))
-        logic = ScannerLogic(
-            decoder=self.decoder,
-            resolver=self.resolver,
-            publisher=self.publisher,
-            jobs=jobs,
-        )
-        self.decoder.process.return_value = "https://example.test/item"
-        logic.set_wall_index(0)
-        logic.set_enabled(True)
+        logic = ScannerLogic(self.decoder, self.resolver, self.publisher, self.quality, self.variants, jobs=jobs, worker_count=1)
+        logic.reset_search("task", "search"); logic.set_control(True, False, 7)
+        self.decoder.process.return_value = ["https://a"]
+        logic.submit_frame("x"); logic.process_latest_frame()
+        original = jobs.get_nowait(); jobs.task_done(); jobs.put_nowait(original)
+        self.resolver.resolve.side_effect = RuntimeError("bad"); logic.work_once(block=False)
+        jobs.put_nowait(object())
+        logic.set_control(True, False, 99, retry_failed=True)
+        jobs.get_nowait(); jobs.task_done()
+        logic.process_latest_frame()
+        retry = jobs.get_nowait(); jobs.task_done()
+        self.assertEqual(original, retry)
 
-        self.assertFalse(logic.handle_image(object()))
-
-        self.assertFalse(logic.busy)
-
-    def test_worker_clears_busy_and_marks_job_done(self):
-        self.decoder.process.return_value = "https://example.test/item"
-        self.resolver.resolve.return_value = "香蕉"
-        self.logic.set_wall_index(0)
-        self.logic.set_enabled(True)
-        self.logic.handle_image(object())
-
-        self.logic.work_once(block=False)
-
-        self.assertFalse(self.logic.busy)
-        self.logic.jobs.join()
-
-    def test_missing_wall_index_ignores_image(self):
-        self.logic.set_enabled(True)
-
-        self.assertFalse(self.logic.handle_image(object()))
-
-        self.decoder.process.assert_not_called()
-
-    def test_rejects_invalid_wall_index(self):
-        for wall_index in (-1, 1.5, True, None):
-            with self.subTest(wall_index=wall_index):
-                with self.assertRaises(ValueError):
-                    self.logic.set_wall_index(wall_index)
-
-    def test_disable_does_not_wait_for_decode_and_discards_result(self):
-        entered = threading.Event()
-        release = threading.Event()
-
-        def blocking_decode(image):
-            entered.set()
-            release.wait(1.0)
-            return "https://example.test/item"
-
-        self.decoder.process.side_effect = blocking_decode
-        self.logic.set_wall_index(0)
-        self.logic.set_enabled(True)
-        decode_thread = threading.Thread(
-            target=self.logic.handle_image,
-            args=(object(),),
-        )
-        decode_thread.start()
-        self.assertTrue(entered.wait(1.0))
-        self.assertTrue(self.logic.busy)
-        self.assertFalse(self.logic.handle_image(object()))
-
-        disable_thread = threading.Thread(
-            target=self.logic.set_enabled,
-            args=(False,),
-        )
-        disable_thread.start()
-        disable_thread.join(0.2)
-        completed_without_decode = not disable_thread.is_alive()
-        release.set()
-        decode_thread.join(1.0)
-
-        self.assertTrue(completed_without_decode)
-        self.assertFalse(decode_thread.is_alive())
-        self.decoder.process.assert_called_once()
-        self.assertEqual(0, self.logic.jobs.qsize())
-        self.assertFalse(self.logic.busy)
-
-    def test_wall_change_does_not_wait_for_decode_and_discards_result(self):
-        entered = threading.Event()
-        release = threading.Event()
-
-        def blocking_decode(image):
-            entered.set()
-            release.wait(1.0)
-            return "https://example.test/item"
-
-        self.decoder.process.side_effect = blocking_decode
-        self.logic.set_wall_index(0)
-        self.logic.set_enabled(True)
-        decode_thread = threading.Thread(
-            target=self.logic.handle_image,
-            args=(object(),),
-        )
-        decode_thread.start()
-        self.assertTrue(entered.wait(1.0))
-
-        wall_thread = threading.Thread(
-            target=self.logic.set_wall_index,
-            args=(1,),
-        )
-        wall_thread.start()
-        wall_thread.join(0.2)
-        completed_without_decode = not wall_thread.is_alive()
-        release.set()
-        decode_thread.join(1.0)
-
-        self.assertTrue(completed_without_decode)
-        self.assertFalse(decode_thread.is_alive())
-        self.assertEqual(0, self.logic.jobs.qsize())
-        self.assertFalse(self.logic.busy)
-
-    def test_decode_exception_publishes_error_and_releases_busy(self):
-        self.decoder.process.side_effect = UnicodeDecodeError(
-            "utf-8", b"\xff", 0, 1, "invalid"
-        )
-        self.logic.set_wall_index(2)
-        self.logic.set_enabled(True)
-
-        self.assertFalse(self.logic.handle_image(object()))
-
-        self.publisher.assert_called_once()
-        payload = self.publisher.call_args[0][0]
-        self.assertEqual("decode_error", payload["status"])
-        self.assertEqual(2, payload["wall_index"])
-        self.assertFalse(self.logic.busy)
-
-    def test_publisher_exception_is_not_republished_and_worker_continues(self):
-        self.decoder.process.side_effect = [
-            "https://example.test/a",
-            "https://example.test/b",
-        ]
-        self.resolver.resolve.side_effect = ["苹果", "香蕉"]
-        self.publisher.side_effect = [RuntimeError("publisher down"), None]
+    def test_errors_do_not_deadlock_and_workers_are_daemon(self):
         error_handler = Mock()
-        logic = ScannerLogic(
-            self.decoder,
-            self.resolver,
-            self.publisher,
-            error_handler=error_handler,
-        )
-        logic.set_wall_index(0)
-        logic.set_enabled(True)
+        logic = ScannerLogic(self.decoder, self.resolver, lambda event: (_ for _ in ()).throw(RuntimeError()),
+                             self.quality, self.variants, worker_count=2, error_handler=error_handler)
+        logic.reset_search("task", "search"); logic.set_control(True, False, 0)
+        self.quality.side_effect = RuntimeError("quality")
+        logic.submit_frame("x"); logic.process_latest_frame()
+        stop = threading.Event()
+        threads = logic.run_workers(stop.is_set)
+        self.assertEqual(2, len(threads)); self.assertTrue(all(thread.daemon for thread in threads))
+        stop.set()
 
-        logic.handle_image(object())
-        logic.work_once(block=False)
-        logic.handle_image(object())
-        logic.work_once(block=False)
+    def test_strict_parameters(self):
+        for count in (0, True, 1.0):
+            with self.subTest(count=count):
+                with self.assertRaises(ValueError):
+                    ScannerLogic(self.decoder, self.resolver, self.publisher, self.quality, self.variants, worker_count=count)
+        with self.assertRaises(ValueError): self.logic.reset_search(" ", "search")
+        for args in ((1, False, 0), (True, 0, 0), (True, False, True), (True, False, math.inf)):
+            with self.subTest(args=args):
+                with self.assertRaises(ValueError): self.logic.set_control(*args)
 
-        self.assertEqual(2, self.publisher.call_count)
-        self.assertEqual(2, self.resolver.resolve.call_count)
-        error_handler.assert_called_once()
+    def test_quality_publishes_after_detection_with_valid_decoded_flag(self):
+        self.decoder.process.return_value = ["bad", "https://a"]
+        self._process()
+        events = [call.args[0] for call in self.publisher.call_args_list]
+        self.assertEqual("quality", events[-1]["event"])
+        self.assertTrue(events[-1]["decoded"])
+        self.assertEqual(1.5, events[-1]["detected_yaw"])
 
-    def test_wall_reset_runs_after_blocking_decode_and_clears_candidate(self):
-        decoder = StatefulBlockingDecoder()
-        logic = ScannerLogic(decoder, self.resolver, self.publisher)
-        logic.set_wall_index(0)
-        decoder.events = []
-        logic.set_enabled(True)
-        decode_thread = threading.Thread(
-            target=logic.handle_image,
-            args=(object(),),
-        )
-        decode_thread.start()
-        self.assertTrue(decoder.entered.wait(1.0))
+    def test_invalid_variant_does_not_short_circuit_later_variants(self):
+        self.logic.set_control(True, True, 0)
+        self.variants.side_effect = None; self.variants.return_value = ["bad", "good"]
+        self.decoder.process.side_effect = [["bad"], ["https://a"]]
+        self._process()
+        self.assertEqual(2, self.decoder.process.call_count)
 
-        wall_thread = threading.Thread(
-            target=logic.set_wall_index,
-            args=(1,),
-        )
-        wall_thread.start()
-        wall_thread.join(0.2)
-        callback_returned = not wall_thread.is_alive()
-        decoder.release.set()
-        decode_thread.join(1.0)
+    def test_reset_disables_and_clears_latest_frame(self):
+        self.logic.submit_frame("old")
+        self.logic.reset_search("new", "new")
+        self.assertFalse(self.logic.submit_frame("ignored"))
+        self.assertFalse(self.logic.process_latest_frame())
 
-        self.assertTrue(callback_returned)
-        self.assertEqual(["process_end", "reset_wall"], decoder.events)
-        self.assertFalse(logic.busy)
-        logic.handle_image(object())
-        self.assertEqual([None], decoder.observed_candidates)
+    def test_deferred_observation_gets_first_order_after_queue_slot_opens(self):
+        jobs = queue.Queue(maxsize=1); jobs.put_nowait(object())
+        logic = ScannerLogic(self.decoder, self.resolver, self.publisher, self.quality, self.variants, jobs=jobs, worker_count=1)
+        logic.reset_search("task", "search"); logic.set_control(True, False, 0)
+        jobs.put_nowait(object()); self.decoder.process.return_value = ["https://a"]
+        logic.submit_frame("frame"); logic.process_latest_frame()
+        jobs.get_nowait(); jobs.task_done()
+        logic.process_latest_frame()
+        self.assertEqual(1, jobs.get_nowait().order)
 
-    def test_search_reset_supersedes_pending_wall_reset(self):
-        decoder = StatefulBlockingDecoder()
-        logic = ScannerLogic(decoder, self.resolver, self.publisher)
-        logic.set_wall_index(0)
-        decoder.events = []
-        logic.set_enabled(True)
-        decode_thread = threading.Thread(
-            target=logic.handle_image,
-            args=(object(),),
-        )
-        decode_thread.start()
-        self.assertTrue(decoder.entered.wait(1.0))
+    def test_work_once_marks_task_done_on_resolver_error(self):
+        self.decoder.process.return_value = ["https://a"]; self._process()
+        self.resolver.resolve.side_effect = RuntimeError("down")
+        self.logic.work_once(block=False)
+        self.assertEqual(0, self.logic.jobs.unfinished_tasks)
 
-        logic.set_wall_index(1)
-        reset_thread = threading.Thread(target=logic.reset_search, args=(4,))
-        reset_thread.start()
-        reset_thread.join(0.2)
-        callback_returned = not reset_thread.is_alive()
-        decoder.release.set()
-        decode_thread.join(1.0)
+    def test_decoder_error_allows_following_frame(self):
+        self.decoder.process.side_effect = [RuntimeError("decode"), ["https://a"]]
+        self._process(); self._process()
+        self.assertEqual(1, self.logic.jobs.qsize())
 
-        self.assertTrue(callback_returned)
-        self.assertEqual(["process_end", "reset_search"], decoder.events)
-        logic.handle_image(object())
-        self.assertEqual([None], decoder.observed_candidates)
+    def test_publisher_error_calls_error_handler(self):
+        errors = Mock()
+        logic = ScannerLogic(self.decoder, self.resolver, Mock(side_effect=RuntimeError("publish")), self.quality, self.variants, worker_count=1, error_handler=errors)
+        logic.reset_search("task", "search"); logic.set_control(True, False, 0)
+        self.decoder.process.return_value = ["https://a"]
+        logic.submit_frame("x"); logic.process_latest_frame()
+        errors.assert_called()
 
-    def test_queue_full_warning_can_reenter_logic_without_deadlock(self):
-        jobs = queue.Queue(maxsize=1)
-        jobs.put_nowait(ScannerJob(0, "existing"))
-        holder = {}
-        warning_called = threading.Event()
+    def test_slow_resolver_reset_does_not_publish_or_record_failure(self):
+        entered, release = threading.Event(), threading.Event()
+        self.decoder.process.return_value = ["https://a"]; self._process()
+        def slow(url): entered.set(); release.wait(1); raise RuntimeError("old")
+        self.resolver.resolve.side_effect = slow
+        worker = threading.Thread(target=self.logic.work_once); worker.start(); self.assertTrue(entered.wait(1))
+        self.logic.reset_search("next", "next"); release.set(); worker.join(1)
+        self.assertFalse(self.logic._failed)
 
-        def reentrant_warning(message):
-            holder["logic"].accepting_images
-            warning_called.set()
+    def test_workers_exit_when_shutdown_is_true(self):
+        stopped = threading.Event(); stopped.set()
+        threads = self.logic.run_workers(stopped.is_set)
+        for thread in threads: thread.join(.5)
+        self.assertTrue(all(not thread.is_alive() for thread in threads))
 
-        logic = ScannerLogic(
-            self.decoder,
-            self.resolver,
-            self.publisher,
-            jobs=jobs,
-            warning=reentrant_warning,
-        )
-        holder["logic"] = logic
-        self.decoder.process.return_value = "https://example.test/item"
-        logic.set_wall_index(0)
-        logic.set_enabled(True)
-        callback_thread = threading.Thread(
-            target=logic.handle_image,
-            args=(object(),),
-        )
-        callback_thread.daemon = True
-
-        callback_thread.start()
-        callback_thread.join(0.2)
-
-        self.assertFalse(callback_thread.is_alive())
-        self.assertTrue(warning_called.is_set())
-
-    def test_reset_search_discards_inflight_resolver_result(self):
-        entered = threading.Event()
-        release = threading.Event()
-
-        def blocking_resolve(url):
-            entered.set()
-            release.wait(1.0)
-            return "stale item"
-
-        self.decoder.process.return_value = "https://example.test/item"
-        self.resolver.resolve.side_effect = blocking_resolve
-        self.logic.set_wall_index(0)
-        self.logic.set_enabled(True)
-        self.logic.handle_image(object())
-        worker = threading.Thread(target=self.logic.work_once)
-        worker.start()
-        self.assertTrue(entered.wait(1.0))
-
-        self.logic.reset_search(1)
-        release.set()
-        worker.join(1.0)
-
-        self.publisher.assert_not_called()
-        self.assertFalse(self.logic.busy)
-
-    def test_reserved_conversion_failure_is_discarded_after_wall_change(self):
-        self.logic.set_wall_index(0)
-        self.logic.set_enabled(True)
-        token = self.logic.reserve_frame()
-
-        wall_thread = threading.Thread(
-            target=self.logic.set_wall_index,
-            args=(1,),
-        )
-        wall_thread.start()
-        wall_thread.join(0.2)
-        callback_returned = not wall_thread.is_alive()
-        result = self.logic.fail_reserved_frame(token, "bridge failed")
-
-        self.assertTrue(callback_returned)
-        self.assertFalse(result)
-        self.publisher.assert_not_called()
-        self.assertFalse(self.logic.busy)
-
-    def test_reserved_frame_is_discarded_after_search_reset(self):
-        self.decoder.process.return_value = "https://example.test/item"
-        self.logic.set_wall_index(0)
-        self.logic.set_enabled(True)
-        token = self.logic.reserve_frame()
-        self.logic.reset_search(7)
-
-        result = self.logic.process_reserved_frame(token, object())
-
-        self.assertFalse(result)
+    def test_reset_during_slow_decode_drops_old_result_and_resets_decoder(self):
+        entered, release = threading.Event(), threading.Event()
+        def slow(frame): entered.set(); release.wait(1); return ["https://old"]
+        self.decoder.process.side_effect = slow
+        self.logic.submit_frame("x"); worker = threading.Thread(target=self.logic.process_latest_frame)
+        worker.start(); self.assertTrue(entered.wait(1)); self.logic.reset_search("next", "next")
+        release.set(); worker.join(1)
         self.assertEqual(0, self.logic.jobs.qsize())
-        self.assertFalse(self.logic.busy)
+        self.assertTrue(self.decoder.reset_search.called)
 
-    def test_second_frame_is_rejected_during_conversion(self):
-        self.logic.set_wall_index(0)
-        self.logic.set_enabled(True)
+    def test_blocking_publisher_does_not_block_reset(self):
+        entered, release = threading.Event(), threading.Event()
+        def publish(event): entered.set(); release.wait(1)
+        logic = ScannerLogic(self.decoder, self.resolver, publish, self.quality, self.variants, worker_count=1)
+        logic.reset_search("task", "search"); logic.set_control(True, False, 0)
+        self.decoder.process.return_value = ["https://a"]
+        logic.submit_frame("x"); worker = threading.Thread(target=logic.process_latest_frame)
+        worker.start(); self.assertTrue(entered.wait(1))
+        reset = threading.Thread(target=logic.reset_search, args=("next", "next")); reset.start(); reset.join(.2)
+        self.assertFalse(reset.is_alive())
+        release.set(); worker.join(1)
 
-        token = self.logic.reserve_frame()
-
-        self.assertIsNotNone(token)
-        self.assertIsNone(self.logic.reserve_frame())
-        self.logic.fail_reserved_frame(token, "bridge failed")
-
-    def test_current_conversion_failure_publishes_one_token_snapshot(self):
-        self.logic.reset_search(5)
-        self.logic.set_wall_index(2)
-        self.logic.set_enabled(True)
-        token = self.logic.reserve_frame()
-
-        self.assertFalse(
-            self.logic.fail_reserved_frame(token, "bridge failed")
-        )
-
-        self.publisher.assert_called_once_with(
-            {
-                "status": "decode_error",
-                "search_id": 5,
-                "wall_index": 2,
-                "url": "",
-                "item_name": "",
-                "message": "bridge failed",
-            }
-        )
-        self.assertFalse(self.logic.busy)
-
-    def test_frame_adapter_releases_token_for_any_conversion_exception(self):
-        bridge = Mock(side_effect=[ValueError("bad frame"), object()])
-        adapter = FrameAdapter(self.logic, bridge)
-        self.logic.set_wall_index(0)
-        self.logic.set_enabled(True)
-        original_fail = self.logic.fail_reserved_frame
-        self.logic.fail_reserved_frame = Mock(wraps=original_fail)
-        self.decoder.process.return_value = None
-
-        self.assertFalse(adapter.handle(object()))
-        self.assertFalse(adapter.handle(object()))
-
-        self.logic.fail_reserved_frame.assert_called_once()
-        self.decoder.process.assert_called_once()
-        self.assertFalse(self.logic.busy)
-
-    def test_frame_adapter_failure_drains_pending_wall_reset(self):
-        self.logic.set_wall_index(0)
-        self.logic.set_enabled(True)
-        self.decoder.reset_wall.reset_mock()
-
-        def changing_bridge(message):
-            self.logic.set_wall_index(1)
-            raise TypeError("conversion failed")
-
-        adapter = FrameAdapter(self.logic, changing_bridge)
-
-        self.assertFalse(adapter.handle(object()))
-
-        self.decoder.reset_wall.assert_called_once_with()
-        self.publisher.assert_not_called()
-        self.assertFalse(self.logic.busy)
+    def test_concurrent_resolvers_may_publish_reverse_completion_with_fixed_orders(self):
+        self.decoder.process.return_value = ["https://a", "https://b"]; self._process()
+        a_entered, release_a, b_done = threading.Event(), threading.Event(), threading.Event()
+        def resolve(url):
+            if url.endswith("a"):
+                a_entered.set(); release_a.wait(1); return "A"
+            b_done.set(); return "B"
+        self.resolver.resolve.side_effect = resolve
+        first = threading.Thread(target=self.logic.work_once, kwargs={"block": False})
+        second = threading.Thread(target=self.logic.work_once, kwargs={"block": False})
+        first.start(); self.assertTrue(a_entered.wait(1)); second.start(); self.assertTrue(b_done.wait(1)); release_a.set()
+        first.join(1); second.join(1)
+        resolved = [call.args[0] for call in self.publisher.call_args_list if call.args[0]["event"] == "resolved"]
+        self.assertEqual([2, 1], [event["order"] for event in resolved])
 
 
 if __name__ == "__main__":

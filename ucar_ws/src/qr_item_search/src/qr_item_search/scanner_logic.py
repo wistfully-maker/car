@@ -1,317 +1,233 @@
+"""Concurrent latest-frame QR scanning and payload resolution."""
+import math
 import queue
 import threading
-from collections import namedtuple
+from dataclasses import dataclass
 
-from qr_item_search.qr_payload import InvalidPayload, InvalidQrUrl
-
-
-ScannerJob = namedtuple(
-    "ScannerJob",
-    ("wall_index", "url", "search_id"),
-)
-ScannerJob.__new__.__defaults__ = (0,)
-FrameToken = namedtuple(
-    "FrameToken",
-    ("generation", "search_id", "wall_index"),
-)
+from qr_item_search.qr_payload import InvalidPayload, InvalidQrUrl, validate_url
 
 
-class FrameAdapter:
-    def __init__(self, logic, convert):
-        self._logic = logic
-        self._convert = convert
-
-    def handle(self, message):
-        token = self._logic.reserve_frame()
-        if token is None:
-            return False
-        try:
-            image = self._convert(message)
-        except Exception as error:
-            self._logic.fail_reserved_frame(token, str(error))
-            return False
-        return self._logic.process_reserved_frame(token, image)
+@dataclass(frozen=True)
+class ScannerJob:
+    generation: int
+    task_id: str
+    search_id: str
+    order: int
+    url: str
+    detected_yaw: float
 
 
 class ScannerLogic:
-    _NO_RESET = 0
-    _WALL_RESET = 1
-    _SEARCH_RESET = 2
-
-    def __init__(
-        self,
-        decoder,
-        resolver,
-        publisher,
-        jobs=None,
-        warning=None,
-        error_handler=None,
-    ):
-        self._decoder = decoder
-        self._resolver = resolver
-        self._publisher = publisher
-        self._warning = warning if warning is not None else lambda message: None
-        self._error_handler = (
-            error_handler
-            if error_handler is not None
-            else lambda error: self._warning(
-                "scanner publisher failed: {}".format(error)
-            )
-        )
-        self._jobs = jobs if jobs is not None else queue.Queue(maxsize=1)
-        self._lock = threading.Lock()
-        self._enabled = False
-        self._busy = False
-        self._decoding = False
-        self._active_token = None
-        self._resetting = False
-        self._pending_reset = self._NO_RESET
-        self._wall_index = -1
+    def __init__(self, decoder, resolver, event_publisher, quality_function, variant_function,
+                 jobs=None, worker_count=3, warning=None, error_handler=None):
+        if type(worker_count) is not int or worker_count < 1:
+            raise ValueError("worker_count must be a positive integer")
+        self._decoder, self._resolver, self._publisher = decoder, resolver, event_publisher
+        self._quality, self._variants = quality_function, variant_function
+        self._jobs = jobs if jobs is not None else queue.Queue(maxsize=max(6, worker_count * 2))
+        self._worker_count = worker_count
+        self._warning, self._error_handler = warning or (lambda _: None), error_handler or (lambda _: None)
+        self._lock, self._decoder_lock = threading.Lock(), threading.Lock()
         self._generation = 0
-        self._search_id = 0
+        self._task_id = self._search_id = None
+        self._enabled = self._enhanced = False
+        self._yaw, self._latest, self._next_order = 0.0, None, 1
+        self._failed, self._retried, self._deferred, self._retry_deferred = {}, set(), {}, {}
+        self._retry_requested = False
+        self._pending_decoder_reset = 0
 
     @property
-    def busy(self):
-        with self._lock:
-            return self._decoding or self._resetting or self._busy
+    def jobs(self): return self._jobs
 
-    @property
-    def accepting_images(self):
-        with self._lock:
-            return (
-                self._enabled
-                and not self._decoding
-                and not self._resetting
-                and not self._busy
-                and self._wall_index >= 0
-            )
-
-    @property
-    def jobs(self):
-        return self._jobs
-
-    def set_enabled(self, enabled):
-        enabled = bool(enabled)
-        with self._lock:
-            changed = enabled != self._enabled
-            self._enabled = enabled
-            if changed:
-                self._generation += 1
-            run_reset = (
-                self._schedule_reset_locked(self._WALL_RESET)
-                if not enabled
-                else False
-            )
-        if run_reset:
-            self._drain_immediate_resets()
-
-    def set_wall_index(self, wall_index):
-        if type(wall_index) is not int or wall_index < 0:
-            raise ValueError("wall_index must be a non-negative integer")
-        with self._lock:
-            changed = wall_index != self._wall_index
-            self._wall_index = wall_index
-            if changed:
-                self._generation += 1
-            run_reset = (
-                self._schedule_reset_locked(self._WALL_RESET)
-                if changed
-                else False
-            )
-        if run_reset:
-            self._drain_immediate_resets()
-
-    def reset_search(self, search_id):
-        if type(search_id) is not int or search_id < 0:
-            raise ValueError("search_id must be a non-negative integer")
+    def reset_search(self, task_id, search_id):
+        task_id, search_id = self._text(task_id, "task_id"), self._text(search_id, "search_id")
         with self._lock:
             self._generation += 1
-            self._search_id = search_id
-            run_reset = self._schedule_reset_locked(self._SEARCH_RESET)
-        if run_reset:
-            self._drain_immediate_resets()
+            self._task_id, self._search_id = task_id, search_id
+            self._enabled = self._enhanced = False
+            self._yaw, self._latest, self._next_order = 0.0, None, 1
+            self._failed, self._retried, self._deferred, self._retry_deferred = {}, set(), {}, {}
+            self._retry_requested = False
+            self._pending_decoder_reset = self._generation
+            self._drain_jobs_locked()
 
-    def handle_image(self, image):
-        token = self.reserve_frame()
-        if token is None:
-            return False
-        return self.process_reserved_frame(token, image)
-
-    def reserve_frame(self):
+    def set_control(self, enabled, enhanced, detected_yaw, retry_failed=False):
+        if type(enabled) is not bool or type(enhanced) is not bool or type(retry_failed) is not bool:
+            raise ValueError("control flags must be bool")
+        if isinstance(detected_yaw, bool) or not isinstance(detected_yaw, (int, float)) or not math.isfinite(detected_yaw):
+            raise ValueError("detected_yaw must be finite")
+        retry_jobs = []
         with self._lock:
-            if (
-                not self._enabled
-                or self._decoding
-                or self._resetting
-                or self._busy
-                or self._wall_index < 0
-            ):
-                return None
-            self._decoding = True
-            token = FrameToken(
-                self._generation,
-                self._search_id,
-                self._wall_index,
-            )
-            self._active_token = token
-            return token
+            self._enabled, self._enhanced, self._yaw = enabled, enhanced, float(detected_yaw)
+            rising = retry_failed and not self._retry_requested
+            self._retry_requested = retry_failed
+            if rising:
+                for url, job in self._failed.items():
+                    if url not in self._retried:
+                        self._retried.add(url); retry_jobs.append(job)
+        for job in retry_jobs: self._requeue_retry(job)
+        self._flush_deferred()
 
-    def process_reserved_frame(self, token, image):
+    def submit_frame(self, frame):
         with self._lock:
-            if token != self._active_token:
-                return False
-        try:
-            url = self._decoder.process(image)
-        except Exception as error:
-            return self._complete_reserved_frame(token, None, error)
-        return self._complete_reserved_frame(token, url, None)
+            if not self._enabled or self._task_id is None: return False
+            self._latest = (frame, self._generation, self._task_id, self._search_id, self._enhanced, self._yaw)
+            return True
 
-    def fail_reserved_frame(self, token, message):
+    def process_latest_frame(self):
+        self._flush_deferred()
         with self._lock:
-            if token != self._active_token:
-                return False
-        return self._complete_reserved_frame(
-            token,
-            None,
-            RuntimeError(message),
-        )
-
-    def _complete_reserved_frame(self, token, url, decode_error):
-        warning_message = None
-        error_payload = None
-        accepted = False
-        while True:
-            with self._lock:
-                reset_kind = self._pending_reset
-                if reset_kind != self._NO_RESET:
-                    self._pending_reset = self._NO_RESET
-                else:
-                    current = (
-                        token == self._active_token
-                        and self._enabled
-                        and self._generation == token.generation
-                        and self._search_id == token.search_id
-                        and self._wall_index == token.wall_index
-                    )
-                    if decode_error is not None and current:
-                        error_payload = self._payload(
-                            ScannerJob(
-                                token.wall_index,
-                                "",
-                                token.search_id,
-                            ),
-                            "decode_error",
-                            "",
-                            str(decode_error),
-                        )
-                    elif url and current:
-                        job = ScannerJob(
-                            token.wall_index,
-                            url,
-                            token.search_id,
-                        )
-                        self._busy = True
-                        try:
-                            self._jobs.put_nowait(job)
-                            accepted = True
-                        except queue.Full:
-                            self._busy = False
-                            warning_message = (
-                                "scanner job queue is full; "
-                                "dropping QR observation"
-                            )
-                    self._decoding = False
-                    self._active_token = None
-                    break
-            self._run_decoder_reset(reset_kind)
-
-        if warning_message is not None:
-            try:
-                self._warning(warning_message)
-            except Exception:
-                pass
-        if error_payload is not None:
-            self._safe_publish(error_payload)
-        return accepted
-
-    def work_once(self, block=True, timeout=None):
+            snapshot, self._latest = self._latest, None
+        if snapshot is None: return False
+        frame, gen, task, search, enhanced, yaw = snapshot
+        if not self._current(gen, task, search): return False
+        try: quality = self._quality(frame)
+        except Exception as error: self._report_error(error); return False
+        valid_urls, invalids = [], []
         try:
-            job = self._jobs.get(block=block, timeout=timeout)
-        except queue.Empty:
-            return False
-
-        try:
-            try:
-                item_name = self._resolver.resolve(job.url)
-                payload = self._payload(job, "success", item_name, "")
-            except InvalidQrUrl as error:
-                payload = self._payload(job, "invalid_url", "", str(error))
-            except InvalidPayload as error:
-                payload = self._payload(
-                    job, "invalid_payload", "", str(error)
-                )
-            except Exception as error:
-                payload = self._payload(job, "http_error", "", str(error))
-            with self._lock:
-                current = job.search_id == self._search_id
-            if current:
-                self._safe_publish(payload)
-        finally:
-            with self._lock:
-                self._busy = False
-            self._jobs.task_done()
+            for variant in self._variants(frame, enhanced):
+                values = self._decode_variant(variant, gen, task, search)
+                if values is None: return False
+                variant_valid = []
+                for raw in values:
+                    try: variant_valid.append(validate_url(raw))
+                    except InvalidQrUrl as error: invalids.append((raw, str(error)))
+                if variant_valid:
+                    valid_urls.extend(variant_valid); break
+        except Exception as error: self._report_error(error); return False
+        if not self._current(gen, task, search): return False
+        seen = set()
+        for raw, message in invalids:
+            self._publish_current(self._event("invalid_url", task, search, url=str(raw), detected_yaw=yaw, item_name="", message=message), gen, task, search)
+        for url in valid_urls:
+            if url not in seen:
+                seen.add(url); self._enqueue_or_defer(gen, task, search, url, yaw)
+        fields = self._quality_fields(quality)
+        fields.update(detected_yaw=yaw, decoded=bool(seen))
+        self._publish_current(self._event("quality", task, search, **fields), gen, task, search)
         return True
 
-    def run_worker(self, is_shutdown):
-        while not is_shutdown():
-            self.work_once(timeout=0.2)
+    def work_once(self, block=True, timeout=None):
+        try: job = self._jobs.get(block=block, timeout=timeout)
+        except queue.Empty: return False
+        try:
+            try:
+                item = self._resolver.resolve(job.url)
+                if not isinstance(item, str) or not item.strip(): raise InvalidPayload("empty resolved item")
+                event = self._job_event("resolved", job, item_name=item.strip())
+            except Exception as error:
+                event = self._job_event("resolve_error", job, message=str(error))
+                with self._lock:
+                    if self._current_locked(job.generation, job.task_id, job.search_id): self._failed[job.url] = job
+            self._publish_current(event, job.generation, job.task_id, job.search_id)
+        finally:
+            self._jobs.task_done()
+        self._flush_deferred()
+        return True
 
-    def _schedule_reset_locked(self, reset_kind):
-        self._pending_reset = max(self._pending_reset, reset_kind)
-        if not self._decoding and not self._resetting:
-            self._resetting = True
-            return True
-        return False
+    def run_workers(self, is_shutdown):
+        threads = []
+        for _ in range(self._worker_count):
+            thread = threading.Thread(target=self._worker_loop, args=(is_shutdown,), daemon=True)
+            thread.start(); threads.append(thread)
+        return threads
 
-    def _drain_immediate_resets(self):
+    def _worker_loop(self, is_shutdown):
+        while not is_shutdown(): self.work_once(timeout=.2)
+
+    def _decode_variant(self, variant, gen, task, search):
+        with self._decoder_lock:
+            self._reset_decoder_if_needed()
+            if not self._current(gen, task, search): return None
+            try: values = self._decoder.process(variant)
+            except Exception:
+                if not self._current(gen, task, search): self._reset_decoder_if_needed(force=True)
+                raise
+            if not self._current(gen, task, search):
+                self._reset_decoder_if_needed(force=True); return None
+            return values
+
+    def _reset_decoder_if_needed(self, force=False):
+        with self._lock: pending = self._pending_decoder_reset
+        if pending or force:
+            self._decoder.reset_search()
+            with self._lock:
+                if pending: self._pending_decoder_reset = 0
+
+    def _enqueue_or_defer(self, gen, task, search, url, yaw):
+        deferred = False
+        with self._lock:
+            if not self._current_locked(gen, task, search): return
+            if url in self._deferred: return
+            job = ScannerJob(gen, task, search, self._next_order, url, yaw)
+            try: self._jobs.put_nowait(job)
+            except queue.Full:
+                self._deferred[url] = (gen, task, search, yaw); deferred = True
+            if deferred:
+                job = None
+            else:
+                self._next_order += 1
+        if deferred:
+            self._warn("scanner job queue is full; observation deferred")
+            return
+        self._publish_current(self._job_event("detected", job), gen, task, search)
+
+    def _flush_deferred(self):
+        queued, warned = [], False
+        with self._lock:
+            for url, job in list(self._retry_deferred.items()):
+                if not self._current_locked(job.generation, job.task_id, job.search_id):
+                    del self._retry_deferred[url]; continue
+                try: self._jobs.put_nowait(job)
+                except queue.Full: warned = True; break
+                del self._retry_deferred[url]
+            for url, (gen, task, search, yaw) in list(self._deferred.items()):
+                if not self._current_locked(gen, task, search): del self._deferred[url]; continue
+                job = ScannerJob(gen, task, search, self._next_order, url, yaw)
+                try: self._jobs.put_nowait(job)
+                except queue.Full: warned = True; break
+                self._next_order += 1; del self._deferred[url]; queued.append(job)
+        if warned: self._warn("scanner job queue is full; observation deferred")
+        for job in queued: self._publish_current(self._job_event("detected", job), job.generation, job.task_id, job.search_id)
+
+    def _requeue_retry(self, job):
+        deferred = False
+        with self._lock:
+            if not self._current_locked(job.generation, job.task_id, job.search_id): return
+            try: self._jobs.put_nowait(job)
+            except queue.Full:
+                self._retry_deferred[job.url] = job; deferred = True
+        if deferred: self._warn("scanner job queue is full; retry deferred")
+
+    def _drain_jobs_locked(self):
         while True:
-            with self._lock:
-                reset_kind = self._pending_reset
-                self._pending_reset = self._NO_RESET
-            self._run_decoder_reset(reset_kind)
-            with self._lock:
-                if self._pending_reset == self._NO_RESET:
-                    self._resetting = False
-                    return
+            try: self._jobs.get_nowait(); self._jobs.task_done()
+            except queue.Empty: return
 
-    def _run_decoder_reset(self, reset_kind):
-        try:
-            if reset_kind == self._SEARCH_RESET:
-                self._decoder.reset_search()
-            elif reset_kind == self._WALL_RESET:
-                self._decoder.reset_wall()
-        except Exception as error:
-            try:
-                self._error_handler(error)
-            except Exception:
-                pass
-
-    def _safe_publish(self, payload):
-        try:
-            self._publisher(payload)
-        except Exception as error:
-            try:
-                self._error_handler(error)
-            except Exception:
-                pass
-
+    def _current(self, gen, task, search):
+        with self._lock: return self._current_locked(gen, task, search)
+    def _current_locked(self, gen, task, search):
+        return gen == self._generation and task == self._task_id and search == self._search_id
     @staticmethod
-    def _payload(job, status, item_name, message):
-        return {
-            "status": status,
-            "search_id": job.search_id,
-            "wall_index": job.wall_index,
-            "url": job.url,
-            "item_name": item_name,
-            "message": message,
-        }
+    def _text(value, name):
+        if not isinstance(value, str) or not value.strip(): raise ValueError("%s must be non-empty" % name)
+        return value.strip()
+    @staticmethod
+    def _quality_fields(value):
+        if isinstance(value, dict): return {key: value[key] for key in ("brightness", "overexposed", "sharpness")}
+        return {key: getattr(value, key) for key in ("brightness", "overexposed", "sharpness")}
+    @staticmethod
+    def _event(event, task, search, **fields):
+        fields.update(event=event, task_id=task, search_id=search); return fields
+    def _job_event(self, event, job, item_name="", message=""):
+        return self._event(event, job.task_id, job.search_id, order=job.order, url=job.url, detected_yaw=job.detected_yaw, item_name=item_name, message=message)
+    def _publish_current(self, event, gen, task, search):
+        if not self._current(gen, task, search): return
+        try: self._publisher(event)
+        except Exception as error: self._report_error(error)
+    def _warn(self, message):
+        try: self._warning(message)
+        except Exception as error: self._report_error(error)
+    def _report_error(self, error):
+        try: self._error_handler(error)
+        except Exception: pass
