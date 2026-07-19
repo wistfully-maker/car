@@ -3,7 +3,7 @@ import types
 import unittest
 from unittest.mock import Mock, patch
 
-from qr_item_search.qr_decode import StableQrDecoder, pyzbar_backend
+from qr_item_search.qr_decode import UniqueQrDecoder, pyzbar_backend
 
 
 class PyzbarBackendTest(unittest.TestCase):
@@ -34,101 +34,50 @@ class PyzbarBackendTest(unittest.TestCase):
         pyzbar_module.decode.assert_called_once_with(image, symbols=[qr_code])
 
 
-class StableQrDecoderTest(unittest.TestCase):
-    def test_confirms_same_value_on_two_frames(self):
-        values = iter([["https://a.test"], ["https://a.test"]])
-        decoder = StableQrDecoder(
-            backend=lambda image: next(values),
-            required_frames=2,
-        )
+class UniqueQrDecoderTest(unittest.TestCase):
+    def test_returns_multiple_trimmed_values_in_backend_order(self):
+        decoder = UniqueQrDecoder(backend=lambda image: [" https://a.test ", "https://b.test"])
+        self.assertEqual(["https://a.test", "https://b.test"], decoder.process(object()))
 
-        self.assertIsNone(decoder.process(object()))
-        self.assertEqual("https://a.test", decoder.process(object()))
+    def test_deduplicates_within_and_across_frames(self):
+        values = iter([["https://a.test", "https://a.test", "https://b.test"],
+                       ["https://a.test", "https://c.test"]])
+        decoder = UniqueQrDecoder(backend=lambda image: next(values))
+        self.assertEqual(["https://a.test", "https://b.test"], decoder.process(object()))
+        self.assertEqual(["https://c.test"], decoder.process(object()))
 
-    def test_different_value_resets_confirmation(self):
-        values = iter(
-            [["https://a.test"], ["https://b.test"], ["https://b.test"]]
-        )
-        decoder = StableQrDecoder(
-            backend=lambda image: next(values),
-            required_frames=2,
-        )
-
-        self.assertIsNone(decoder.process(object()))
-        self.assertIsNone(decoder.process(object()))
-        self.assertEqual("https://b.test", decoder.process(object()))
-
-    def test_reset_search_allows_same_qr_again(self):
-        decoder = StableQrDecoder(
-            backend=lambda image: ["https://a.test"],
-            required_frames=1,
-        )
-
-        self.assertEqual("https://a.test", decoder.process(object()))
-        self.assertIsNone(decoder.process(object()))
+    def test_reset_search_allows_values_again(self):
+        decoder = UniqueQrDecoder(backend=lambda image: ["https://a.test"])
+        self.assertEqual(["https://a.test"], decoder.process(object()))
+        self.assertEqual([], decoder.process(object()))
         decoder.reset_search()
-        self.assertEqual("https://a.test", decoder.process(object()))
+        self.assertEqual(["https://a.test"], decoder.process(object()))
 
-    def test_rejects_zero_required_frames(self):
-        with self.assertRaises(ValueError):
-            StableQrDecoder(required_frames=0)
+    def test_ignores_empty_values(self):
+        decoder = UniqueQrDecoder(backend=lambda image: ["", "  "])
+        self.assertEqual([], decoder.process(object()))
 
-    def test_no_result_resets_candidate(self):
-        values = iter([["https://a.test"], [], ["https://a.test"], ["https://a.test"]])
-        decoder = StableQrDecoder(
-            backend=lambda image: next(values),
-            required_frames=2,
-        )
+    def test_non_string_value_does_not_partially_update_seen_values(self):
+        decoder = UniqueQrDecoder(backend=lambda image: ["https://a.test", 42])
+        with self.assertRaises(TypeError):
+            decoder.process(object())
+        decoder._backend = lambda image: ["https://a.test"]
+        self.assertEqual(["https://a.test"], decoder.process(object()))
 
-        self.assertIsNone(decoder.process(object()))
-        self.assertIsNone(decoder.process(object()))
-        self.assertIsNone(decoder.process(object()))
-        self.assertEqual("https://a.test", decoder.process(object()))
+    def test_backend_runtime_error_propagates_without_updating_seen_values(self):
+        def failing_backend(image):
+            raise RuntimeError("camera unavailable")
 
-    def test_uses_first_non_empty_backend_value(self):
-        decoder = StableQrDecoder(
-            backend=lambda image: ["", "https://a.test", "https://b.test"],
-            required_frames=1,
-        )
+        decoder = UniqueQrDecoder(backend=failing_backend)
+        with self.assertRaisesRegex(RuntimeError, "camera unavailable"):
+            decoder.process(object())
+        decoder._backend = lambda image: ["https://a.test"]
+        self.assertEqual(["https://a.test"], decoder.process(object()))
 
-        self.assertEqual("https://a.test", decoder.process(object()))
-
-    def test_skips_seen_value_to_process_next_backend_value(self):
-        values = iter(
-            [
-                ["https://a.test"],
-                ["https://a.test", "https://b.test"],
-            ]
-        )
-        decoder = StableQrDecoder(
-            backend=lambda image: next(values),
-            required_frames=1,
-        )
-
-        self.assertEqual("https://a.test", decoder.process(object()))
-        self.assertEqual("https://b.test", decoder.process(object()))
-
-    def test_reset_wall_clears_candidate_but_keeps_seen_values(self):
-        values = iter(
-            [
-                ["https://a.test"],
-                ["https://a.test"],
-                ["https://b.test"],
-                ["https://b.test"],
-                ["https://a.test"],
-            ]
-        )
-        decoder = StableQrDecoder(
-            backend=lambda image: next(values),
-            required_frames=2,
-        )
-
-        self.assertIsNone(decoder.process(object()))
-        self.assertEqual("https://a.test", decoder.process(object()))
-        self.assertIsNone(decoder.process(object()))
-        decoder.reset_wall()
-        self.assertIsNone(decoder.process(object()))
-        self.assertIsNone(decoder.process(object()))
+    def test_rejects_non_string_backend_values(self):
+        decoder = UniqueQrDecoder(backend=lambda image: [42])
+        with self.assertRaises(TypeError):
+            decoder.process(object())
 
 
 if __name__ == "__main__":
