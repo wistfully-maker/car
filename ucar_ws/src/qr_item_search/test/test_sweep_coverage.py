@@ -139,6 +139,43 @@ class CoverageMapTest(unittest.TestCase):
         self.assertEqual(1, len(intervals))
         self.assertEqual((0.0, math.pi, 1), (intervals[0].start, intervals[0].end, intervals[0].priority))
 
+    def test_merges_non_adjacent_runs_when_default_margins_overlap(self):
+        coverage = CoverageMap()
+        for index in range(24):
+            for _ in range(2):
+                coverage.record(
+                    index * math.tau / 24 + 0.01,
+                    50.0,
+                    0.5 if index == 2 else 0.0,
+                    50.0,
+                    False,
+                )
+
+        intervals = coverage.rescan_intervals()
+
+        self.assertEqual(1, len(intervals))
+        self.assertAlmostEqual(math.radians(-10), intervals[0].start)
+        self.assertAlmostEqual(math.radians(55), intervals[0].end)
+        self.assertEqual(1, intervals[0].priority)
+
+    def test_keeps_margin_expanded_runs_separate_when_they_do_not_overlap(self):
+        coverage = CoverageMap()
+        for index in range(24):
+            for _ in range(2):
+                coverage.record(
+                    index * math.tau / 24 + 0.01,
+                    50.0,
+                    0.5 if index == 4 else 0.0,
+                    50.0,
+                    False,
+                )
+
+        intervals = sorted(coverage.rescan_intervals(), key=lambda interval: interval.start)
+
+        self.assertEqual(2, len(intervals))
+        self.assertLess(intervals[0].end, intervals[1].start)
+        self.assertEqual([3, 1], [interval.priority for interval in intervals])
+
     def test_merges_cross_zero_candidates_with_different_priorities(self):
         coverage = CoverageMap(sector_count=24, margin=0.0)
         for index in range(23):

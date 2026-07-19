@@ -150,6 +150,21 @@ class CoverageMap:
             runs.insert(0, [last[0], first[1] + self.sector_count])
         return runs
 
+    @staticmethod
+    def _merge_overlapping_intervals(intervals):
+        merged = []
+        for interval in sorted(intervals, key=lambda item: item.start):
+            if not merged or interval.start > merged[-1].end:
+                merged.append(interval)
+                continue
+            previous = merged[-1]
+            merged[-1] = Interval(
+                start=previous.start,
+                end=max(previous.end, interval.end),
+                priority=min(previous.priority, interval.priority),
+            )
+        return merged
+
     def rescan_intervals(self):
         candidates = self._candidate_priorities()
         intervals = []
@@ -165,4 +180,5 @@ class CoverageMap:
                     priority=priority,
                 )
             )
+        intervals = self._merge_overlapping_intervals(intervals)
         return sorted(intervals, key=lambda interval: (interval.priority, interval.start))

@@ -120,10 +120,19 @@ class DirectedAngularCommandTest(unittest.TestCase):
         self.assertEqual((0.0, True), directed_angular_command(-0.05, 1.0, 0.05))
 
     def test_rejects_boolean_non_finite_and_invalid_parameters(self):
-        for value in (True, math.nan, math.inf, -math.inf):
-            with self.subTest(value=value):
-                with self.assertRaises(ValueError):
-                    directed_angular_command(value, 1.0, 0.0)
+        valid = {
+            "error": 0.1,
+            "speed": 1.0,
+            "tolerance": 0.0,
+            "min_speed": 0.0,
+        }
+        for name in valid:
+            for value in (True, False, math.nan, math.inf, -math.inf):
+                parameters = dict(valid)
+                parameters[name] = value
+                with self.subTest(name=name, value=value):
+                    with self.assertRaises(ValueError):
+                        directed_angular_command(**parameters)
 
         for parameters in (
             (0.1, 0.0, 0.0, 0.0),
