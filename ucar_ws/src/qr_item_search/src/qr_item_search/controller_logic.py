@@ -31,15 +31,16 @@ class SearchController:
         self._heading_timeout, self._camera_timeout, self._total_timeout = heading_timeout, camera_timeout, search_total_timeout
         self._coverage, self._errors, self._clock = coverage or CoverageMap(), error_handler or (lambda _: None), clock or time.monotonic
         self._machine, self._tracker, self._lock = SearchMachine(), YawTracker(), threading.RLock()
-        self._speed_lock, self._control_epoch = threading.Lock(), 0
+        self._action_lock, self._speed_lock, self._control_epoch = threading.Lock(), threading.Lock(), 0
         self._yaw = self._relative = self._last_heading = self._last_now = None
         self._task = self._search = None
         self._started = self._last_image = None
         self._detected, self._resolved, self._resolve_errors = {}, {}, {}
         self._intervals, self._interval_index, self._target_phase = [], 0, "approach"
         self._last_result = None
+        self._retry_edge_sent = False
         self._emit([("publish_speed", 0.0), ("publish_state", "IDLE"),
-                    ("publish_scanner_control", self._control(False, False, False))])
+                    ("publish_scanner_control", self._control(False, False, False))], 0)
 
     @property
     def state(self):
@@ -57,7 +58,8 @@ class SearchController:
                 actions.append(("publish_scanner_control", self._control(
                     self._machine.state in ("FAST_SWEEP", "TARGETED_RESCAN"),
                     self._machine.state == "TARGETED_RESCAN", False)))
-        return self._emit(actions)
+            epoch = self._control_epoch
+        return self._emit(actions, epoch)
 
     def start(self, raw_json, now=None):
         now = self._resolve_now(now)
@@ -85,6 +87,7 @@ class SearchController:
                 self._machine.start(); self._tracker.reset(self._yaw); self._relative = 0.0
                 self._coverage.reset()
                 self._detected, self._resolved, self._resolve_errors = {}, {}, {}
+                self._retry_edge_sent = False
                 self._intervals, self._interval_index, self._target_phase = [], 0, "approach"
                 self._started, self._last_image = now, None
                 searching = self._result(now, "searching", "", [])
@@ -93,7 +96,8 @@ class SearchController:
                            ("publish_state", "FAST_SWEEP"),
                            ("publish_scanner_control", self._control(True, False, False))]
                 result = True
-        self._emit(actions); return result
+            epoch = self._control_epoch
+        self._emit(actions, epoch); return result
 
     def tick(self, now=None):
         now = self._resolve_now(now)
@@ -116,14 +120,12 @@ class SearchController:
                 actions = [("publish_speed", 0.0), ("publish_scanner_control", self._control(False, False, False))]
             elif state == "FAST_SWEEP":
                 if self._relative >= self._sweep_angle:
-                    self._control_epoch += 1
-                    self._machine.fast_sweep_finished(); self._begin_rescan_locked()
-                    actions = [("publish_speed", 0.0), ("publish_state", "TARGETED_RESCAN"),
-                               ("publish_scanner_control", self._control(True, True, False))]
+                    actions = self._enter_targeted_rescan_locked(now)
                 else: actions = [("publish_speed", self._fast, self._control_epoch)]
             else:
                 actions = self._target_tick_locked(now)
-        ok = self._emit(actions)
+            epoch = self._control_epoch
+        ok = self._emit(actions, epoch)
         if not ok and any(action[0] == "publish_speed" and action[1] != 0 for action in actions):
             with self._lock: return self._finish_error_locked(now, "speed publisher failed")
         return ok
@@ -147,6 +149,8 @@ class SearchController:
             malformed_identity = not valid_identity and self._machine.state in self._machine.ACTIVE
             if valid_identity and (task_id != self._task or search_id != self._search):
                 return False
+            if valid_identity and self._machine.state not in self._machine.ACTIVE:
+                return False
         now = self._resolve_now(now)
         if now is None: return False
         with self._lock:
@@ -156,9 +160,10 @@ class SearchController:
             if payload.get("protocol_version") != 1 or not isinstance(payload.get("event"), str):
                 return self._finish_error_locked(now, "malformed scanner event")
             try: actions = self._scanner_event_locked(payload, now)
-            except (ValueError, KeyError, TypeError):
+            except Exception:
                 return self._finish_error_locked(now, "malformed scanner event")
-        self._emit(actions); return True
+            epoch = self._control_epoch
+        self._emit(actions, epoch); return True
 
     def stop(self, raw_json, now=None):
         try: request = parse_stop_request(raw_json)
@@ -174,12 +179,14 @@ class SearchController:
             result = self._result(now, "stopped", request.reason, self._partial_items())
             self._last_result = result
             actions = self._terminal_actions(result)
-        self._emit(actions); return True
+            epoch = self._control_epoch
+        self._emit(actions, epoch); return True
 
     def shutdown(self):
         with self._lock:
             self._control_epoch += 1
-        self._emit([("publish_speed", 0.0), ("publish_scanner_control", self._control(False, False, False))])
+            epoch = self._control_epoch
+        self._emit([("publish_speed", 0.0), ("publish_scanner_control", self._control(False, False, False))], epoch)
 
     def _scanner_event_locked(self, p, now):
         kind = p["event"]
@@ -198,6 +205,8 @@ class SearchController:
             if len(self._detected) == 3 and self._machine.state in ("FAST_SWEEP", "TARGETED_RESCAN"):
                 self._control_epoch += 1
                 self._machine.urls_collected()
+                if self._resolve_errors:
+                    return self._enter_targeted_rescan_locked(now)
                 return [("publish_speed", 0.0), ("publish_state", "WAITING_HTTP"),
                         ("publish_scanner_control", self._control(False, False, False))]
             return []
@@ -208,6 +217,7 @@ class SearchController:
             if kind == "resolved":
                 name = self._text(p.get("item_name"), "item_name")
                 self._resolved[order] = name
+                self._resolve_errors.pop(order, None)
                 if len(self._resolved) == 3:
                     self._control_epoch += 1
                     self._machine.items_resolved()
@@ -218,10 +228,7 @@ class SearchController:
                 message = self._text(p.get("message"), "message")
                 self._resolve_errors[order] = message
                 if self._machine.state == "WAITING_HTTP":
-                    self._control_epoch += 1
-                    self._machine.resume_rescan(); self._begin_rescan_locked()
-                    return [("publish_speed", 0.0), ("publish_state", "TARGETED_RESCAN"),
-                            ("publish_scanner_control", self._control(True, True, True))]
+                    return self._enter_targeted_rescan_locked(now)
             return []
         raise ValueError()
 
@@ -255,12 +262,24 @@ class SearchController:
             self._intervals.append((interval.start + shift, interval.end + shift))
         self._interval_index, self._target_phase = 0, "approach"
 
+    def _enter_targeted_rescan_locked(self, now):
+        if self._machine.state == "FAST_SWEEP":
+            self._machine.fast_sweep_finished()
+        elif self._machine.state == "WAITING_HTTP":
+            self._machine.resume_rescan()
+        self._control_epoch += 1
+        self._begin_rescan_locked()
+        retry = bool(self._resolve_errors) and not self._retry_edge_sent
+        if retry: self._retry_edge_sent = True
+        return [("publish_speed", 0.0), ("publish_state", "TARGETED_RESCAN"),
+                ("publish_scanner_control", self._control(True, True, retry))]
+
     def _finish_not_found_locked(self, now, message):
         self._machine.timeout() if self._machine.state in self._machine.ACTIVE else None
         self._control_epoch += 1
         result = self._result(now, "not_found", message, self._partial_items())
         self._last_result = result; actions = self._terminal_actions(result)
-        self._emit_without_state_lock(actions); return False
+        self._emit_without_state_lock(actions, self._control_epoch); return False
 
     def _finish_error_locked(self, now, message):
         self._machine.fail()
@@ -271,7 +290,7 @@ class SearchController:
         if self._task:
             result = self._result(now, "error", message, items); self._last_result = result
             actions.append(("publish_result", result))
-        self._emit_without_state_lock(actions); return False
+        self._emit_without_state_lock(actions, self._control_epoch); return False
 
     def _fail_locked(self, now, message): return self._finish_error_locked(now, message)
     def _terminal_actions(self, result):
@@ -308,16 +327,32 @@ class SearchController:
     def _serial(self, now):
         if self._last_now is not None and now < self._last_now: return False
         self._last_now = now; return True
-    def _emit(self, actions):
+    def _emit(self, actions, expected_epoch=None):
+        if not actions:
+            return True
+        if expected_epoch is None:
+            with self._lock: expected_epoch = self._control_epoch
         ok = True
-        for action in actions:
-            name, value = action[:2]
-            if name == "publish_speed":
-                expected_epoch = action[2] if len(action) == 3 else None
-                if not self._emit_speed_guarded(value, expected_epoch): ok = False
-                continue
-            try: getattr(self._outputs, name)(value)
-            except Exception as error: ok = False; self._report(error)
+        critical_failure = None
+        with self._action_lock:
+            for action in actions:
+                name, value = action[:2]
+                if not (name == "publish_speed" and value == 0.0):
+                    with self._lock:
+                        if expected_epoch != self._control_epoch:
+                            continue
+                if name == "publish_speed":
+                    speed_epoch = action[2] if len(action) == 3 else expected_epoch
+                    if not self._emit_speed_guarded(value, speed_epoch): ok = False
+                    continue
+                try:
+                    getattr(self._outputs, name)(value)
+                except Exception as error:
+                    ok = False; self._report(error)
+                    if name == "publish_scanner_control" and value.get("enabled") is True:
+                        critical_failure = "scanner control publisher failed"
+        if critical_failure is not None:
+            self._degrade_output_failure(expected_epoch, critical_failure)
         return ok
     def _emit_speed_guarded(self, value, expected_epoch):
         with self._speed_lock:
@@ -332,12 +367,24 @@ class SearchController:
             except Exception as error:
                 self._report(error)
                 return False
-    def _emit_without_state_lock(self, actions):
+    def _emit_without_state_lock(self, actions, expected_epoch):
         self._lock.release()
         try:
-            return self._emit(actions)
+            return self._emit(actions, expected_epoch)
         finally:
             self._lock.acquire()
+    def _degrade_output_failure(self, expected_epoch, message):
+        with self._lock:
+            if expected_epoch != self._control_epoch:
+                return
+            self._machine.fail(); self._control_epoch += 1
+            epoch = self._control_epoch
+            actions = [("publish_speed", 0.0), ("publish_scanner_control", self._control(False, False, False)),
+                       ("publish_state", "ERROR")]
+            if self._task:
+                result = self._result(self._last_now or 0.0, "error", message, self._partial_items())
+                self._last_result = result; actions.append(("publish_result", result))
+        self._emit(actions, epoch)
     def _report(self, error):
         try: self._errors(error)
         except Exception: pass

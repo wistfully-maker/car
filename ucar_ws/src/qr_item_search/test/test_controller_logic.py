@@ -429,6 +429,91 @@ class SearchControllerTest(unittest.TestCase):
                 self.assertFalse(out.controls[-1]["enabled"])
                 self.assertFalse(out.controls[-1]["enhanced"])
 
+    def test_early_resolve_error_enters_targeted_when_third_url_arrives(self):
+        self.start()
+        self.detected(1, now=.1)
+        self.c.handle_scanner_event(event("resolve_error", order=1, url="https://1", detected_yaw=.2,
+                                          item_name="", message="offline"), .11)
+        self.detected(2, now=.12); self.detected(3, now=.13)
+        self.assertEqual("TARGETED_RESCAN", self.c.state)
+        self.assertTrue(self.out.controls[-1]["retry_failed"])
+        self.c.update_yaw(.1, .14)
+        self.assertFalse(self.out.controls[-1]["retry_failed"])
+
+    def test_fast_sweep_finish_with_early_error_enters_targeted_retry(self):
+        coverage = Mock(); coverage.reset = Mock(); coverage.rescan_intervals.return_value = [Interval(0, .2, 0)]
+        out = Outputs(); c = SearchController(out, coverage=coverage, fast_sweep_angle=.5)
+        c.update_yaw(0, 0); c.start(start_json(), 0)
+        c.handle_scanner_event(event("detected", order=1, url="https://1", detected_yaw=.2), .1)
+        c.handle_scanner_event(event("resolve_error", order=1, url="https://1", detected_yaw=.2,
+                                     item_name="", message="offline"), .11)
+        c.update_yaw(.6, .2)
+        c.handle_scanner_event(event("quality", brightness=1., overexposed=0., sharpness=50.,
+                                     decoded=False, detected_yaw=.6), .21)
+        c.tick(.22)
+        self.assertEqual("TARGETED_RESCAN", c.state)
+        self.assertTrue(out.controls[-1]["retry_failed"])
+
+    def test_late_current_events_are_ignored_after_all_terminal_states(self):
+        terminal = []
+        out = Outputs(); c = SearchController(out); c.update_yaw(0, 0); c.start(start_json(), 0)
+        c.stop(json.dumps({"protocol_version": 1, "task_id": "task", "search_id": "search", "reason": "stop"}), .1)
+        terminal.append(c)
+        out = Outputs(); c = SearchController(out); c.update_yaw(0, 0); c.start(start_json(), 0); c.tick(40)
+        terminal.append(c)
+        for c in terminal:
+            state = c.state
+            self.assertFalse(c.handle_scanner_event(event("resolved", order=1, url="https://1",
+                                                           detected_yaw=1., item_name="late", message=""), 41))
+            self.assertEqual(state, c.state)
+
+    def test_start_enabled_control_failure_degrades_to_safe_error(self):
+        out, errors = Outputs(), Mock()
+        original = out.publish_scanner_control
+        def control(value):
+            if value["enabled"]: raise RuntimeError("control")
+            original(value)
+        out.publish_scanner_control = control
+        c = SearchController(out, error_handler=errors); c.update_yaw(0, 0); c.start(start_json(), 0)
+        self.assertEqual("ERROR", c.state)
+        self.assertEqual(0., out.speeds[-1])
+        self.assertFalse(out.controls[-1]["enabled"])
+        errors.assert_called()
+
+    def test_target_mode_control_failure_degrades_to_safe_error(self):
+        out, errors = Outputs(), Mock()
+        original = out.publish_scanner_control
+        def control(value):
+            if value["enabled"] and value["enhanced"]: raise RuntimeError("target control")
+            original(value)
+        out.publish_scanner_control = control
+        c = SearchController(out, fast_sweep_angle=.5, error_handler=errors)
+        c.update_yaw(0, 0); c.start(start_json(), 0); c.update_yaw(.6, .1)
+        c.handle_scanner_event(event("quality", brightness=1., overexposed=0., sharpness=50.,
+                                     decoded=False, detected_yaw=.6), .11)
+        c.tick(.12)
+        self.assertEqual("ERROR", c.state)
+        self.assertEqual(0., out.speeds[-1])
+        self.assertFalse(out.controls[-1]["enabled"])
+
+    def test_blocked_old_enabled_control_then_stop_finishes_consistently(self):
+        entered, release = threading.Event(), threading.Event()
+        out = Outputs()
+        original = out.publish_scanner_control
+        def control(value):
+            if value["enabled"]:
+                entered.set(); release.wait(1)
+            original(value)
+        out.publish_scanner_control = control
+        c = SearchController(out); c.update_yaw(0, 0)
+        starter = threading.Thread(target=c.start, args=(start_json(), 0)); starter.start()
+        self.assertTrue(entered.wait(1))
+        raw = json.dumps({"protocol_version": 1, "task_id": "task", "search_id": "search", "reason": "stop"})
+        stopper = threading.Thread(target=c.stop, args=(raw, .1)); stopper.start()
+        release.set(); starter.join(1); stopper.join(1)
+        self.assertEqual("STOPPED", out.states[-1])
+        self.assertFalse(out.controls[-1]["enabled"])
+
 
 if __name__ == "__main__":
     unittest.main()
