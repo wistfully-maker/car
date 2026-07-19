@@ -33,6 +33,7 @@ class ScannerLogic:
         self._enabled = self._enhanced = False
         self._yaw, self._latest, self._next_order = 0.0, None, 1
         self._failed, self._retried, self._deferred, self._retry_deferred = {}, set(), {}, {}
+        self._ready_gates = {}
         self._retry_requested = False
         self._pending_decoder_reset = 0
 
@@ -47,6 +48,8 @@ class ScannerLogic:
             self._enabled = self._enhanced = False
             self._yaw, self._latest, self._next_order = 0.0, None, 1
             self._failed, self._retried, self._deferred, self._retry_deferred = {}, set(), {}, {}
+            for gate in self._ready_gates.values(): gate.set()
+            self._ready_gates = {}
             self._retry_requested = False
             self._pending_decoder_reset = self._generation
             self._drain_jobs_locked()
@@ -111,15 +114,22 @@ class ScannerLogic:
         try: job = self._jobs.get(block=block, timeout=timeout)
         except queue.Empty: return False
         try:
+            if not self._wait_until_detected(job): return True
             try:
                 item = self._resolver.resolve(job.url)
                 if not isinstance(item, str) or not item.strip(): raise InvalidPayload("empty resolved item")
                 event = self._job_event("resolved", job, item_name=item.strip())
             except Exception as error:
                 event = self._job_event("resolve_error", job, message=str(error))
+                retry_job = None
                 with self._lock:
-                    if self._current_locked(job.generation, job.task_id, job.search_id): self._failed[job.url] = job
+                    if self._current_locked(job.generation, job.task_id, job.search_id):
+                        self._failed[job.url] = job
+                        if self._retry_requested and job.url not in self._retried:
+                            self._retried.add(job.url); retry_job = job
             self._publish_current(event, job.generation, job.task_id, job.search_id)
+            if 'retry_job' in locals() and retry_job is not None:
+                self._requeue_retry(retry_job)
         finally:
             self._jobs.task_done()
         self._flush_deferred()
@@ -160,8 +170,11 @@ class ScannerLogic:
             if not self._current_locked(gen, task, search): return
             if url in self._deferred: return
             job = ScannerJob(gen, task, search, self._next_order, url, yaw)
+            key = (job.generation, job.order)
+            self._ready_gates[key] = threading.Event()
             try: self._jobs.put_nowait(job)
             except queue.Full:
+                self._ready_gates.pop(key, None)
                 self._deferred[url] = (gen, task, search, yaw); deferred = True
             if deferred:
                 job = None
@@ -170,7 +183,7 @@ class ScannerLogic:
         if deferred:
             self._warn("scanner job queue is full; observation deferred")
             return
-        self._publish_current(self._job_event("detected", job), gen, task, search)
+        self._publish_detected_then_release(job)
 
     def _flush_deferred(self):
         queued, warned = [], False
@@ -184,11 +197,14 @@ class ScannerLogic:
             for url, (gen, task, search, yaw) in list(self._deferred.items()):
                 if not self._current_locked(gen, task, search): del self._deferred[url]; continue
                 job = ScannerJob(gen, task, search, self._next_order, url, yaw)
+                key = (job.generation, job.order)
+                self._ready_gates[key] = threading.Event()
                 try: self._jobs.put_nowait(job)
-                except queue.Full: warned = True; break
+                except queue.Full:
+                    self._ready_gates.pop(key, None); warned = True; break
                 self._next_order += 1; del self._deferred[url]; queued.append(job)
         if warned: self._warn("scanner job queue is full; observation deferred")
-        for job in queued: self._publish_current(self._job_event("detected", job), job.generation, job.task_id, job.search_id)
+        for job in queued: self._publish_detected_then_release(job)
 
     def _requeue_retry(self, job):
         deferred = False
@@ -198,6 +214,24 @@ class ScannerLogic:
             except queue.Full:
                 self._retry_deferred[job.url] = job; deferred = True
         if deferred: self._warn("scanner job queue is full; retry deferred")
+
+    def _publish_detected_then_release(self, job):
+        key = (job.generation, job.order)
+        with self._lock:
+            gate = self._ready_gates.setdefault(key, threading.Event())
+        try:
+            self._publish_current(self._job_event("detected", job), job.generation, job.task_id, job.search_id)
+        finally:
+            gate.set()
+
+    def _wait_until_detected(self, job):
+        key = (job.generation, job.order)
+        with self._lock: gate = self._ready_gates.get(key)
+        if gate is not None:
+            while not gate.wait(.05):
+                if not self._current(job.generation, job.task_id, job.search_id): return False
+            with self._lock: self._ready_gates.pop(key, None)
+        return self._current(job.generation, job.task_id, job.search_id)
 
     def _drain_jobs_locked(self):
         while True:

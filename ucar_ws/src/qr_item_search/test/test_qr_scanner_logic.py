@@ -260,6 +260,33 @@ class ScannerLogicTest(unittest.TestCase):
         resolved = [call.args[0] for call in self.publisher.call_args_list if call.args[0]["event"] == "resolved"]
         self.assertEqual([2, 1], [event["order"] for event in resolved])
 
+    def test_worker_cannot_resolve_before_detected_event(self):
+        events = []
+        logic = ScannerLogic(self.decoder, self.resolver, events.append, self.quality, self.variants, worker_count=1)
+        logic.reset_search("task", "search"); logic.set_control(True, False, 0)
+        self.decoder.process.return_value = ["https://a"]; self.resolver.resolve.return_value = "item"
+        stop = threading.Event(); logic.run_workers(stop.is_set)
+        logic.submit_frame("x"); logic.process_latest_frame()
+        for _ in range(20):
+            if any(event["event"] == "resolved" for event in events): break
+            threading.Event().wait(.02)
+        stop.set()
+        sequence = [event["event"] for event in events if event["event"] in ("detected", "resolved")]
+        self.assertEqual(["detected", "resolved"], sequence)
+
+    def test_retry_requested_before_blocking_failure_requeues_original_once(self):
+        entered, release = threading.Event(), threading.Event()
+        self.decoder.process.return_value = ["https://a"]; self._process()
+        original = self.logic.jobs.get_nowait(); self.logic.jobs.task_done(); self.logic.jobs.put_nowait(original)
+        def fail(url): entered.set(); release.wait(1); raise RuntimeError("bad")
+        self.resolver.resolve.side_effect = fail
+        worker = threading.Thread(target=self.logic.work_once); worker.start(); self.assertTrue(entered.wait(1))
+        self.logic.set_control(True, False, 0, retry_failed=True); release.set(); worker.join(1)
+        retry = self.logic.jobs.get_nowait(); self.logic.jobs.task_done()
+        self.assertEqual(original, retry)
+        self.logic.set_control(True, False, 0, retry_failed=True)
+        self.assertEqual(0, self.logic.jobs.qsize())
+
 
 if __name__ == "__main__":
     unittest.main()
