@@ -196,6 +196,50 @@ class SearchControllerTest(unittest.TestCase):
         self.assertEqual(0., out.speeds[-1])
         self.assertFalse(out.controls[-1]["enabled"])
 
+    def test_shutdown_latch_rejects_new_search_after_active_shutdown(self):
+        self.start(); self.c.shutdown()
+        self.assertFalse(self.c.start(start_json(search="new"), .2))
+        self.assertEqual("ERROR", self.c.state)
+        self.assertEqual(0., self.out.speeds[-1])
+        self.assertFalse(self.out.controls[-1]["enabled"])
+
+    def test_idle_shutdown_preserves_idle_and_rejects_start(self):
+        out = Outputs(); c = SearchController(out)
+        c.shutdown()
+        self.assertEqual("IDLE", c.state)
+        self.assertFalse(c.start(start_json(), 0))
+        self.assertEqual("IDLE", c.state)
+        self.assertFalse(out.controls[-1]["enabled"])
+
+    def test_terminal_shutdown_preserves_state_and_last_result(self):
+        cases = []
+
+        out = Outputs(); c = SearchController(out); c.update_yaw(0, 0); c.start(start_json(), 0)
+        for order in (1, 2, 3):
+            c.handle_scanner_event(event("detected", order=order, url="https://%d" % order,
+                                         detected_yaw=float(order)), .1 + order / 100)
+        for index, order in enumerate((1, 2, 3)):
+            c.handle_scanner_event(event("resolved", order=order, url="https://%d" % order,
+                                         detected_yaw=float(order), item_name=str(order), message=""), .2 + index / 100)
+        cases.append((c, out, "COMPLETE"))
+
+        out = Outputs(); c = SearchController(out); c.update_yaw(0, 0); c.start(start_json(), 0)
+        c.stop(json.dumps({"protocol_version": 1, "task_id": "task", "search_id": "search", "reason": "stop"}), .1)
+        cases.append((c, out, "STOPPED"))
+
+        out = Outputs(); c = SearchController(out); c.update_yaw(0, 0); c.start(start_json(), 0); c.tick(40)
+        cases.append((c, out, "NOT_FOUND"))
+
+        for c, out, state in cases:
+            with self.subTest(state=state):
+                result = out.results[-1]
+                count = len(out.results)
+                c.shutdown()
+                self.assertEqual(state, c.state)
+                self.assertEqual(count, len(out.results))
+                self.assertIs(result, out.results[-1])
+                self.assertFalse(c.start(start_json(search="new"), 41))
+
     def test_duplicate_active_start_is_idempotent(self):
         self.start()
         self.assertFalse(self.c.start(start_json(), .1))

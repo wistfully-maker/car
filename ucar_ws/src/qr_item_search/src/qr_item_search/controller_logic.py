@@ -39,6 +39,7 @@ class SearchController:
         self._intervals, self._interval_index, self._target_phase = [], 0, "approach"
         self._last_result = None
         self._retry_edge_sent = False
+        self._shutdown_latched = False
         self._emit([("publish_speed", 0.0), ("publish_state", "IDLE"),
                     ("publish_scanner_control", self._control(False, False, False))], 0)
 
@@ -62,12 +63,17 @@ class SearchController:
         return self._emit(actions, epoch)
 
     def start(self, raw_json, now=None):
+        with self._lock:
+            if self._shutdown_latched:
+                return False
         now = self._resolve_now(now)
         if now is None: return False
         try: request = parse_start_request(raw_json)
         except ProtocolError:
             self._emit([("publish_speed", 0.0)]); return False
         with self._lock:
+            if self._shutdown_latched:
+                return False
             if not self._serial(now): return self._finish_error_locked(now, "time moved backwards")
             same = request.search_id == self._search
             if same and self._machine.state in self._machine.ACTIVE:
@@ -186,15 +192,18 @@ class SearchController:
 
     def shutdown(self):
         with self._lock:
-            self._machine.fail()
+            self._shutdown_latched = True
             self._control_epoch += 1
             epoch = self._control_epoch
+            was_active = self._machine.state in self._machine.ACTIVE
+            if was_active:
+                self._machine.fail()
             actions = [
                 ("publish_speed", 0.0),
                 ("publish_scanner_control", self._control(False, False, False)),
-                ("publish_state", "ERROR"),
+                ("publish_state", self._machine.state),
             ]
-            if self._task:
+            if was_active and self._task:
                 stamp = self._last_now if self._last_now is not None else 0.0
                 result = self._result(stamp, "error", "controller shutdown", self._partial_items())
                 self._last_result = result
