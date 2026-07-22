@@ -147,40 +147,51 @@ class SearchController:
             now = self._resolve_now(now)
             if now is None: return False
             with self._lock: return self._finish_error_locked(now, "malformed scanner event")
-        if payload.get("event") == "scanner_started":
-            now = self._resolve_now(now)
-            if now is None: return False
-            with self._lock:
-                if not self._serial(now): return self._finish_error_locked(now, "time moved backwards")
-                session = payload.get("scanner_session")
-                valid = (type(payload.get("protocol_version")) is int
-                         and payload.get("protocol_version") == 1
-                         and isinstance(session, str) and bool(session.strip()))
-                if not valid:
+        now = self._resolve_now(now)
+        if now is None: return False
+        with self._lock:
+            session = payload.get("scanner_session")
+            valid_session = isinstance(session, str) and bool(session.strip())
+            previous_session = self._scanner_session
+            normalized_session = session.strip() if valid_session else None
+            session_fault = None
+            if not valid_session:
+                if self._machine.state in self._machine.ACTIVE:
+                    session_fault = "malformed scanner event"
+            else:
+                self._scanner_session = normalized_session
+                if (previous_session is not None and previous_session != normalized_session
+                        and self._machine.state in self._machine.ACTIVE):
+                    session_fault = "scanner restarted"
+
+            if payload.get("event") == "scanner_started":
+                valid_hello = (type(payload.get("protocol_version")) is int
+                               and payload.get("protocol_version") == 1 and valid_session)
+                if not self._serial(now):
+                    return self._finish_error_locked(now, "time moved backwards")
+                if not valid_hello:
                     if self._machine.state in self._machine.ACTIVE:
                         return self._finish_error_locked(now, "malformed scanner event")
                     return False
-                previous = self._scanner_session
-                self._scanner_session = session.strip()
-                if (previous is not None and previous != self._scanner_session
-                        and self._machine.state in self._machine.ACTIVE):
-                    return self._finish_error_locked(now, "scanner restarted")
+                if session_fault is not None:
+                    return self._finish_error_locked(now, session_fault)
                 return False
-        with self._lock:
+
             task_id, search_id = payload.get("task_id"), payload.get("search_id")
             valid_identity = (
                 isinstance(task_id, str) and bool(task_id.strip()) and
                 isinstance(search_id, str) and bool(search_id.strip())
             )
             malformed_identity = not valid_identity and self._machine.state in self._machine.ACTIVE
-            if valid_identity and (task_id != self._task or search_id != self._search):
+            if (session_fault is None and valid_identity
+                    and (task_id != self._task or search_id != self._search)):
                 return False
-            if valid_identity and self._machine.state not in self._machine.ACTIVE:
+            if (session_fault is None and valid_identity
+                    and self._machine.state not in self._machine.ACTIVE):
                 return False
-        now = self._resolve_now(now)
-        if now is None: return False
-        with self._lock:
             if not self._serial(now): return self._finish_error_locked(now, "time moved backwards")
+            if session_fault is not None:
+                return self._finish_error_locked(now, session_fault)
             if malformed_identity:
                 return self._finish_error_locked(now, "malformed scanner event")
             if payload.get("protocol_version") != 1 or not isinstance(payload.get("event"), str):

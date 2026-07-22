@@ -22,7 +22,8 @@ def start_json(task="task", search="search"):
 
 
 def event(kind, **fields):
-    value = {"protocol_version": 1, "task_id": "task", "search_id": "search", "event": kind}
+    value = {"protocol_version": 1, "task_id": "task", "search_id": "search",
+             "event": kind, "scanner_session": "session-a"}
     value.update(fields)
     return json.dumps(value)
 
@@ -616,6 +617,66 @@ class SearchControllerTest(unittest.TestCase):
         self.start()
         self.assertFalse(self.c.handle_scanner_event(malformed, .1))
         self.assertEqual("ERROR", self.c.state)
+
+
+    def test_active_ordinary_event_from_new_scanner_session_fails_safe(self):
+        hello = json.dumps({"protocol_version": 1, "event": "scanner_started",
+                            "scanner_session": "session-a", "task_id": "", "search_id": ""})
+        self.c.handle_scanner_event(hello, 0.0); self.start()
+        payload = json.loads(event("quality", brightness=1., overexposed=0., sharpness=50.,
+                                   decoded=False, detected_yaw=0.0))
+        payload["scanner_session"] = "session-b"
+        self.assertFalse(self.c.handle_scanner_event(json.dumps(payload), .1))
+        self.assertEqual("ERROR", self.c.state)
+        self.assertEqual(0.0, self.out.speeds[-1])
+        self.assertFalse(self.out.controls[-1]["enabled"])
+
+    def test_active_ordinary_event_requires_nonempty_scanner_session(self):
+        for session in (None, ""):
+            with self.subTest(session=session):
+                out = Outputs(); c = SearchController(out); c.update_yaw(0, 0)
+                c.start(start_json(), 0)
+                payload = json.loads(event("quality", brightness=1., overexposed=0., sharpness=50.,
+                                           decoded=False, detected_yaw=0.0))
+                if session is None:
+                    payload.pop("scanner_session", None)
+                else:
+                    payload["scanner_session"] = session
+                self.assertFalse(c.handle_scanner_event(json.dumps(payload), .1))
+                self.assertEqual("ERROR", c.state)
+
+
+    def test_session_validation_is_atomic_with_idle_to_active_start(self):
+        for mode in ("missing", "changed"):
+            with self.subTest(mode=mode):
+                out = Outputs(); c = SearchController(out); c.update_yaw(0, 0)
+                if mode == "changed":
+                    hello = json.dumps({"protocol_version": 1, "event": "scanner_started",
+                                        "scanner_session": "session-a", "task_id": "", "search_id": ""})
+                    c.handle_scanner_event(hello, 0.0)
+                payload = json.loads(event("quality", brightness=1., overexposed=0., sharpness=50.,
+                                           decoded=False, detected_yaw=0.0))
+                if mode == "missing":
+                    payload.pop("scanner_session", None)
+                else:
+                    payload["scanner_session"] = "session-b"
+                entered, release = threading.Event(), threading.Event()
+                original_resolve = c._resolve_now
+
+                def blocking_resolve(value):
+                    if value == .2:
+                        entered.set(); release.wait(1)
+                    return original_resolve(value)
+
+                c._resolve_now = blocking_resolve
+                worker = threading.Thread(target=c.handle_scanner_event,
+                                          args=(json.dumps(payload), .2))
+                worker.start(); self.assertTrue(entered.wait(1))
+                self.assertTrue(c.start(start_json(), .1))
+                release.set(); worker.join(1)
+                self.assertEqual("ERROR", c.state)
+                self.assertEqual(0.0, out.speeds[-1])
+                self.assertFalse(out.controls[-1]["enabled"])
 
 
 if __name__ == "__main__":

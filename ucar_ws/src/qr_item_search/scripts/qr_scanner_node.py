@@ -25,7 +25,9 @@ def main():
     session_id = str(uuid.uuid4())
 
     def publish(payload):
-        publisher.publish(String(data=json.dumps(payload, ensure_ascii=False)))
+        value = dict(payload)
+        value["scanner_session"] = session_id
+        publisher.publish(String(data=json.dumps(value, ensure_ascii=False)))
 
     worker_count = rospy.get_param("~http_worker_count", 3)
     logic = ScannerLogic(

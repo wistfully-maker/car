@@ -29,8 +29,11 @@ class IntegrationContractTest(unittest.TestCase):
                                           "search_id": "search", "expected_count": 3}), 0.0)
         self.now = 0.01
         self.events = []
+        self.scanner_session = "session-a"
 
     def publish(self, value):
+        value = dict(value)
+        value["scanner_session"] = self.scanner_session
         self.events.append(value)
         self.now += 0.01
         self.controller.handle_scanner_event(json.dumps(value), self.now)

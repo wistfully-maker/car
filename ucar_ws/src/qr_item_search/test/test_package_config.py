@@ -110,6 +110,7 @@ class PackageConfigTest(unittest.TestCase):
         self.assertIn("uuid.uuid4()", self.scanner)
         self.assertIn('"event": "scanner_started"', self.scanner)
         self.assertIn('"scanner_session": session_id', self.scanner)
+        self.assertIn('value["scanner_session"] = session_id', self.scanner)
 
     def test_scanner_logic_construction_and_parameter_defaults(self):
         tree = ast.parse(self.scanner)
