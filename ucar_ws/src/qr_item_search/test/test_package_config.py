@@ -7,6 +7,18 @@ import xml.etree.ElementTree as ET
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def _literal(node):
+    if isinstance(node, ast.Str):
+        return node.s
+    if isinstance(node, ast.Num):
+        return node.n
+    if isinstance(node, ast.NameConstant):
+        return node.value
+    if hasattr(ast, "Constant") and isinstance(node, ast.Constant):
+        return node.value
+    raise TypeError("not a literal AST node")
+
+
 class PackageConfigTest(unittest.TestCase):
     def setUp(self):
         self.scanner = (ROOT / "scripts" / "qr_scanner_node.py").read_text(encoding="utf-8")
@@ -53,11 +65,11 @@ class PackageConfigTest(unittest.TestCase):
         self.assertIn("rospy.Duration(0.05)", self.controller)
         self.assertIn("rospy.on_shutdown", self.controller)
         cmd = self._topic_call(tree, "Publisher", "/cmd_vel")
-        self.assertEqual(1, next(k.value.value for k in cmd.keywords if k.arg == "queue_size"))
+        self.assertEqual(1, next(_literal(k.value) for k in cmd.keywords if k.arg == "queue_size"))
         for topic in ("/qr_item_search/scanner_control", "/qr_item_search/state", "/qr_item_search/result"):
             call = self._topic_call(tree, "Publisher", topic)
             self.assertEqual("String", call.args[1].id)
-            self.assertIs(True, next(k.value.value for k in call.keywords if k.arg == "latch"))
+            self.assertIs(True, next(_literal(k.value) for k in call.keywords if k.arg == "latch"))
         for topic in ("/qr_item_search/start", "/qr_item_search/stop", "/qr_item_search/scanner_event"):
             self.assertEqual("String", self._topic_call(tree, "Subscriber", topic).args[1].id)
 
@@ -67,13 +79,20 @@ class PackageConfigTest(unittest.TestCase):
                     and node.name == "main")
         nested = next(node for node in safe.body if isinstance(node, ast.FunctionDef)
                       and node.name == "safe_callback")
-        text = ast.unparse(nested)
-        self.assertIn("callback_fault.is_set()", text)
-        self.assertIn("callback_fault.set()", text)
-        self.assertIn("controller.shutdown()", text)
+        calls = [node for node in ast.walk(nested) if isinstance(node, ast.Call)
+                 and isinstance(node.func, ast.Attribute)]
+        is_set = next(node for node in calls if node.func.attr == "is_set"
+                      and isinstance(node.func.value, ast.Name) and node.func.value.id == "callback_fault")
+        set_call = next(node for node in calls if node.func.attr == "set"
+                        and isinstance(node.func.value, ast.Name) and node.func.value.id == "callback_fault")
+        shutdown = next(node for node in calls if node.func.attr == "shutdown"
+                        and isinstance(node.func.value, ast.Name) and node.func.value.id == "controller")
+        self.assertLess(is_set.lineno, set_call.lineno)
+        self.assertLess(set_call.lineno, shutdown.lineno)
         timer = next(node for node in safe.body if isinstance(node, ast.FunctionDef)
                      and node.name == "timer_callback")
-        self.assertIn("safe_callback", ast.unparse(timer))
+        self.assertTrue(any(isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                            and node.func.id == "safe_callback" for node in ast.walk(timer)))
 
     def test_scanner_protocol_topics_are_string(self):
         tree = ast.parse(self.scanner)
@@ -90,13 +109,13 @@ class PackageConfigTest(unittest.TestCase):
         self.assertEqual("measure_quality", keywords["quality_function"].id)
         self.assertEqual("decode_variants", keywords["variant_function"].id)
         self.assertEqual("worker_count", keywords["worker_count"].id)
-        self.assertEqual(3, keywords["expected_count"].value)
+        self.assertEqual(3, _literal(keywords["expected_count"]))
         defaults = {}
         for node in ast.walk(tree):
             if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
                     and node.func.attr == "get_param" and len(node.args) == 2
-                    and isinstance(node.args[0], ast.Constant)):
-                defaults[node.args[0].value] = node.args[1].value
+                    and isinstance(node.args[0], (ast.Str, ast.Constant))):
+                defaults[_literal(node.args[0])] = _literal(node.args[1])
         self.assertEqual(1.0, defaults["~connect_timeout"])
         self.assertEqual(2.0, defaults["~read_timeout"])
         self.assertEqual(1, defaults["~http_retries"])
@@ -109,7 +128,7 @@ class PackageConfigTest(unittest.TestCase):
         self.assertTrue(any(isinstance(node.func, ast.Attribute) and node.func.attr == "on_shutdown" for node in calls))
         self.assertTrue(any(isinstance(node, ast.Assign) and any(
             isinstance(target, ast.Attribute) and target.attr == "daemon" for target in node.targets)
-            and isinstance(node.value, ast.Constant) and node.value.value is True for node in ast.walk(tree)))
+            and _literal(node.value) is True for node in ast.walk(tree)))
         clear_at = self.scanner.index("decoder_event.clear()")
         recheck_at = self.scanner.index("if stop_event.is_set() or rospy.is_shutdown():")
         process_at = self.scanner.index("logic.process_latest_frame()")
@@ -134,8 +153,8 @@ class PackageConfigTest(unittest.TestCase):
     def _topic_call(tree, method, topic):
         matches = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
                    and isinstance(n.func, ast.Attribute) and n.func.attr == method
-                   and len(n.args) >= 2 and isinstance(n.args[0], ast.Constant)
-                   and n.args[0].value == topic]
+                   and len(n.args) >= 2 and isinstance(n.args[0], (ast.Str, ast.Constant))
+                   and _literal(n.args[0]) == topic]
         if len(matches) != 1: raise AssertionError((method, topic, len(matches)))
         return matches[0]
 

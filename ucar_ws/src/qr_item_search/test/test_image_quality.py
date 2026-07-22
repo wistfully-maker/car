@@ -82,7 +82,7 @@ class DecodeVariantsTest(unittest.TestCase):
         self.assertIs(threshold_result, variants[3])
         create_clahe.assert_called_once_with(clipLimit=2.0, tileGridSize=(8, 8))
         clahe.apply.assert_called_once()
-        np.testing.assert_array_equal(expected_gray, clahe.apply.call_args.args[0])
+        np.testing.assert_array_equal(expected_gray, clahe.apply.call_args[0][0])
         threshold.assert_called_once_with(
             clahe_result,
             255,

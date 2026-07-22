@@ -42,7 +42,7 @@ class ScannerLogicTest(unittest.TestCase):
         self._process("one")
         self._process("two")
         self.assertEqual([1, 2, 3], [job.order for job in list(self.logic.jobs.queue)])
-        detected = [call.args[0] for call in self.publisher.call_args_list if call.args[0]["event"] == "detected"]
+        detected = [call[0][0] for call in self.publisher.call_args_list if call[0][0]["event"] == "detected"]
         self.assertEqual(["https://a", "https://b", "https://c"], [event["url"] for event in detected])
 
     def test_reset_allows_three_urls_again_after_capacity_reached(self):
@@ -59,7 +59,7 @@ class ScannerLogicTest(unittest.TestCase):
         self.decoder.process.return_value = ["bad", "https://good"]
         self._process()
         self.assertEqual(1, self.logic.jobs.get_nowait().order)
-        events = [call.args[0]["event"] for call in self.publisher.call_args_list]
+        events = [call[0][0]["event"] for call in self.publisher.call_args_list]
         self.assertIn("invalid_url", events)
 
     def test_duplicate_url_only_uses_one_order(self):
@@ -75,8 +75,8 @@ class ScannerLogicTest(unittest.TestCase):
         self.variants.return_value = ["one", "two", "three"]
         self.decoder.process.side_effect = [[], ["https://a"]]
         self._process()
-        self.assertEqual(["one", "two"], [call.args[0] for call in self.decoder.process.call_args_list])
-        quality = [call.args[0] for call in self.publisher.call_args_list if call.args[0]["event"] == "quality"][0]
+        self.assertEqual(["one", "two"], [call[0][0] for call in self.decoder.process.call_args_list])
+        quality = [call[0][0] for call in self.publisher.call_args_list if call[0][0]["event"] == "quality"][0]
         self.assertEqual("quality", quality["event"])
         self.assertEqual(1.0, quality["brightness"])
 
@@ -100,7 +100,7 @@ class ScannerLogicTest(unittest.TestCase):
         self.resolver.resolve.side_effect = ["A", RuntimeError("offline")]
         self.logic.work_once(block=False)
         self.logic.work_once(block=False)
-        events = [call.args[0] for call in self.publisher.call_args_list]
+        events = [call[0][0] for call in self.publisher.call_args_list]
         self.assertEqual("resolved", events[-2]["event"])
         self.assertEqual("resolve_error", events[-1]["event"])
         self.assertEqual([1, 2], [events[-2]["order"], events[-1]["order"]])
@@ -129,11 +129,11 @@ class ScannerLogicTest(unittest.TestCase):
         self._process(); original = self.logic.jobs.get_nowait(); self.logic.jobs.task_done()
         self.resolver.resolve.side_effect = RuntimeError("bad")
         self.logic.jobs.put_nowait(original); self.logic.work_once(block=False)
-        detected_before = len([call for call in self.publisher.call_args_list if call.args[0]["event"] == "detected"])
+        detected_before = len([call for call in self.publisher.call_args_list if call[0][0]["event"] == "detected"])
         self.logic.set_control(True, False, 99, retry_failed=True)
         retry = self.logic.jobs.get_nowait(); self.logic.jobs.task_done()
         self.assertEqual(original, retry)
-        self.assertEqual(detected_before, len([call for call in self.publisher.call_args_list if call.args[0]["event"] == "detected"]))
+        self.assertEqual(detected_before, len([call for call in self.publisher.call_args_list if call[0][0]["event"] == "detected"]))
         self.logic.set_control(True, False, 99, retry_failed=True)
         self.assertEqual(0, self.logic.jobs.qsize())
 
@@ -177,7 +177,7 @@ class ScannerLogicTest(unittest.TestCase):
     def test_quality_publishes_after_detection_with_valid_decoded_flag(self):
         self.decoder.process.return_value = ["bad", "https://a"]
         self._process()
-        events = [call.args[0] for call in self.publisher.call_args_list]
+        events = [call[0][0] for call in self.publisher.call_args_list]
         self.assertEqual("quality", events[-1]["event"])
         self.assertTrue(events[-1]["decoded"])
         self.assertEqual(1.5, events[-1]["detected_yaw"])
@@ -273,7 +273,7 @@ class ScannerLogicTest(unittest.TestCase):
         second = threading.Thread(target=self.logic.work_once, kwargs={"block": False})
         first.start(); self.assertTrue(a_entered.wait(1)); second.start(); self.assertTrue(b_done.wait(1)); release_a.set()
         first.join(1); second.join(1)
-        resolved = [call.args[0] for call in self.publisher.call_args_list if call.args[0]["event"] == "resolved"]
+        resolved = [call[0][0] for call in self.publisher.call_args_list if call[0][0]["event"] == "resolved"]
         self.assertEqual([2, 1], [event["order"] for event in resolved])
 
     def test_worker_cannot_resolve_before_detected_event(self):
