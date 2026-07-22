@@ -594,5 +594,29 @@ class SearchControllerTest(unittest.TestCase):
         self.assertEqual("WAITING_HTTP", self.c.state)
 
 
+    def test_scanner_session_restart_fails_active_search_and_allows_new_search(self):
+        hello = lambda session: json.dumps({"protocol_version": 1, "event": "scanner_started",
+                                             "scanner_session": session, "task_id": "", "search_id": ""})
+        self.assertFalse(self.c.handle_scanner_event(hello("session-1"), 0.0))
+        self.start()
+        self.assertFalse(self.c.handle_scanner_event(hello("session-1"), .1))
+        self.assertEqual("FAST_SWEEP", self.c.state)
+        self.assertFalse(self.c.handle_scanner_event(hello("session-2"), .2))
+        self.assertEqual("ERROR", self.c.state)
+        self.assertEqual(0.0, self.out.speeds[-1])
+        self.assertFalse(self.out.controls[-1]["enabled"])
+        self.assertEqual("scanner restarted", self.out.results[-1]["message"])
+        self.assertTrue(self.c.start(start_json(search="new-search"), .3))
+
+    def test_malformed_scanner_session_fails_only_active_search(self):
+        malformed = json.dumps({"protocol_version": 1, "event": "scanner_started",
+                                "scanner_session": "", "task_id": "", "search_id": ""})
+        self.assertFalse(self.c.handle_scanner_event(malformed, 0.0))
+        self.assertEqual("IDLE", self.c.state)
+        self.start()
+        self.assertFalse(self.c.handle_scanner_event(malformed, .1))
+        self.assertEqual("ERROR", self.c.state)
+
+
 if __name__ == "__main__":
     unittest.main()

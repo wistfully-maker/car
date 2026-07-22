@@ -41,7 +41,9 @@ class PackageConfigTest(unittest.TestCase):
     def test_package_runtime_dependencies_include_opencv(self):
         root = ET.parse(str(ROOT / "package.xml")).getroot()
         deps = {e.text.strip() for tag in ("depend", "exec_depend") for e in root.findall(tag)}
-        self.assertTrue({"tf", "python3-pyzbar", "python3-requests", "python3-opencv"}.issubset(deps))
+        self.assertTrue({"tf", "python3-pyzbar", "python3-requests", "python3-opencv",
+                         "python3-numpy"}.issubset(deps))
+        self.assertIn("Continuous four-edge", root.find("description").text)
 
     def test_nodes_use_only_new_string_protocol_topics(self):
         combined = self.scanner + self.controller
@@ -96,8 +98,18 @@ class PackageConfigTest(unittest.TestCase):
 
     def test_scanner_protocol_topics_are_string(self):
         tree = ast.parse(self.scanner)
-        self.assertEqual("String", self._topic_call(tree, "Publisher", "/qr_item_search/scanner_event").args[1].id)
+        publisher = self._topic_call(tree, "Publisher", "/qr_item_search/scanner_event")
+        self.assertEqual("String", publisher.args[1].id)
+        self.assertIs(True, next(_literal(k.value) for k in publisher.keywords if k.arg == "latch"))
         self.assertEqual("String", self._topic_call(tree, "Subscriber", "/qr_item_search/scanner_control").args[1].id)
+
+    def test_scanner_publishes_uuid_session_handshake(self):
+        tree = ast.parse(self.scanner)
+        self.assertTrue(any(isinstance(node, ast.Import) and any(alias.name == "uuid" for alias in node.names)
+                            for node in tree.body))
+        self.assertIn("uuid.uuid4()", self.scanner)
+        self.assertIn('"event": "scanner_started"', self.scanner)
+        self.assertIn('"scanner_session": session_id', self.scanner)
 
     def test_scanner_logic_construction_and_parameter_defaults(self):
         tree = ast.parse(self.scanner)

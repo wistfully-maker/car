@@ -2,7 +2,7 @@
 <package format="2">
   <name>qr_item_search</name>
   <version>0.1.0</version>
-  <description>Three-wall QR item search for U-CAR-02</description>
+  <description>Continuous four-edge QR item search for U-CAR-02</description>
 
   <maintainer email="ucar@example.com">U-CAR Team</maintainer>
   <license>BSD-3-Clause</license>
@@ -19,6 +19,7 @@
   <exec_depend>python3-requests</exec_depend>
   <exec_depend>python3-pyzbar</exec_depend>
   <exec_depend>python3-opencv</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
   <exec_depend>tf</exec_depend>
 
   <test_depend>rostest</test_depend>

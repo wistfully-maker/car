@@ -273,7 +273,7 @@ class ScannerLogic:
         return {key: getattr(value, key) for key in ("brightness", "overexposed", "sharpness")}
     @staticmethod
     def _event(event, task, search, **fields):
-        fields.update(event=event, task_id=task, search_id=search); return fields
+        fields.update(protocol_version=1, event=event, task_id=task, search_id=search); return fields
     def _job_event(self, event, job, item_name="", message=""):
         return self._event(event, job.task_id, job.search_id, order=job.order, url=job.url, detected_yaw=job.detected_yaw, item_name=item_name, message=message)
     def _publish_current(self, event, gen, task, search):

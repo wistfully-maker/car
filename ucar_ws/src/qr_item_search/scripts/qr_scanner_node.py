@@ -2,6 +2,7 @@
 import json
 import math
 import threading
+import uuid
 
 from qr_item_search.image_quality import decode_variants, measure_quality
 from qr_item_search.qr_decode import UniqueQrDecoder
@@ -20,7 +21,8 @@ def main():
     decoder_event = threading.Event()
     stop_event = threading.Event()
     current_identity = [None, None]
-    publisher = rospy.Publisher("/qr_item_search/scanner_event", String, queue_size=10)
+    publisher = rospy.Publisher("/qr_item_search/scanner_event", String, queue_size=10, latch=True)
+    session_id = str(uuid.uuid4())
 
     def publish(payload):
         publisher.publish(String(data=json.dumps(payload, ensure_ascii=False)))
@@ -106,6 +108,8 @@ def main():
         decoder_event.set()
 
     rospy.on_shutdown(shutdown)
+    publish({"protocol_version": 1, "event": "scanner_started",
+             "scanner_session": session_id, "task_id": "", "search_id": ""})
     rospy.spin()
     _ = worker_threads
 

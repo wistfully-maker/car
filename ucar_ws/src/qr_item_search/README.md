@@ -77,6 +77,8 @@
 
 `searching` 表示搜索已接受；`complete` 必须恰有三个不同 URL；`not_found` 可携带已成功解析的部分物品；`error` 表示系统无法安全继续；`stopped` 表示匹配当前 identity 的停止请求已执行。`not_found`、`error`、`stopped` 的 `message` 非空。
 
+Scanner 每次启动都会发布新的 session 标识；若 scanner 在活动搜索中重启，controller 会立即停车并以 `scanner restarted` 进入 `ERROR`。恢复后必须使用新的 `search_id` 发起搜索。
+
 协议与设计文档：
 
 - [Protocol v1](../../../docs/superpowers/specs/2026-07-19-task1-minimal-integration-protocol.md)
