@@ -41,9 +41,19 @@ class ScannerLogicTest(unittest.TestCase):
         self.decoder.process.side_effect = [["https://a", "https://b", "https://c"], ["https://d"]]
         self._process("one")
         self._process("two")
-        self.assertEqual([1, 2, 3, 4], [job.order for job in list(self.logic.jobs.queue)])
+        self.assertEqual([1, 2, 3], [job.order for job in list(self.logic.jobs.queue)])
         detected = [call.args[0] for call in self.publisher.call_args_list if call.args[0]["event"] == "detected"]
-        self.assertEqual(["https://a", "https://b", "https://c", "https://d"], [event["url"] for event in detected])
+        self.assertEqual(["https://a", "https://b", "https://c"], [event["url"] for event in detected])
+
+    def test_reset_allows_three_urls_again_after_capacity_reached(self):
+        self.decoder.process.side_effect = [["https://1", "https://2", "https://3", "https://4"],
+                                            ["https://4", "https://5", "https://6"]]
+        self._process()
+        self.assertEqual(3, self.logic.jobs.qsize())
+        self.logic.reset_search("task2", "search2")
+        self.logic.set_control(True, False, 0)
+        self._process()
+        self.assertEqual(3, self.logic.jobs.qsize())
 
     def test_invalid_url_does_not_consume_order(self):
         self.decoder.process.return_value = ["bad", "https://good"]
@@ -292,6 +302,25 @@ class ScannerLogicTest(unittest.TestCase):
         self.assertEqual(original, retry)
         self.logic.set_control(True, False, 0, retry_failed=True)
         self.assertEqual(0, self.logic.jobs.qsize())
+
+
+    def test_full_queue_reserves_only_first_three_unique_urls(self):
+        jobs = queue.Queue(maxsize=1)
+        logic = ScannerLogic(self.decoder, self.resolver, self.publisher, self.quality,
+                             self.variants, jobs=jobs, warning=Mock(), worker_count=1)
+        logic.reset_search("task", "search"); logic.set_control(True, False, 0)
+        jobs.put_nowait(object())
+        self.decoder.process.return_value = ["https://1", "https://2", "https://3", "https://4"]
+        logic.submit_frame("x"); logic.process_latest_frame()
+        self.assertEqual({"https://1", "https://2", "https://3"}, logic._reserved_urls)
+        self.assertEqual(3, len(logic._deferred))
+
+    def test_rejects_invalid_expected_count(self):
+        for value in (0, True, 1.0):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    ScannerLogic(self.decoder, self.resolver, self.publisher, self.quality,
+                                 self.variants, expected_count=value)
 
 
 if __name__ == "__main__":

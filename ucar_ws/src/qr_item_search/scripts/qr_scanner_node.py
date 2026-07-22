@@ -37,6 +37,7 @@ def main():
         quality_function=measure_quality,
         variant_function=decode_variants,
         worker_count=worker_count,
+        expected_count=3,
         warning=rospy.logwarn,
         error_handler=rospy.logerr,
     )

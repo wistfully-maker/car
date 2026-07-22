@@ -61,6 +61,20 @@ class PackageConfigTest(unittest.TestCase):
         for topic in ("/qr_item_search/start", "/qr_item_search/stop", "/qr_item_search/scanner_event"):
             self.assertEqual("String", self._topic_call(tree, "Subscriber", topic).args[1].id)
 
+    def test_controller_callback_fault_stops_future_callbacks_and_shuts_down(self):
+        tree = ast.parse(self.controller)
+        safe = next(node for node in tree.body if isinstance(node, ast.FunctionDef)
+                    and node.name == "main")
+        nested = next(node for node in safe.body if isinstance(node, ast.FunctionDef)
+                      and node.name == "safe_callback")
+        text = ast.unparse(nested)
+        self.assertIn("callback_fault.is_set()", text)
+        self.assertIn("callback_fault.set()", text)
+        self.assertIn("controller.shutdown()", text)
+        timer = next(node for node in safe.body if isinstance(node, ast.FunctionDef)
+                     and node.name == "timer_callback")
+        self.assertIn("safe_callback", ast.unparse(timer))
+
     def test_scanner_protocol_topics_are_string(self):
         tree = ast.parse(self.scanner)
         self.assertEqual("String", self._topic_call(tree, "Publisher", "/qr_item_search/scanner_event").args[1].id)
@@ -76,6 +90,7 @@ class PackageConfigTest(unittest.TestCase):
         self.assertEqual("measure_quality", keywords["quality_function"].id)
         self.assertEqual("decode_variants", keywords["variant_function"].id)
         self.assertEqual("worker_count", keywords["worker_count"].id)
+        self.assertEqual(3, keywords["expected_count"].value)
         defaults = {}
         for node in ast.walk(tree):
             if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)

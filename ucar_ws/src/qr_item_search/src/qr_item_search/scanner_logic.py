@@ -19,13 +19,16 @@ class ScannerJob:
 
 class ScannerLogic:
     def __init__(self, decoder, resolver, event_publisher, quality_function, variant_function,
-                 jobs=None, worker_count=3, warning=None, error_handler=None):
+                 jobs=None, worker_count=3, expected_count=3, warning=None, error_handler=None):
         if type(worker_count) is not int or worker_count < 1:
             raise ValueError("worker_count must be a positive integer")
+        if type(expected_count) is not int or expected_count < 1:
+            raise ValueError("expected_count must be a positive integer")
         self._decoder, self._resolver, self._publisher = decoder, resolver, event_publisher
         self._quality, self._variants = quality_function, variant_function
         self._jobs = jobs if jobs is not None else queue.Queue(maxsize=max(6, worker_count * 2))
         self._worker_count = worker_count
+        self._expected_count = expected_count
         self._warning, self._error_handler = warning or (lambda _: None), error_handler or (lambda _: None)
         self._lock, self._decoder_lock = threading.Lock(), threading.Lock()
         self._generation = 0
@@ -34,6 +37,7 @@ class ScannerLogic:
         self._yaw, self._latest, self._next_order = 0.0, None, 1
         self._failed, self._retried, self._deferred, self._retry_deferred = {}, set(), {}, {}
         self._ready_gates = {}
+        self._reserved_urls = set()
         self._retry_requested = False
         self._pending_decoder_reset = 0
 
@@ -48,6 +52,7 @@ class ScannerLogic:
             self._enabled = self._enhanced = False
             self._yaw, self._latest, self._next_order = 0.0, None, 1
             self._failed, self._retried, self._deferred, self._retry_deferred = {}, set(), {}, {}
+            self._reserved_urls = set()
             for gate in self._ready_gates.values(): gate.set()
             self._ready_gates = {}
             self._retry_requested = False
@@ -168,20 +173,34 @@ class ScannerLogic:
 
     def _enqueue_or_defer(self, gen, task, search, url, yaw):
         deferred = False
+        capacity_full = False
         with self._lock:
             if not self._current_locked(gen, task, search): return
-            if url in self._deferred: return
-            job = ScannerJob(gen, task, search, self._next_order, url, yaw)
-            key = (job.generation, job.order)
-            self._ready_gates[key] = threading.Event()
-            try: self._jobs.put_nowait(job)
-            except queue.Full:
-                self._ready_gates.pop(key, None)
-                self._deferred[url] = (gen, task, search, yaw); deferred = True
-            if deferred:
+            if url in self._reserved_urls: return
+            if len(self._reserved_urls) >= self._expected_count:
+                capacity_full = True
+            else:
+                self._reserved_urls.add(url)
+            if capacity_full:
                 job = None
             else:
-                self._next_order += 1
+                job = ScannerJob(gen, task, search, self._next_order, url, yaw)
+            if capacity_full:
+                pass
+            else:
+                key = (job.generation, job.order)
+                self._ready_gates[key] = threading.Event()
+                try: self._jobs.put_nowait(job)
+                except queue.Full:
+                    self._ready_gates.pop(key, None)
+                    self._deferred[url] = (gen, task, search, yaw); deferred = True
+                if deferred:
+                    job = None
+                else:
+                    self._next_order += 1
+        if capacity_full:
+            self._warn("scanner expected URL count reached; ignoring observation")
+            return
         if deferred:
             self._warn("scanner job queue is full; observation deferred")
             return

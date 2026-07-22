@@ -162,6 +162,8 @@ class SearchController:
             try: actions = self._scanner_event_locked(payload, now)
             except Exception:
                 return self._finish_error_locked(now, "malformed scanner event")
+            if actions is None:
+                return False
             epoch = self._control_epoch
         self._emit(actions, epoch); return True
 
@@ -196,6 +198,8 @@ class SearchController:
             self._coverage.record(y, b, o, s, p["decoded"]); self._last_image = now
             return []
         if kind == "detected":
+            if self._machine.state == "WAITING_HTTP":
+                return None
             order, url, yaw = self._item_identity(p)
             existing = self._detected.get(order)
             candidate = {"order": order, "url": url, "detected_yaw": yaw}

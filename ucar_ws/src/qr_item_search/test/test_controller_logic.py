@@ -515,5 +515,13 @@ class SearchControllerTest(unittest.TestCase):
         self.assertFalse(out.controls[-1]["enabled"])
 
 
+    def test_waiting_http_ignores_extra_detection(self):
+        self.start()
+        for order in (1, 2, 3): self.detected(order, now=.1 + order / 100)
+        self.assertFalse(self.c.handle_scanner_event(event(
+            "detected", order=4, url="https://4", detected_yaw=4.0), .2))
+        self.assertEqual("WAITING_HTTP", self.c.state)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,5 +1,6 @@
 #!/usr/bin/python3
 import json
+import threading
 
 from qr_item_search.controller_logic import SearchController
 
@@ -44,11 +45,19 @@ def main():
         search_total_timeout=rospy.get_param("~search_total_timeout", 40.0),
         error_handler=rospy.logerr,
     )
+    callback_fault = threading.Event()
 
     def safe_callback(label, callback):
+        if callback_fault.is_set():
+            return False
         try:
             return callback()
         except Exception as error:
+            callback_fault.set()
+            try:
+                controller.shutdown()
+            except Exception as shutdown_error:
+                rospy.logerr("controller emergency shutdown failed: %s", shutdown_error)
             rospy.logerr("%s callback failed: %s", label, error)
             return False
 
@@ -72,12 +81,19 @@ def main():
     def timer_callback(event):
         return safe_callback("timer", lambda: controller.tick(rospy.get_time()))
 
+    def shutdown():
+        callback_fault.set()
+        try:
+            controller.shutdown()
+        except Exception as error:
+            rospy.logerr("controller shutdown failed: %s", error)
+
     rospy.Subscriber("/odom", Odometry, odom_callback)
     rospy.Subscriber("/qr_item_search/start", String, start_callback)
     rospy.Subscriber("/qr_item_search/stop", String, stop_callback)
     rospy.Subscriber("/qr_item_search/scanner_event", String, scanner_event_callback)
     rospy.Timer(rospy.Duration(0.05), timer_callback)
-    rospy.on_shutdown(controller.shutdown)
+    rospy.on_shutdown(shutdown)
     rospy.spin()
 
 
