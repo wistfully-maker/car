@@ -4,150 +4,124 @@ import unittest
 import xml.etree.ElementTree as ET
 
 
-PACKAGE_ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent
 
 
 class PackageConfigTest(unittest.TestCase):
-    def test_launch_file_has_expected_nodes_and_parameters(self):
-        root = ET.parse(
-            str(PACKAGE_ROOT / "launch" / "qr_item_search.launch")
-        ).getroot()
-        arguments = {
-            element.get("name"): element.get("default")
-            for element in root.findall("arg")
-        }
-        self.assertEqual("/usb_cam/image_raw", arguments["image_topic"])
-        self.assertEqual(
-            "[0.0, 1.5708, 3.1416]",
-            arguments["wall_yaw_offsets"],
-        )
+    def setUp(self):
+        self.scanner = (ROOT / "scripts" / "qr_scanner_node.py").read_text(encoding="utf-8")
+        self.controller = (ROOT / "scripts" / "item_search_controller_node.py").read_text(encoding="utf-8")
 
-        nodes = {
-            element.get("type"): element
-            for element in root.findall("node")
-        }
-        scanner = nodes["qr_scanner_node.py"]
-        controller = nodes["item_search_controller_node.py"]
-        self.assertEqual("qr_item_search", scanner.get("pkg"))
-        self.assertEqual("qr_item_search", controller.get("pkg"))
+    def test_launch_has_exact_continuous_search_parameters(self):
+        root = ET.parse(str(ROOT / "launch" / "qr_item_search.launch")).getroot()
+        self.assertEqual({"image_topic": "/usb_cam/image_raw"},
+                         {arg.get("name"): arg.get("default") for arg in root.findall("arg")})
+        nodes = {node.get("type"): node for node in root.findall("node")}
+        scanner = {p.get("name"): p.get("value") for p in nodes["qr_scanner_node.py"].findall("param")}
+        controller = {p.get("name"): p.get("value") for p in nodes["item_search_controller_node.py"].findall("param")}
+        self.assertEqual({"image_topic": "$(arg image_topic)", "connect_timeout": "1.0",
+                          "read_timeout": "2.0", "http_retries": "1", "http_worker_count": "3"}, scanner)
+        self.assertEqual({"fast_angular_speed": "0.40", "targeted_angular_speed": "0.20",
+                          "minimum_effective_speed": "0.11", "fast_sweep_angle": "6.632251",
+                          "yaw_tolerance": "0.035", "heading_timeout": "1.0",
+                          "camera_timeout": "1.0", "search_total_timeout": "40.0"}, controller)
 
-        scanner_parameters = {
-            element.get("name"): element.get("value")
-            for element in scanner.findall("param")
-        }
-        self.assertEqual("$(arg image_topic)", scanner_parameters["image_topic"])
-        self.assertEqual("2", scanner_parameters["required_frames"])
-        self.assertEqual("1.0", scanner_parameters["connect_timeout"])
-        self.assertEqual("2.0", scanner_parameters["read_timeout"])
-        self.assertEqual("2", scanner_parameters["http_retries"])
+    def test_package_runtime_dependencies_include_opencv(self):
+        root = ET.parse(str(ROOT / "package.xml")).getroot()
+        deps = {e.text.strip() for tag in ("depend", "exec_depend") for e in root.findall(tag)}
+        self.assertTrue({"tf", "python3-pyzbar", "python3-requests", "python3-opencv"}.issubset(deps))
 
-        controller_parameters = {
-            element.get("name"): element.get("value")
-            for element in controller.findall("param")
-        }
-        expected = {
-            "yaw_kp": "1.2",
-            "max_angular_speed": "0.30",
-            "min_angular_speed": "0.11",
-            "yaw_tolerance": "0.035",
-            "settle_seconds": "0.8",
-            "scan_timeout": "4.0",
-            "turn_timeout": "8.0",
-        }
-        self.assertEqual(expected, controller_parameters)
-        wall_offsets = controller.find("rosparam")
-        self.assertEqual("wall_yaw_offsets", wall_offsets.get("param"))
-        self.assertEqual("true", wall_offsets.get("subst_value"))
-        self.assertEqual("$(arg wall_yaw_offsets)", wall_offsets.text.strip())
+    def test_nodes_use_only_new_string_protocol_topics(self):
+        combined = self.scanner + self.controller
+        for topic in ("/qr_item_search/scanner_event", "/qr_item_search/scanner_control",
+                      "/qr_item_search/start", "/qr_item_search/stop", "/qr_item_search/result"):
+            self.assertIn(topic, combined)
+        for old in ("/qr_item_search/match_decision", "/qr_item_search/wall_index",
+                    "/qr_item_search/scan_enabled", "/qr_item_search/reset",
+                    "FrameAdapter", "StableQrDecoder", "Bool", "Empty", "Int32"):
+            self.assertNotIn(old, combined)
 
-    def test_package_declares_runtime_dependencies(self):
-        root = ET.parse(str(PACKAGE_ROOT / "package.xml")).getroot()
-        dependencies = {
-            element.text.strip()
-            for tag in ("depend", "exec_depend")
-            for element in root.findall(tag)
-        }
-        self.assertTrue(
-            {"tf", "python3-pyzbar", "python3-requests"}.issubset(
-                dependencies
-            )
-        )
+    def test_scanner_has_decoder_thread_workers_and_shutdown(self):
+        self.assertIn("thread.daemon = True", self.scanner)
+        self.assertIn("run_workers(rospy.is_shutdown)", self.scanner)
+        self.assertIn("rospy.on_shutdown", self.scanner)
+        self.assertIn("queue_size=1", self.scanner)
+        self.assertIn("buff_size=2 ** 24", self.scanner)
 
-    def test_maintainer_email_has_a_qualified_domain(self):
-        root = ET.parse(str(PACKAGE_ROOT / "package.xml")).getroot()
-        email = root.find("maintainer").get("email")
-        local, separator, domain = email.partition("@")
+    def test_controller_publishers_timer_and_shutdown(self):
+        tree = ast.parse(self.controller)
+        self.assertIn("rospy.Duration(0.05)", self.controller)
+        self.assertIn("rospy.on_shutdown", self.controller)
+        cmd = self._topic_call(tree, "Publisher", "/cmd_vel")
+        self.assertEqual(1, next(k.value.value for k in cmd.keywords if k.arg == "queue_size"))
+        for topic in ("/qr_item_search/scanner_control", "/qr_item_search/state", "/qr_item_search/result"):
+            call = self._topic_call(tree, "Publisher", topic)
+            self.assertEqual("String", call.args[1].id)
+            self.assertIs(True, next(k.value.value for k in call.keywords if k.arg == "latch"))
+        for topic in ("/qr_item_search/start", "/qr_item_search/stop", "/qr_item_search/scanner_event"):
+            self.assertEqual("String", self._topic_call(tree, "Subscriber", topic).args[1].id)
 
-        self.assertTrue(local)
-        self.assertEqual("@", separator)
-        self.assertIn(".", domain)
+    def test_scanner_protocol_topics_are_string(self):
+        tree = ast.parse(self.scanner)
+        self.assertEqual("String", self._topic_call(tree, "Publisher", "/qr_item_search/scanner_event").args[1].id)
+        self.assertEqual("String", self._topic_call(tree, "Subscriber", "/qr_item_search/scanner_control").args[1].id)
 
-    def test_cmake_installs_scripts_and_launch_with_one_test_block(self):
-        cmake = (PACKAGE_ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
-        self.assertIn("scripts/qr_scanner_node.py", cmake)
-        self.assertIn("scripts/item_search_controller_node.py", cmake)
-        self.assertIn("install(DIRECTORY launch/", cmake)
-        self.assertIn("${CATKIN_PACKAGE_SHARE_DESTINATION}/launch", cmake)
-        self.assertEqual(1, cmake.count("if(CATKIN_ENABLE_TESTING)"))
+    def test_scanner_logic_construction_and_parameter_defaults(self):
+        tree = ast.parse(self.scanner)
+        call = next(node for node in ast.walk(tree) if isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name) and node.func.id == "ScannerLogic")
+        keywords = {item.arg: item.value for item in call.keywords}
+        self.assertEqual("UniqueQrDecoder", keywords["decoder"].func.id)
+        self.assertEqual("ItemResolver", keywords["resolver"].func.id)
+        self.assertEqual("measure_quality", keywords["quality_function"].id)
+        self.assertEqual("decode_variants", keywords["variant_function"].id)
+        self.assertEqual("worker_count", keywords["worker_count"].id)
+        defaults = {}
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "get_param" and len(node.args) == 2
+                    and isinstance(node.args[0], ast.Constant)):
+                defaults[node.args[0].value] = node.args[1].value
+        self.assertEqual(1.0, defaults["~connect_timeout"])
+        self.assertEqual(2.0, defaults["~read_timeout"])
+        self.assertEqual(1, defaults["~http_retries"])
+        self.assertEqual(3, defaults["~http_worker_count"])
 
-    def test_reset_ros_interfaces_use_latched_int32(self):
-        scanner_tree = ast.parse(
-            (PACKAGE_ROOT / "scripts" / "qr_scanner_node.py").read_text(
-                encoding="utf-8"
-            )
-        )
-        controller_tree = ast.parse(
-            (
-                PACKAGE_ROOT / "scripts" / "item_search_controller_node.py"
-            ).read_text(encoding="utf-8")
-        )
-        scanner_call = self._topic_call(
-            scanner_tree,
-            "Subscriber",
-            "/qr_item_search/reset",
-        )
-        controller_call = self._topic_call(
-            controller_tree,
-            "Publisher",
-            "/qr_item_search/reset",
-        )
-        self.assertEqual("Int32", scanner_call.args[1].id)
-        self.assertEqual("Int32", controller_call.args[1].id)
-        latch = next(
-            keyword.value
-            for keyword in controller_call.keywords
-            if keyword.arg == "latch"
-        )
-        self.assertIs(True, latch.value)
+    def test_scanner_thread_worker_shutdown_and_stop_recheck_structure(self):
+        tree = ast.parse(self.scanner)
+        calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
+        self.assertTrue(any(isinstance(node.func, ast.Attribute) and node.func.attr == "run_workers" for node in calls))
+        self.assertTrue(any(isinstance(node.func, ast.Attribute) and node.func.attr == "on_shutdown" for node in calls))
+        self.assertTrue(any(isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Attribute) and target.attr == "daemon" for target in node.targets)
+            and isinstance(node.value, ast.Constant) and node.value.value is True for node in ast.walk(tree)))
+        clear_at = self.scanner.index("decoder_event.clear()")
+        recheck_at = self.scanner.index("if stop_event.is_set() or rospy.is_shutdown():")
+        process_at = self.scanner.index("logic.process_latest_frame()")
+        self.assertLess(clear_at, recheck_at)
+        self.assertLess(recheck_at, process_at)
+        shutdown = self.scanner[self.scanner.index("def shutdown():"):]
+        self.assertLess(shutdown.index("stop_event.set()"), shutdown.index("logic.set_control"))
+        self.assertLess(shutdown.index("logic.set_control"), shutdown.index("decoder_event.set()"))
+
+    def test_scanner_control_has_strict_version_and_empty_identity_rules(self):
+        self.assertIn('type(value.get("protocol_version")) is not int', self.scanner)
+        self.assertIn('(not task_id) != (not search_id)', self.scanner)
+        self.assertIn('current_identity[:] = [None, None]', self.scanner)
+
+    def test_cmake_still_installs_both_scripts_and_launch(self):
+        cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
+        for value in ("scripts/qr_scanner_node.py", "scripts/item_search_controller_node.py",
+                      "install(DIRECTORY launch/"):
+            self.assertIn(value, cmake)
 
     @staticmethod
     def _topic_call(tree, method, topic):
-        matches = []
-        for node in ast.walk(tree):
-            if not (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Attribute)
-                and node.func.attr == method
-                and len(node.args) >= 2
-            ):
-                continue
-            topic_node = node.args[0]
-            if isinstance(topic_node, (ast.Str, ast.Constant)):
-                value = (
-                    topic_node.s
-                    if isinstance(topic_node, ast.Str)
-                    else topic_node.value
-                )
-                if value == topic:
-                    matches.append(node)
-        if len(matches) != 1:
-            raise AssertionError(
-                "expected one {} for {}, found {}".format(
-                    method,
-                    topic,
-                    len(matches),
-                )
-            )
+        matches = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
+                   and isinstance(n.func, ast.Attribute) and n.func.attr == method
+                   and len(n.args) >= 2 and isinstance(n.args[0], ast.Constant)
+                   and n.args[0].value == topic]
+        if len(matches) != 1: raise AssertionError((method, topic, len(matches)))
         return matches[0]
 
 

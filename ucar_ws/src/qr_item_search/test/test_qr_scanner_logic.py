@@ -31,6 +31,12 @@ class ScannerLogicTest(unittest.TestCase):
         self.logic.set_control(False, False, 0)
         self.assertFalse(self.logic.submit_frame("ignored"))
 
+    def test_disabling_discards_pending_latest_frame(self):
+        self.assertTrue(self.logic.submit_frame("pending"))
+        self.logic.set_control(False, False, 0)
+        self.assertFalse(self.logic.process_latest_frame())
+        self.quality.assert_not_called()
+
     def test_detects_three_urls_in_order_and_http_pending_allows_next_frame(self):
         self.decoder.process.side_effect = [["https://a", "https://b", "https://c"], ["https://d"]]
         self._process("one")

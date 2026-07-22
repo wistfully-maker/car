@@ -1,4 +1,6 @@
 #!/usr/bin/python3
+import json
+
 from qr_item_search.controller_logic import SearchController
 
 
@@ -6,101 +8,75 @@ def main():
     import rospy
     from geometry_msgs.msg import Twist
     from nav_msgs.msg import Odometry
-    from std_msgs.msg import Bool, Empty, Int32, String
+    from std_msgs.msg import String
     from tf.transformations import euler_from_quaternion
 
     rospy.init_node("item_search_controller")
-    speed_publisher = rospy.Publisher("/cmd_vel", Twist, queue_size=1)
-    enabled_publisher = rospy.Publisher(
-        "/qr_item_search/scan_enabled",
-        Bool,
-        queue_size=1,
-        latch=True,
-    )
-    wall_publisher = rospy.Publisher(
-        "/qr_item_search/wall_index",
-        Int32,
-        queue_size=1,
-        latch=True,
-    )
-    state_publisher = rospy.Publisher(
-        "/qr_item_search/state",
-        String,
-        queue_size=10,
-        latch=True,
-    )
-    reset_publisher = rospy.Publisher(
-        "/qr_item_search/reset",
-        Int32,
-        queue_size=1,
-        latch=True,
-    )
+    speed = rospy.Publisher("/cmd_vel", Twist, queue_size=1)
+    control = rospy.Publisher("/qr_item_search/scanner_control", String, queue_size=1, latch=True)
+    state = rospy.Publisher("/qr_item_search/state", String, queue_size=10, latch=True)
+    result = rospy.Publisher("/qr_item_search/result", String, queue_size=10, latch=True)
 
     class RosOutputs:
         def publish_speed(self, value):
-            command = Twist()
-            command.angular.z = value
-            speed_publisher.publish(command)
-
-        def publish_scan_enabled(self, value):
-            enabled_publisher.publish(Bool(data=value))
-
-        def publish_wall(self, value):
-            wall_publisher.publish(Int32(data=value))
+            message = Twist()
+            message.angular.z = value
+            speed.publish(message)
 
         def publish_state(self, value):
-            state_publisher.publish(String(data=value))
+            state.publish(String(data=value))
 
-        def publish_reset(self, search_id):
-            reset_publisher.publish(Int32(data=search_id))
+        def publish_scanner_control(self, value):
+            control.publish(String(data=json.dumps(value, ensure_ascii=False)))
+
+        def publish_result(self, value):
+            result.publish(String(data=json.dumps(value, ensure_ascii=False)))
 
     controller = SearchController(
-        wall_yaw_offsets=rospy.get_param(
-            "~wall_yaw_offsets",
-            [0.0, 1.5708, 3.1416],
-        ),
         outputs=RosOutputs(),
-        kp=rospy.get_param("~yaw_kp", 1.2),
-        max_speed=rospy.get_param("~max_angular_speed", 0.30),
-        min_speed=rospy.get_param("~min_angular_speed", 0.11),
-        tolerance=rospy.get_param("~yaw_tolerance", 0.035),
-        settle_seconds=rospy.get_param("~settle_seconds", 0.8),
-        scan_timeout=rospy.get_param("~scan_timeout", 4.0),
-        turn_timeout=rospy.get_param("~turn_timeout", 8.0),
+        fast_angular_speed=rospy.get_param("~fast_angular_speed", .40),
+        targeted_angular_speed=rospy.get_param("~targeted_angular_speed", .20),
+        minimum_effective_speed=rospy.get_param("~minimum_effective_speed", .11),
+        fast_sweep_angle=rospy.get_param("~fast_sweep_angle", 6.632251),
+        yaw_tolerance=rospy.get_param("~yaw_tolerance", .035),
+        heading_timeout=rospy.get_param("~heading_timeout", 1.0),
+        camera_timeout=rospy.get_param("~camera_timeout", 1.0),
+        search_total_timeout=rospy.get_param("~search_total_timeout", 40.0),
+        error_handler=rospy.logerr,
     )
+
+    def safe_callback(label, callback):
+        try:
+            return callback()
+        except Exception as error:
+            rospy.logerr("%s callback failed: %s", label, error)
+            return False
 
     def odom_callback(message):
-        orientation = message.pose.pose.orientation
-        yaw = euler_from_quaternion(
-            [
-                orientation.x,
-                orientation.y,
-                orientation.z,
-                orientation.w,
-            ]
-        )[2]
-        controller.update_yaw(yaw)
+        def invoke():
+            orientation = message.pose.pose.orientation
+            yaw = euler_from_quaternion([orientation.x, orientation.y, orientation.z, orientation.w])[2]
+            return controller.update_yaw(yaw, rospy.get_time())
+        return safe_callback("odometry", invoke)
+
+    def start_callback(message):
+        return safe_callback("start", lambda: controller.start(message.data, rospy.get_time()))
+
+    def stop_callback(message):
+        return safe_callback("stop", lambda: controller.stop(message.data, rospy.get_time()))
+
+    def scanner_event_callback(message):
+        return safe_callback("scanner event", lambda: controller.handle_scanner_event(
+            message.data, rospy.get_time()))
+
+    def timer_callback(event):
+        return safe_callback("timer", lambda: controller.tick(rospy.get_time()))
 
     rospy.Subscriber("/odom", Odometry, odom_callback)
-    rospy.Subscriber(
-        "/qr_item_search/start",
-        Empty,
-        lambda message: controller.start(),
-    )
-    rospy.Subscriber(
-        "/qr_item_search/observation",
-        String,
-        lambda message: controller.handle_observation(message.data),
-    )
-    rospy.Subscriber(
-        "/qr_item_search/match_decision",
-        Bool,
-        lambda message: controller.match_decision(message.data),
-    )
-    rospy.Timer(
-        rospy.Duration(0.05),
-        lambda event: controller.tick(),
-    )
+    rospy.Subscriber("/qr_item_search/start", String, start_callback)
+    rospy.Subscriber("/qr_item_search/stop", String, stop_callback)
+    rospy.Subscriber("/qr_item_search/scanner_event", String, scanner_event_callback)
+    rospy.Timer(rospy.Duration(0.05), timer_callback)
     rospy.on_shutdown(controller.shutdown)
     rospy.spin()
 

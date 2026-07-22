@@ -1,26 +1,20 @@
 <launch>
   <arg name="image_topic" default="/usb_cam/image_raw"/>
-  <arg name="wall_yaw_offsets" default="[0.0, 1.5708, 3.1416]"/>
-
-  <node pkg="qr_item_search" type="qr_scanner_node.py"
-        name="qr_scanner" output="screen">
+  <node pkg="qr_item_search" type="qr_scanner_node.py" name="qr_scanner" output="screen">
     <param name="image_topic" value="$(arg image_topic)"/>
-    <param name="required_frames" value="2"/>
     <param name="connect_timeout" value="1.0"/>
     <param name="read_timeout" value="2.0"/>
-    <param name="http_retries" value="2"/>
+    <param name="http_retries" value="1"/>
+    <param name="http_worker_count" value="3"/>
   </node>
-
-  <node pkg="qr_item_search" type="item_search_controller_node.py"
-        name="item_search_controller" output="screen">
-    <rosparam param="wall_yaw_offsets"
-              subst_value="true">$(arg wall_yaw_offsets)</rosparam>
-    <param name="yaw_kp" value="1.2"/>
-    <param name="max_angular_speed" value="0.30"/>
-    <param name="min_angular_speed" value="0.11"/>
+  <node pkg="qr_item_search" type="item_search_controller_node.py" name="item_search_controller" output="screen">
+    <param name="fast_angular_speed" value="0.40"/>
+    <param name="targeted_angular_speed" value="0.20"/>
+    <param name="minimum_effective_speed" value="0.11"/>
+    <param name="fast_sweep_angle" value="6.632251"/>
     <param name="yaw_tolerance" value="0.035"/>
-    <param name="settle_seconds" value="0.8"/>
-    <param name="scan_timeout" value="4.0"/>
-    <param name="turn_timeout" value="8.0"/>
+    <param name="heading_timeout" value="1.0"/>
+    <param name="camera_timeout" value="1.0"/>
+    <param name="search_total_timeout" value="40.0"/>
   </node>
 </launch>

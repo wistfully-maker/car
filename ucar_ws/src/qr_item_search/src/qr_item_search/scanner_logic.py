@@ -62,6 +62,8 @@ class ScannerLogic:
         retry_jobs = []
         with self._lock:
             self._enabled, self._enhanced, self._yaw = enabled, enhanced, float(detected_yaw)
+            if not enabled:
+                self._latest = None
             rising = retry_failed and not self._retry_requested
             self._retry_requested = retry_failed
             if rising:
