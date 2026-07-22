@@ -168,6 +168,33 @@ class SearchControllerTest(unittest.TestCase):
         self.start(); self.c.tick(.1); self.c.shutdown()
         self.assertEqual(0., self.out.speeds[-1])
         self.assertFalse(self.out.controls[-1]["enabled"])
+        self.assertEqual("ERROR", self.c.state)
+        self.assertEqual("controller shutdown", self.out.results[-1]["message"])
+
+    def test_fast_shutdown_prevents_later_tick_from_moving(self):
+        self.start()
+        barrier = threading.Barrier(2)
+        shutdown = threading.Thread(target=lambda: (self.c.shutdown(), barrier.wait()))
+        tick = threading.Thread(target=lambda: (barrier.wait(), self.c.tick(.2)))
+        shutdown.start(); tick.start(); shutdown.join(1); tick.join(1)
+        self.assertEqual("ERROR", self.c.state)
+        self.assertEqual(0., self.out.speeds[-1])
+        shutdown_index = len(self.out.speeds) - 1
+        self.assertFalse(any(value != 0.0 for value in self.out.speeds[shutdown_index:]))
+
+    def test_targeted_and_repeated_shutdown_remain_safe(self):
+        coverage = Mock(); coverage.reset = Mock()
+        coverage.rescan_intervals.return_value = [Interval(1., 2., 0)]
+        out = Outputs(); c = SearchController(out, coverage=coverage, fast_sweep_angle=.5)
+        c.update_yaw(0, 0); c.start(start_json(), 0); c.update_yaw(.6, .1)
+        c.handle_scanner_event(event("quality", brightness=1., overexposed=0., sharpness=50.,
+                                     decoded=False, detected_yaw=.6), .11)
+        c.tick(.12)
+        self.assertEqual("TARGETED_RESCAN", c.state)
+        c.shutdown(); c.shutdown(); c.tick(.2)
+        self.assertEqual("ERROR", c.state)
+        self.assertEqual(0., out.speeds[-1])
+        self.assertFalse(out.controls[-1]["enabled"])
 
     def test_duplicate_active_start_is_idempotent(self):
         self.start()

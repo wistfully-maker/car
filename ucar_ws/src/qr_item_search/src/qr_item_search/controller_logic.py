@@ -186,9 +186,20 @@ class SearchController:
 
     def shutdown(self):
         with self._lock:
+            self._machine.fail()
             self._control_epoch += 1
             epoch = self._control_epoch
-        self._emit([("publish_speed", 0.0), ("publish_scanner_control", self._control(False, False, False))], epoch)
+            actions = [
+                ("publish_speed", 0.0),
+                ("publish_scanner_control", self._control(False, False, False)),
+                ("publish_state", "ERROR"),
+            ]
+            if self._task:
+                stamp = self._last_now if self._last_now is not None else 0.0
+                result = self._result(stamp, "error", "controller shutdown", self._partial_items())
+                self._last_result = result
+                actions.append(("publish_result", result))
+        self._emit(actions, epoch)
 
     def _scanner_event_locked(self, p, now):
         kind = p["event"]
