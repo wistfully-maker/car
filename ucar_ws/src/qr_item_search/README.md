@@ -69,7 +69,7 @@ source ~/ucar_ws/devel/setup.bash
 ```bash
 source /opt/ros/noetic/setup.bash
 source ~/ucar_ws/devel/setup.bash
-roslaunch qr_item_search qr_item_search.launch image_topic:=/usb_cam/image_raw
+  roslaunch qr_item_search qr_item_search.launch image_topic:=/usb_cam/image_raw
 ```
 
 该 launch 启动：
@@ -412,7 +412,280 @@ roslaunch qr_item_search qr_item_search.launch \
 
 注意：当前 launch 只声明了 `image_topic` 为 launch argument；其余参数写在 launch 文件内。若要调整其他参数，请修改 launch 文件并重新启动节点。不要在比赛现场未经空旷地测试直接提高角速度。
 
-## 16. 常见问题排查
+## 16. 调参位置与实车调参方法
+
+### 16.1 先分清三类参数
+
+| 参数类别 | 修改位置 | 是否需要重启节点 | 典型参数 |
+|---|---|---|---|
+| QR 搜索控制 | `~/ucar_ws/src/qr_item_search/launch/qr_item_search.launch` | 需要重启 QR launch | 转速、扫描角度、总超时 |
+| QR 网络解析 | 同一个 QR launch 的 `qr_scanner` 节点参数 | 需要重启 QR launch | HTTP 超时、重试、worker 数 |
+| USB 相机硬件 | `/dev/video0` 的 V4L2 controls | 通常立即生效；相机或小车重启后可能恢复 | 对焦、曝光、锐度、白平衡 |
+| 相机分辨率/格式 | `/opt/ros/noetic/share/usb_cam/launch/usb_cam-test.launch` 或相机启动命令 | 需要重启相机 | 宽高、YUYV/MJPG、帧率 |
+
+不要直接修改 `/opt/ros/noetic/share` 下的系统文件作为长期方案，系统包更新时会被覆盖。调试阶段优先使用命令行；参数确定后，应在团队自己的相机 launch 或启动脚本中固化。
+
+### 16.2 QR 搜索参数在哪里改
+
+本包当前参数文件：
+
+```bash
+nano ~/ucar_ws/src/qr_item_search/launch/qr_item_search.launch
+```
+
+当前相关片段：
+
+```xml
+<param name="fast_angular_speed" value="0.40"/>
+<param name="targeted_angular_speed" value="0.20"/>
+<param name="minimum_effective_speed" value="0.11"/>
+<param name="fast_sweep_angle" value="6.632251"/>
+<param name="yaw_tolerance" value="0.035"/>
+<param name="heading_timeout" value="1.0"/>
+<param name="camera_timeout" value="1.0"/>
+<param name="search_total_timeout" value="40.0"/>
+```
+
+保存后不需要重新 `catkin_make`，但必须在原 QR launch 终端按 `Ctrl+C`，再重新执行 `roslaunch`。节点只在启动时读取这些参数，运行中执行 `rosparam set` 不会改变已经构造好的控制器。
+
+分步运行 controller 时，可以临时覆盖参数而不改文件：
+
+```bash
+rosrun qr_item_search item_search_controller_node.py \
+  _fast_angular_speed:=0.40 \
+  _targeted_angular_speed:=0.20 \
+  _search_total_timeout:=60.0
+```
+
+### 16.3 本轮建议的 QR 参数
+
+从 `search-test-004` 到 `search-test-007` 的结果看，四轮分别解析到 1、2、1、1 个物品。`search-test-005` 在累计 `8.89 rad`（约 509°）识别到第二个二维码，并在约 40 秒结束，证明补扫仍在工作，但调试总超时偏紧。
+
+第一轮建议只改一个值：
+
+```xml
+<param name="search_total_timeout" value="60.0"/>
+```
+
+其余暂时保持：
+
+```text
+fast_angular_speed     = 0.40 rad/s
+targeted_angular_speed = 0.20 rad/s
+fast_sweep_angle       = 6.632251 rad（约 380°）
+```
+
+原因：相机实测稳定约 30 fps。`0.40 rad/s` 时每帧之间只转约 `0.0133 rad`，即 `0.76°`，不是明显过快。现在降速会增加比赛耗时，却不能验证固定焦距、曝光或二维码尺寸问题。
+
+`60 s` 只用于跑通流程和收集数据。三二维码稳定后，应根据实测逐步降回 `45–50 s`，最终再评估是否恢复 `40 s`。
+
+### 16.4 当前相机实际状态
+
+小车当前 `/dev/video0` 实测为：
+
+```text
+640 × 480
+YUYV
+约 30 fps
+exposure_auto = 3              自动曝光（光圈优先）
+exposure_auto_priority = 1     自动曝光可优先延长曝光
+focus_auto = 0                 自动对焦关闭
+focus_absolute = 68            固定焦距
+sharpness = 50
+```
+
+其中最值得先检查的是固定焦距 `68`。二维码位于不同墙边、距离和斜视角不同时，固定焦距可能让一两个码清晰，而另一个码始终不够清晰。
+
+查看当前值：
+
+```bash
+v4l2-ctl -d /dev/video0 --get-ctrl=focus_auto
+v4l2-ctl -d /dev/video0 --get-ctrl=focus_absolute
+v4l2-ctl -d /dev/video0 --get-ctrl=exposure_auto
+v4l2-ctl -d /dev/video0 --get-ctrl=exposure_auto_priority
+```
+
+查看设备支持的全部控制范围：
+
+```bash
+v4l2-ctl -d /dev/video0 --list-ctrls-menus
+v4l2-ctl -d /dev/video0 --list-formats-ext
+```
+
+### 16.5 正确标定并锁定焦距
+
+不要在小车旋转时让自动对焦不断搜索。推荐在实际物品区、实际观察距离上先自动找焦，再锁定结果。
+
+1. 停止当前 QR 搜索，确保底盘不动。
+2. 让相机正对一个比赛尺寸的二维码，距离采用比赛观察点到墙面的典型距离。
+3. 打开图像：
+
+```bash
+rqt_image_view /usb_cam/image_raw
+```
+
+4. 临时开启自动对焦：
+
+```bash
+v4l2-ctl -d /dev/video0 --set-ctrl=focus_auto=1
+```
+
+5. 等待 2–3 秒，画面稳定后读取焦距：
+
+```bash
+v4l2-ctl -d /dev/video0 --get-ctrl=focus_absolute
+```
+
+6. 记录得到的数值，例如 `N`；关闭自动对焦并锁定：
+
+```bash
+v4l2-ctl -d /dev/video0 --set-ctrl=focus_auto=0
+v4l2-ctl -d /dev/video0 --set-ctrl=focus_absolute=N
+```
+
+7. 不移动小车，分别让三个二维码处于画面中央、左右边缘和一定斜角，做 Scanner-only 测试。三个码都能在静止状态快速解码后，才开始旋转测试。
+
+若启用自动对焦后 `focus_absolute` 不更新，说明该摄像头驱动没有可靠报告自动焦点。此时以 `68` 为中心，手动小步调整，例如每次只改变 10–20，并用同一距离、同一二维码比较清晰度和解码时间。不要同时改曝光。
+
+### 16.6 曝光调整顺序
+
+当前帧率稳定，因此第一步不建议直接切换全手动曝光。先禁止自动曝光为了亮度而延长曝光：
+
+```bash
+v4l2-ctl -d /dev/video0 --set-ctrl=exposure_auto_priority=0
+```
+
+保留：
+
+```bash
+v4l2-ctl -d /dev/video0 --set-ctrl=exposure_auto=3
+```
+
+然后在相同场地重复测试。若仍有明显运动拖影，再测试手动曝光：
+
+1. 静止面对典型二维码，让自动曝光稳定。
+2. 读取当前曝光：
+
+```bash
+v4l2-ctl -d /dev/video0 --get-ctrl=exposure_absolute
+```
+
+3. 记录值 `E`，切换手动并锁定：
+
+```bash
+v4l2-ctl -d /dev/video0 --set-ctrl=exposure_auto=1
+v4l2-ctl -d /dev/video0 --set-ctrl=exposure_absolute=E
+```
+
+4. 一次只小幅降低曝光，检查二维码黑白块是否仍有足够对比度。曝光太长会拖影，太短会让暗处二维码丢失。
+
+回到自动曝光：
+
+```bash
+v4l2-ctl -d /dev/video0 --set-ctrl=exposure_auto=3
+```
+
+V4L2 修改可能在相机节点或小车重启后恢复默认值。每次测试前都用 `--get-ctrl` 重新确认，最终把确定值放进团队自己的启动流程。
+
+### 16.7 分辨率与格式
+
+当前设备支持：
+
+- `YUYV 640×480 @ 30 fps`：当前配置，解码开销较低。
+- `YUYV 800×600 @ 15 fps`：像素增加但帧率减半，不优先。
+- `MJPG 800×600/1280×720/1920×1080 @ 30 fps`：细节增加，但需要解压且可能增加 CPU 负载和压缩伪影。
+
+第一轮不要同时换分辨率。只有在焦距和曝光调整后，静止画面中的二维码仍然像素过少，才单独测试 `MJPG 1280×720 @ 30 fps`，并同时观察：
+
+```bash
+rostopic hz /usb_cam/image_raw
+top
+```
+
+如果 scanner 处理跟不上，高分辨率反而会减少有效解码次数。
+
+### 16.8 每轮必须保存的诊断数据
+
+当前实现不会保存成功解码的关键帧。相机回调只在内存中保留最新帧，解码后就会被覆盖；最终 result 只包含成功解析的 URL、物品名和航向。因此仅看 `/qr_item_search/result`，无法判断漏码是模糊、过曝、没有进入视野、解码失败还是 HTTP 失败。
+
+下一轮测试至少开三个记录终端：
+
+```bash
+rostopic echo /qr_item_search/result \
+  > ~/qr_result_$(date +%Y%m%d_%H%M%S).log
+```
+
+```bash
+rostopic echo /qr_item_search/scanner_event \
+  > ~/qr_scanner_event_$(date +%Y%m%d_%H%M%S).log
+```
+
+```bash
+rosbag record -O ~/qr_debug_$(date +%Y%m%d_%H%M%S).bag \
+  /usb_cam/image_raw /odom /cmd_vel \
+  /qr_item_search/state /qr_item_search/scanner_event /qr_item_search/result
+```
+
+`rosbag` 图像数据较大，测试结束后立即按 `Ctrl+C`，并检查磁盘：
+
+```bash
+df -h ~
+ls -lh ~/qr_debug_*.bag
+```
+
+有了 bag，才能离线定位每个 `detected_yaw` 对应的相机帧，并比较漏掉二维码的方向。
+
+### 16.9 单变量调参顺序
+
+每次使用相同的三个二维码、相同位置和新的 `search_id`，按顺序测试：
+
+1. 现有 `search-test-004` 至 `007` 作为 40 秒基线；下一轮开始保存 result、scanner_event 和 bag。
+2. 只把搜索总超时改为 `60 s`，建立不容易被提前截断的调试基线。
+3. 保持 60 秒，只标定并锁定焦距；先做静止三二维码测试，再做旋转测试。
+4. 保持其他参数不变，只把 `exposure_auto_priority` 改为 `0`。
+5. 三码稳定后，再分别评估总超时和角速度。
+6. 最后才测试更高分辨率或候选二维码停车方案。
+
+每个配置至少连续测试 5 次，记录成功数量、总耗时、每个二维码航向和失败原因。不要用某一次偶然成功作为最终参数。
+
+### 16.10 当前连续扫描设计的限制与下一版方向
+
+当前图像链路是“latest frame”模型：
+
+```text
+相机 30 fps
+  -> 回调只保留内存中的最新帧
+  -> 单独解码线程取走最新帧
+  -> pyzbar 尝试完整解码 URL
+  -> 成功后只发布 URL、航向和质量
+  -> 图像被后续帧覆盖
+```
+
+它不会自动截图，也没有保存“第一次成功解码帧”。单元测试和静态图片测试证明了解码器能工作，实车测试证明至少有部分二维码被成功解码，但没有保留对应实车关键帧。调参阶段应先使用 rosbag 补齐这项证据；后续可增加可配置的关键帧保存功能，默认关闭，避免比赛时持续写盘。
+
+单纯在 pyzbar 已经完整解码 URL 后停车，对“漏掉的二维码”帮助有限，因为最困难的一步已经完成。更有效的下一版是两阶段视觉：
+
+1. 连续旋转时使用较轻量的候选检测，只要求发现二维码外框或三个定位点，不要求已经解出 URL。
+2. 候选连续出现 2 帧后，controller 立即减速并停车。
+3. 等画面稳定约 `0.2–0.5 s`，保存候选关键帧。
+4. 对静止图像执行原图、灰度、CLAHE、自适应阈值和必要的透视矫正解码。
+5. 成功则记录 URL 并恢复旋转；失败则在有限等待后恢复旋转，避免被假候选永久卡住。
+
+推荐状态机扩展：
+
+```text
+FAST_SWEEP
+  -> CANDIDATE_BRAKE
+  -> STATIC_DECODE
+      -> FAST_SWEEP          成功或候选超时，继续找剩余二维码
+      -> WAITING_HTTP        三个 URL 都已取得
+```
+
+候选检测可以使用 OpenCV `QRCodeDetector.detect()` 或轮廓/定位点检测；完整内容仍可由当前 pyzbar/ZBar 解码。这样 OpenCV 只负责“看见疑似二维码”，pyzbar 负责“读取内容”，不会要求更换当前已经验证过的解码后端。
+
+在实现该状态前，应先完成本节的焦距、曝光和数据记录实验。如果三个二维码在静止状态都不能稳定解码，停车状态机不会解决根本问题；必须先修正相机、码面尺寸、距离或光照。
+
+## 17. 常见问题排查
 
 ### 没有旋转
 
@@ -442,7 +715,7 @@ scanner 在活动搜索中重启后，controller 会安全停车并进入 `ERROR
 
 这是正常行为。`complete/not_found/error/stopped` 只结束一次搜索，不退出常驻节点。继续测试可直接发送新的 start；准备关机则按第 7 节关闭节点。
 
-## 17. Windows 本地测试
+## 18. Windows 本地测试
 
 在仓库或 worktree 根目录运行：
 
@@ -465,7 +738,7 @@ PYTHONPATH=~/ucar_ws/src/qr_item_search/src \
 python3 -m unittest discover -s test -p 'test_*.py' -q
 ```
 
-## 18. 比赛现场检查清单
+## 19. 比赛现场检查清单
 
 - [ ] `ssh ucar@172.20.10.4` 可连接。
 - [ ] 二维码三个 URL 均可由小车访问并返回合法 JSON。
