@@ -15,6 +15,7 @@ from task_orchestrator.protocol import (
     parse_dependencies_ready,
     parse_llm_result,
     parse_qr_result,
+    parse_speak_request,
     parse_speech_done,
     parse_task_request,
 )
@@ -25,6 +26,24 @@ def encode(value):
 
 
 class ProtocolTests(unittest.TestCase):
+    def test_speak_request_requires_identity_and_text(self):
+        message = {
+            "protocol_version": 1,
+            "task_id": "task-001",
+            "speech_id": "speech-001",
+            "text": "播报内容",
+        }
+        self.assertEqual(
+            "播报内容",
+            parse_speak_request(encode(message))["text"],
+        )
+        for field in ("task_id", "speech_id", "text"):
+            invalid = dict(message)
+            invalid[field] = " "
+            with self.subTest(field=field):
+                with self.assertRaises(ProtocolError):
+                    parse_speak_request(encode(invalid))
+
     def test_dependencies_ready_validates_task_identity(self):
         message = {
             "protocol_version": 1,

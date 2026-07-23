@@ -753,7 +753,8 @@ git commit -m "feat: adapt recognized speech into task requests"
 - 传入的文本完全一致；
 - 退出码为零时转换成 `success`；
 - 非零退出码和超时转换成 `error`；
-- one `speech_id` is never played twice.
+- 相同 `(task_id, speech_id)` 永远不会播放两次；
+- 重复请求会重新返回第一次缓存的 `speak_done`，避免完成消息丢失后永久等待。
 
 - [ ] **步骤 2：实现带超时限制的子进程运行器**
 
@@ -764,6 +765,9 @@ git commit -m "feat: adapt recognized speech into task requests"
 ```
 
 使用参数列表，不使用 `shell=True`。超时时间从 ROS 参数读取。
+
+运行器测试必须注入假进程函数，不得实际启动 Python、访问网络、扬声器或
+真实 TTS 程序。
 
 - [ ] **步骤 3：发布 `/voice/speak_done`**
 
@@ -781,7 +785,15 @@ git commit -m "feat: adapt recognized speech into task requests"
 
 - [ ] **步骤 4：运行测试**
 
-任何测试都不能访问网络、扬声器或真实 TTS 进程。
+```powershell
+python ucar_ws/src/task_orchestrator/test/test_tts_runner.py -v
+python -m unittest discover `
+  -s ucar_ws/src/task_orchestrator/test `
+  -p "test_*.py" -v
+```
+
+任何测试都不能访问网络、扬声器或真实 TTS 进程。测试通过后，将
+`tts_bridge_node.py` 加入 CMake 和统一 launch，并从 YAML 加载命令与超时。
 
 - [ ] **步骤 5：让 Codex 审查并提交**
 

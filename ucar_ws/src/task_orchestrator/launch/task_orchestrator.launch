@@ -13,4 +13,11 @@
     <rosparam command="load"
               file="$(find task_orchestrator)/config/orchestrator.yaml"/>
   </node>
+  <node pkg="task_orchestrator"
+        type="tts_bridge_node.py"
+        name="tts_bridge"
+        output="screen">
+    <rosparam command="load"
+              file="$(find task_orchestrator)/config/orchestrator.yaml"/>
+  </node>
 </launch>

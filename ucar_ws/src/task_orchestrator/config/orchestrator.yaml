@@ -9,3 +9,9 @@ timeouts:
 
 voice_adapter:
   debounce_seconds: 2.0
+
+tts_bridge:
+  command:
+    - python3
+    - /home/ucar/ucar_ws/src/speech_command/scripts/tts_http.py
+  timeout: 30.0

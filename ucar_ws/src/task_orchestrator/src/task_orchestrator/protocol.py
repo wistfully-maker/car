@@ -210,6 +210,17 @@ def parse_llm_result(raw_json, context):
     return message
 
 
+def parse_speak_request(raw_json):
+    message = load_object(raw_json)
+    message["task_id"] = require_text(message.get("task_id"), "task_id")
+    message["speech_id"] = require_text(
+        message.get("speech_id"),
+        "speech_id",
+    )
+    message["text"] = require_text(message.get("text"), "text")
+    return message
+
+
 def _candidate_map(candidates):
     if not isinstance(candidates, list) or not candidates:
         raise ProtocolError("candidates must be a non-empty list")

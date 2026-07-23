@@ -12,6 +12,7 @@ catkin_package()
 catkin_install_python(PROGRAMS
   scripts/task_orchestrator_node.py
   scripts/voice_task_adapter_node.py
+  scripts/tts_bridge_node.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
