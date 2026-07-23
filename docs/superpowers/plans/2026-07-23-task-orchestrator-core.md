@@ -136,14 +136,11 @@ find_package(catkin REQUIRED COMPONENTS
 
 catkin_python_setup()
 catkin_package()
-
-catkin_install_python(PROGRAMS
-  scripts/task_orchestrator_node.py
-  scripts/voice_task_adapter_node.py
-  scripts/tts_bridge_node.py
-  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
-)
 ```
+
+三个 ROS 节点脚本目前还不存在，因此这里暂不添加
+`catkin_install_python()`。等任务 6～8 创建脚本后再统一添加，避免
+Catkin 在配置阶段引用不存在的文件。
 
 - [ ] **步骤 6：创建 `setup.py` 和 `__init__.py`**
 
@@ -587,6 +584,17 @@ timeouts:
 - never execute `roslaunch`, `rosrun`, or `rosnode kill`.
 
 - [ ] **步骤 4：创建 launch 文件**
+
+当任务 6～8 中的三个节点脚本全部创建后，在 `CMakeLists.txt` 末尾添加：
+
+```cmake
+catkin_install_python(PROGRAMS
+  scripts/task_orchestrator_node.py
+  scripts/voice_task_adapter_node.py
+  scripts/tts_bridge_node.py
+  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
+```
 
 ```xml
 <launch>
