@@ -1,20 +1,20 @@
-# Task Orchestrator Core Implementation Plan
+# 任务编排器核心实施计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **执行说明：** 按任务逐项实施本计划，并使用复选框（`- [ ]`）记录进度。若由代理执行，应使用 `superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`。
 
-**Goal:** Build a tested ROS-independent task orchestration core, ROS topic adapter, voice text adapter, and TTS bridge that can complete the full workflow with simulated navigation, QR, LLM, and TTS modules.
+**目标：** 构建经过测试、与 ROS 解耦的任务编排核心，以及 ROS topic 适配层、语音文本适配器和 TTS 桥接节点；先通过模拟导航、二维码、LLM 和 TTS 模块跑通完整流程。
 
-**Architecture:** Business rules live in pure Python modules with no `rospy` dependency. Thin ROS scripts translate `std_msgs/String` JSON messages into state-machine events and publish returned actions. Existing speech hardware remains the sole microphone/serial owner; adapters consume `/question` and call the existing TTS script without restarting `speech_command_node`.
+**架构：** 业务规则放在不依赖 `rospy` 的纯 Python 模块中。轻量 ROS 脚本把 `std_msgs/String` JSON 消息转换成状态机事件，并发布状态机返回的动作。现有语音硬件节点继续独占麦克风和串口；适配器读取 `/question` 并调用现有 TTS 脚本，不重启 `speech_command_node`。
 
-**Tech Stack:** ROS 1 Noetic, Python 3.7, `rospy`, `std_msgs/String`, JSON protocol v1, `unittest`, Catkin.
+**技术栈：** ROS 1 Noetic、Python 3.7、`rospy`、`std_msgs/String`、JSON 协议 v1、`unittest`、Catkin。
 
 ---
 
-## Scope
+## 实施范围
 
-This plan implements the orchestrator package and proves the complete flow with mock topics. It does not yet modify the deployed `llm_spark` source or navigation algorithms. Those integrations get separate plans after the core protocol is stable.
+本计划实现编排器包，并使用模拟 topic 验证完整流程。本阶段不修改已经部署的 `llm_spark` 源码，也不修改导航算法；等核心协议稳定后，再分别制定实际模块的接入计划。
 
-## File map
+## 文件结构
 
 ```text
 ucar_ws/src/task_orchestrator/
@@ -43,18 +43,18 @@ ucar_ws/src/task_orchestrator/
     └── test_package_config.py
 ```
 
-## Task 1: Create the Catkin package skeleton
+## 任务 1：创建 Catkin 包骨架
 
-**Files:**
-- Create: `ucar_ws/src/task_orchestrator/package.xml`
-- Create: `ucar_ws/src/task_orchestrator/CMakeLists.txt`
-- Create: `ucar_ws/src/task_orchestrator/setup.py`
-- Create: `ucar_ws/src/task_orchestrator/src/task_orchestrator/__init__.py`
-- Create: `ucar_ws/src/task_orchestrator/test/test_package_config.py`
+**涉及文件：**
+- 新建：`ucar_ws/src/task_orchestrator/package.xml`
+- 新建：`ucar_ws/src/task_orchestrator/CMakeLists.txt`
+- 新建：`ucar_ws/src/task_orchestrator/setup.py`
+- 新建：`ucar_ws/src/task_orchestrator/src/task_orchestrator/__init__.py`
+- 新建：`ucar_ws/src/task_orchestrator/test/test_package_config.py`
 
-- [ ] **Step 1: Create the package directories**
+- [ ] **步骤 1：创建包目录**
 
-From the new worktree root:
+在新 worktree 根目录执行：
 
 ```powershell
 New-Item -ItemType Directory -Force `
@@ -65,11 +65,11 @@ New-Item -ItemType Directory -Force `
   ucar_ws/src/task_orchestrator/test
 ```
 
-Expected: five directories exist under `ucar_ws/src/task_orchestrator`.
+预期结果：`ucar_ws/src/task_orchestrator` 下出现五个目录。
 
-- [ ] **Step 2: Write the first package-structure test**
+- [ ] **步骤 2：编写第一个包结构测试**
 
-Create `test/test_package_config.py`:
+创建 `test/test_package_config.py`：
 
 ```python
 import unittest
@@ -94,15 +94,15 @@ if __name__ == "__main__":
     unittest.main()
 ```
 
-- [ ] **Step 3: Run the test and observe failure**
+- [ ] **步骤 3：运行测试并确认它按预期失败**
 
 ```powershell
-python -m unittest ucar_ws/src/task_orchestrator/test/test_package_config.py -v
+python ucar_ws/src/task_orchestrator/test/test_package_config.py -v
 ```
 
-Expected: FAIL because package files do not exist.
+预期结果：出现断言失败，因为包配置文件尚未创建。不能是 `ModuleNotFoundError`；后者表示测试命令不适用于当前 Windows 环境。
 
-- [ ] **Step 4: Create `package.xml`**
+- [ ] **步骤 4：创建 `package.xml`**
 
 ```xml
 <?xml version="1.0"?>
@@ -123,7 +123,7 @@ Expected: FAIL because package files do not exist.
 </package>
 ```
 
-- [ ] **Step 5: Create `CMakeLists.txt`**
+- [ ] **步骤 5：创建 `CMakeLists.txt`**
 
 ```cmake
 cmake_minimum_required(VERSION 3.0.2)
@@ -145,7 +145,7 @@ catkin_install_python(PROGRAMS
 )
 ```
 
-- [ ] **Step 6: Create `setup.py` and `__init__.py`**
+- [ ] **步骤 6：创建 `setup.py` 和 `__init__.py`**
 
 `setup.py`:
 
@@ -170,30 +170,30 @@ setup(**setup_args)
 """U-CAR full task orchestration package."""
 ```
 
-- [ ] **Step 7: Re-run the package test**
+- [ ] **步骤 7：重新运行包结构测试**
 
 ```powershell
-python -m unittest ucar_ws/src/task_orchestrator/test/test_package_config.py -v
+python ucar_ws/src/task_orchestrator/test/test_package_config.py -v
 ```
 
-Expected: PASS.
+预期结果：测试通过。
 
-- [ ] **Step 8: Ask Codex to review and commit**
+- [ ] **步骤 8：让 Codex 审查并提交**
 
-Suggested commit:
+建议提交命令：
 
 ```bash
 git add ucar_ws/src/task_orchestrator
 git commit -m "build: scaffold task orchestrator package"
 ```
 
-## Task 2: Implement trusted category mapping and speech formatting
+## 任务 2：实现可信类别映射和播报文本格式化
 
-**Files:**
-- Create: `ucar_ws/src/task_orchestrator/src/task_orchestrator/categories.py`
-- Create: `ucar_ws/src/task_orchestrator/test/test_categories.py`
+**涉及文件：**
+- 新建：`ucar_ws/src/task_orchestrator/src/task_orchestrator/categories.py`
+- 新建：`ucar_ws/src/task_orchestrator/test/test_categories.py`
 
-- [ ] **Step 1: Write category tests**
+- [ ] **步骤 1：编写类别测试**
 
 ```python
 import unittest
@@ -232,16 +232,16 @@ if __name__ == "__main__":
     unittest.main()
 ```
 
-- [ ] **Step 2: Run the test and observe import failure**
+- [ ] **步骤 2：运行测试并确认导入失败**
 
 ```powershell
 $env:PYTHONPATH='ucar_ws/src/task_orchestrator/src'
 python -m unittest ucar_ws/src/task_orchestrator/test/test_categories.py -v
 ```
 
-Expected: FAIL with missing `task_orchestrator.categories`.
+预期结果：测试失败，提示缺少 `task_orchestrator.categories`。
 
-- [ ] **Step 3: Implement `categories.py`**
+- [ ] **步骤 3：实现 `categories.py`**
 
 ```python
 _CATEGORY_CONFIG = {
@@ -281,13 +281,13 @@ def format_result_speech(
     )
 ```
 
-- [ ] **Step 4: Run the category tests**
+- [ ] **步骤 4：运行类别测试**
 
-Expected: 3 tests PASS.
+预期结果：3 项测试全部通过。
 
-- [ ] **Step 5: Ask Codex to review and commit**
+- [ ] **步骤 5：让 Codex 审查并提交**
 
-Suggested commit:
+建议提交命令：
 
 ```bash
 git add ucar_ws/src/task_orchestrator/src/task_orchestrator/categories.py \
@@ -295,13 +295,13 @@ git add ucar_ws/src/task_orchestrator/src/task_orchestrator/categories.py \
 git commit -m "feat: add trusted task category mapping"
 ```
 
-## Task 3: Parse the fixed voice instruction
+## 任务 3：解析固定格式的语音指令
 
-**Files:**
-- Create: `ucar_ws/src/task_orchestrator/src/task_orchestrator/voice_parser.py`
-- Create: `ucar_ws/src/task_orchestrator/test/test_voice_parser.py`
+**涉及文件：**
+- 新建：`ucar_ws/src/task_orchestrator/src/task_orchestrator/voice_parser.py`
+- 新建：`ucar_ws/src/task_orchestrator/test/test_voice_parser.py`
 
-- [ ] **Step 1: Write parser tests**
+- [ ] **步骤 1：编写解析器测试**
 
 ```python
 import unittest
@@ -336,11 +336,11 @@ if __name__ == "__main__":
     unittest.main()
 ```
 
-- [ ] **Step 2: Run and observe failure**
+- [ ] **步骤 2：运行测试并确认失败**
 
-Expected: missing `voice_parser`.
+预期结果：提示缺少 `voice_parser`。
 
-- [ ] **Step 3: Implement the minimal deterministic parser**
+- [ ] **步骤 3：实现最小化、确定性的解析器**
 
 ```python
 import re
@@ -358,13 +358,13 @@ def parse_categories(text):
     return matches[0], matches[1]
 ```
 
-- [ ] **Step 4: Run the tests**
+- [ ] **步骤 4：运行测试**
 
-Expected: 4 tests PASS.
+预期结果：4 项测试全部通过。
 
-- [ ] **Step 5: Ask Codex to review and commit**
+- [ ] **步骤 5：让 Codex 审查并提交**
 
-Suggested commit:
+建议提交命令：
 
 ```bash
 git add ucar_ws/src/task_orchestrator/src/task_orchestrator/voice_parser.py \
@@ -372,13 +372,13 @@ git add ucar_ws/src/task_orchestrator/src/task_orchestrator/voice_parser.py \
 git commit -m "feat: parse dual-category voice commands"
 ```
 
-## Task 4: Implement protocol parsing and identity validation
+## 任务 4：实现协议解析和消息身份校验
 
-**Files:**
-- Create: `ucar_ws/src/task_orchestrator/src/task_orchestrator/protocol.py`
-- Create: `ucar_ws/src/task_orchestrator/test/test_protocol.py`
+**涉及文件：**
+- 新建：`ucar_ws/src/task_orchestrator/src/task_orchestrator/protocol.py`
+- 新建：`ucar_ws/src/task_orchestrator/test/test_protocol.py`
 
-Required parsers:
+需要实现的解析函数：
 
 ```python
 parse_task_request(raw_json)
@@ -389,22 +389,22 @@ parse_speech_done(raw_json, expected_task_id, expected_speech_id)
 parse_cancel(raw_json, expected_task_id)
 ```
 
-- [ ] **Step 1: Write tests for valid task and QR messages**
+- [ ] **步骤 1：为合法任务消息和二维码消息编写测试**
 
-Tests must assert:
+测试必须验证：
 
 - protocol version is integer `1`;
-- categories are trusted values;
-- QR `complete` contains exactly three distinct orders, names and URLs;
-- mismatched identity is rejected.
+- 类别属于可信类别集合；
+- 二维码 `complete` 结果恰好包含三个互不重复的顺序号、名称和 URL；
+- 身份标识不匹配的消息会被拒绝。
 
-- [ ] **Step 2: Run tests and verify failure**
+- [ ] **步骤 2：运行测试并确认失败**
 
-Expected: missing protocol functions.
+预期结果：提示缺少协议解析函数。
 
-- [ ] **Step 3: Implement small validation helpers**
+- [ ] **步骤 3：实现小型校验辅助函数**
 
-Use these exact primitives:
+使用以下基础函数：
 
 ```python
 def load_object(raw_json):
@@ -422,17 +422,17 @@ def require_text(value, field):
     return value.strip()
 ```
 
-- [ ] **Step 4: Implement each parser one at a time**
+- [ ] **步骤 4：逐个实现解析函数**
 
-After each parser, run only its tests. Do not implement all parsers in one edit.
+每完成一个解析函数，只运行对应测试。不要在一次编辑中同时实现全部解析器。
 
-- [ ] **Step 5: Run the full protocol suite**
+- [ ] **步骤 5：运行完整协议测试集**
 
-Expected: all protocol tests PASS on Python 3.7.
+预期结果：全部协议测试在 Python 3.7 下通过。
 
-- [ ] **Step 6: Ask Codex to review and commit**
+- [ ] **步骤 6：让 Codex 审查并提交**
 
-Suggested commit:
+建议提交命令：
 
 ```bash
 git add ucar_ws/src/task_orchestrator/src/task_orchestrator/protocol.py \
@@ -440,13 +440,13 @@ git add ucar_ws/src/task_orchestrator/src/task_orchestrator/protocol.py \
 git commit -m "feat: validate orchestrator protocol messages"
 ```
 
-## Task 5: Implement the pure orchestration state machine
+## 任务 5：实现纯 Python 任务编排状态机
 
-**Files:**
-- Create: `ucar_ws/src/task_orchestrator/src/task_orchestrator/orchestrator.py`
-- Create: `ucar_ws/src/task_orchestrator/test/test_orchestrator.py`
+**涉及文件：**
+- 新建：`ucar_ws/src/task_orchestrator/src/task_orchestrator/orchestrator.py`
+- 新建：`ucar_ws/src/task_orchestrator/test/test_orchestrator.py`
 
-The core returns action tuples instead of publishing ROS directly:
+核心状态机返回动作元组，不直接发布 ROS topic：
 
 ```python
 ("publish_status", payload)
@@ -458,19 +458,19 @@ The core returns action tuples instead of publishing ROS directly:
 ("publish_delivery_goal", payload)
 ```
 
-- [ ] **Step 1: Test the happy path**
+- [ ] **步骤 1：测试完整成功路径**
 
-Feed:
+依次输入：
 
 1. task request;
 2. dependencies ready;
 3. pickup arrived;
 4. QR complete;
-5. LLM success;
+5. LLM 成功结果；
 6. speech done;
 7. delivery arrived.
 
-Assert states:
+断言状态依次为：
 
 ```text
 CHECKING_DEPENDENCIES
@@ -482,19 +482,19 @@ NAVIGATING_TO_WORKSHOP
 COMPLETE
 ```
 
-- [ ] **Step 2: Run and verify failure**
+- [ ] **步骤 2：运行测试并确认失败**
 
-Expected: missing `TaskOrchestrator`.
+预期结果：提示缺少 `TaskOrchestrator`。
 
-- [ ] **Step 3: Implement constructor and task acceptance**
+- [ ] **步骤 3：实现构造函数和任务接收逻辑**
 
-Constructor inputs:
+构造函数参数：
 
 ```python
 TaskOrchestrator(outputs, clock, id_factory, timeouts)
 ```
 
-Store:
+保存以下状态：
 
 ```python
 self.state = "IDLE"
@@ -503,9 +503,9 @@ self.deadline = None
 self.last_status = None
 ```
 
-- [ ] **Step 4: Implement one transition at a time**
+- [ ] **步骤 4：逐个实现状态转换**
 
-For every transition:
+每次状态转换都必须：
 
 1. validate current state;
 2. validate identities;
@@ -513,35 +513,35 @@ For every transition:
 4. set the next deadline;
 5. return actions.
 
-- [ ] **Step 5: Add failure tests**
+- [ ] **步骤 5：添加失败路径测试**
 
-Cover:
+覆盖以下情况：
 
 - QR `not_found`;
-- LLM error;
-- TTS error;
-- navigation failure;
-- each stage timeout.
+- LLM 返回错误；
+- TTS 返回错误；
+- 导航失败；
+- 每个阶段分别超时。
 
-- [ ] **Step 6: Add concurrency-safety behavior tests**
+- [ ] **步骤 6：添加并发安全和幂等行为测试**
 
-Cover:
+覆盖以下情况：
 
 - duplicate same `task_id`;
 - different `task_id` while busy;
 - stale `search_id`;
 - stale `request_id`;
 - stale `speech_id`;
-- repeated success result;
-- cancellation in every active state.
+- 重复收到成功结果；
+- 在每个活动状态中取消任务。
 
-- [ ] **Step 7: Run the complete pure-Python suite**
+- [ ] **步骤 7：运行完整纯 Python 测试集**
 
-Expected: all tests PASS without importing `rospy`.
+预期结果：不导入 `rospy`，全部测试通过。
 
-- [ ] **Step 8: Ask Codex to review and commit**
+- [ ] **步骤 8：让 Codex 审查并提交**
 
-Suggested commit:
+建议提交命令：
 
 ```bash
 git add ucar_ws/src/task_orchestrator/src/task_orchestrator/orchestrator.py \
@@ -549,15 +549,15 @@ git add ucar_ws/src/task_orchestrator/src/task_orchestrator/orchestrator.py \
 git commit -m "feat: add task orchestration state machine"
 ```
 
-## Task 6: Add configuration and ROS node adapter
+## 任务 6：添加配置和 ROS 节点适配层
 
-**Files:**
-- Create: `ucar_ws/src/task_orchestrator/config/orchestrator.yaml`
-- Create: `ucar_ws/src/task_orchestrator/scripts/task_orchestrator_node.py`
-- Create: `ucar_ws/src/task_orchestrator/launch/task_orchestrator.launch`
-- Modify: `ucar_ws/src/task_orchestrator/test/test_package_config.py`
+**涉及文件：**
+- 新建：`ucar_ws/src/task_orchestrator/config/orchestrator.yaml`
+- 新建：`ucar_ws/src/task_orchestrator/scripts/task_orchestrator_node.py`
+- 新建：`ucar_ws/src/task_orchestrator/launch/task_orchestrator.launch`
+- 修改：`ucar_ws/src/task_orchestrator/test/test_package_config.py`
 
-- [ ] **Step 1: Add configuration**
+- [ ] **步骤 1：添加配置文件**
 
 ```yaml
 timeouts:
@@ -570,23 +570,23 @@ timeouts:
   cancel_ack: 15.0
 ```
 
-- [ ] **Step 2: Extend package tests**
+- [ ] **步骤 2：扩展包结构测试**
 
-Use Python `ast` and XML parsing to assert exact topic names and that all publishers/subscribers use `std_msgs/String`.
+使用 Python `ast` 和 XML 解析来校验准确的 topic 名称，并确认所有发布者和订阅者都使用 `std_msgs/String`。
 
-- [ ] **Step 3: Implement thin ROS outputs**
+- [ ] **步骤 3：实现轻量 ROS 输入输出层**
 
-`task_orchestrator_node.py` must:
+`task_orchestrator_node.py` 必须：
 
-- create publishers once;
-- create subscribers once;
-- parse no business fields itself;
-- delegate callbacks to the pure core;
+- 发布者只创建一次；
+- 订阅者只创建一次；
+- ROS 层自身不解析业务字段；
+- 把回调事件交给纯 Python 核心；
 - call `tick(rospy.get_time())` from a timer;
-- catch callback exceptions and publish an error status;
+- 捕获回调异常并发布错误状态；
 - never execute `roslaunch`, `rosrun`, or `rosnode kill`.
 
-- [ ] **Step 4: Create launch file**
+- [ ] **步骤 4：创建 launch 文件**
 
 ```xml
 <launch>
@@ -598,39 +598,39 @@ Use Python `ast` and XML parsing to assert exact topic names and that all publis
 </launch>
 ```
 
-- [ ] **Step 5: Run package tests and `py_compile`**
+- [ ] **步骤 5：运行包测试和 `py_compile`**
 
 ```bash
 python3 -m py_compile scripts/task_orchestrator_node.py
 python3 -m unittest discover -s test -p 'test_*.py' -v
 ```
 
-- [ ] **Step 6: Ask Codex to review and commit**
+- [ ] **步骤 6：让 Codex 审查并提交**
 
-Suggested commit:
+建议提交命令：
 
 ```bash
 git add ucar_ws/src/task_orchestrator
 git commit -m "feat: expose orchestrator ROS topics"
 ```
 
-## Task 7: Add the voice task adapter
+## 任务 7：添加语音任务适配器
 
-**Files:**
-- Create: `ucar_ws/src/task_orchestrator/scripts/voice_task_adapter_node.py`
-- Modify: `ucar_ws/src/task_orchestrator/test/test_package_config.py`
+**涉及文件：**
+- 新建：`ucar_ws/src/task_orchestrator/scripts/voice_task_adapter_node.py`
+- 修改：`ucar_ws/src/task_orchestrator/test/test_package_config.py`
 
-- [ ] **Step 1: Add an adapter topic test**
+- [ ] **步骤 1：添加适配器 topic 测试**
 
-Assert:
+断言：
 
 - subscriber `/question`;
 - publisher `/voice/task_request`;
 - both use `std_msgs/String`.
 
-- [ ] **Step 2: Implement callback behavior**
+- [ ] **步骤 2：实现回调行为**
 
-On each non-empty `/question`:
+每次收到非空 `/question` 时：
 
 1. call `parse_categories`;
 2. generate one UUID task ID;
@@ -638,13 +638,13 @@ On each non-empty `/question`:
 4. reject text that does not contain exactly two categories;
 5. suppress an identical text received again within a configurable short debounce window.
 
-- [ ] **Step 3: Run unit and package tests**
+- [ ] **步骤 3：运行单元测试和包测试**
 
-Expected: parser and AST tests PASS.
+预期结果：解析器测试和 AST 测试全部通过。
 
-- [ ] **Step 4: Ask Codex to review and commit**
+- [ ] **步骤 4：让 Codex 审查并提交**
 
-Suggested commit:
+建议提交命令：
 
 ```bash
 git add ucar_ws/src/task_orchestrator/scripts/voice_task_adapter_node.py \
@@ -652,35 +652,35 @@ git add ucar_ws/src/task_orchestrator/scripts/voice_task_adapter_node.py \
 git commit -m "feat: adapt recognized speech into task requests"
 ```
 
-## Task 8: Add the TTS bridge
+## 任务 8：添加 TTS 桥接节点
 
-**Files:**
-- Create: `ucar_ws/src/task_orchestrator/scripts/tts_bridge_node.py`
-- Create: `ucar_ws/src/task_orchestrator/src/task_orchestrator/tts_runner.py`
-- Create: `ucar_ws/src/task_orchestrator/test/test_tts_runner.py`
+**涉及文件：**
+- 新建：`ucar_ws/src/task_orchestrator/scripts/tts_bridge_node.py`
+- 新建：`ucar_ws/src/task_orchestrator/src/task_orchestrator/tts_runner.py`
+- 新建：`ucar_ws/src/task_orchestrator/test/test_tts_runner.py`
 
-- [ ] **Step 1: Test command execution without invoking real audio**
+- [ ] **步骤 1：在不调用真实音频设备的情况下测试命令执行**
 
-Inject a runner callable and assert:
+注入一个可调用的运行器并断言：
 
-- exact text is passed;
-- exit code zero becomes `success`;
-- nonzero exit code and timeout become `error`;
+- 传入的文本完全一致；
+- 退出码为零时转换成 `success`；
+- 非零退出码和超时转换成 `error`；
 - one `speech_id` is never played twice.
 
-- [ ] **Step 2: Implement a bounded subprocess runner**
+- [ ] **步骤 2：实现带超时限制的子进程运行器**
 
-Invoke:
+调用方式：
 
 ```text
 /home/ucar/ucar_ws/src/speech_command/scripts/tts_http.py <text>
 ```
 
-Use an argument list, not `shell=True`. Timeout comes from ROS parameters.
+使用参数列表，不使用 `shell=True`。超时时间从 ROS 参数读取。
 
-- [ ] **Step 3: Publish `/voice/speak_done`**
+- [ ] **步骤 3：发布 `/voice/speak_done`**
 
-Include:
+消息必须包含：
 
 ```json
 {
@@ -692,34 +692,34 @@ Include:
 }
 ```
 
-- [ ] **Step 4: Run tests**
+- [ ] **步骤 4：运行测试**
 
-No test may call the network, speaker, or real TTS process.
+任何测试都不能访问网络、扬声器或真实 TTS 进程。
 
-- [ ] **Step 5: Ask Codex to review and commit**
+- [ ] **步骤 5：让 Codex 审查并提交**
 
-Suggested commit:
+建议提交命令：
 
 ```bash
 git add ucar_ws/src/task_orchestrator
 git commit -m "feat: bridge orchestrator speech to existing TTS"
 ```
 
-## Task 9: Complete simulated end-to-end ROS integration
+## 任务 9：完成 ROS 模拟端到端联调
 
-**Files:**
-- Create: `ucar_ws/src/task_orchestrator/test/manual_simulation.md`
-- Modify: `ucar_ws/src/task_orchestrator/README.md`
+**涉及文件：**
+- 新建：`ucar_ws/src/task_orchestrator/test/manual_simulation.md`
+- 修改：`ucar_ws/src/task_orchestrator/README.md`
 
-- [ ] **Step 1: Start the orchestrator package**
+- [ ] **步骤 1：启动任务编排器包**
 
 ```bash
 roslaunch task_orchestrator task_orchestrator.launch
 ```
 
-- [ ] **Step 2: Simulate each external module**
+- [ ] **步骤 2：模拟各个外部模块**
 
-Use separate terminals to echo outgoing topics and publish:
+使用不同终端监听输出 topic，并发布以下模拟消息：
 
 - `/question`;
 - `/task/pickup_arrived`;
@@ -728,44 +728,44 @@ Use separate terminals to echo outgoing topics and publish:
 - `/voice/speak_done`;
 - `/task/delivery_arrived`.
 
-Use one consistent `task_id` and the IDs emitted by the orchestrator.
+全程使用同一个 `task_id`，其他 ID 使用编排器实际发布出来的值。
 
-- [ ] **Step 3: Verify the exact speech text**
+- [ ] **步骤 3：核对严格格式的播报文本**
 
-Expected:
+预期结果：
 
 ```text
 取得苹果属于食品大类应放置在食品加工车间，仿真环境中取得毛巾属于日用品大类应放置在日用品加工车间
 ```
 
-- [ ] **Step 4: Verify delivery goal scope**
+- [ ] **步骤 4：核对实物配送导航目标**
 
-Assert `/task/delivery_navigation_goal` contains only the physical workshop and physical item.
+确认 `/task/delivery_navigation_goal` 只包含实物目标车间和实物名称。
 
-- [ ] **Step 5: Verify failures**
+- [ ] **步骤 5：验证失败路径**
 
-Repeat with:
+分别使用以下情况重复测试：
 
 - QR `not_found`;
-- LLM `error`;
-- TTS `error`;
-- stale IDs;
-- cancel.
+- LLM 返回 `error`；
+- TTS 返回 `error`；
+- 过期 ID；
+- 取消任务。
 
-No failed path may publish a delivery goal.
+任何失败路径都不得发布配送导航目标。
 
-- [ ] **Step 6: Ask Codex for final core review and commit**
+- [ ] **步骤 6：让 Codex 完成核心版本最终审查并提交**
 
-Suggested commit:
+建议提交命令：
 
 ```bash
 git add ucar_ws/src/task_orchestrator
 git commit -m "test: document orchestrator integration simulation"
 ```
 
-## Follow-up plans
+## 后续实施计划
 
-After this plan passes:
+本计划全部通过后：
 
 1. Upgrade `llm_spark` to dual-target protocol and remove hard-coded credentials from tracked source.
 2. Integrate real pickup navigation and define its cancel/arrival contract.
