@@ -17,6 +17,14 @@
 - LLM 能对一个实物目标母类完成分类；
 - QR 与 LLM 可以人工通过 topic 联调。
 
+对小车已部署源码的只读核对还确认：
+
+- `speech_command_node` 当前发布 `/question`、`/answer` 和 `/angle`；
+- `/question` 同时承载云端和本地识别出的原始文本，尚无双母类结构化消息；
+- AIUI 配置中的 IAT 当前是云端识别，本地能力主要是唤醒、VAD 和精确问答匹配；
+- `tts_http.py` 是命令行函数，不订阅 `/voice/speak`，也不发布完成回执；
+- `spark_llm_node` 已使用 `/llm/classify/request` 和 `/llm/classify/result`，但请求是普通文本，结果只支持单目标且没有 `task_id/request_id`。
+
 本阶段需要补齐：
 
 - 语音同时提取实物目标母类和仿真目标母类；
@@ -72,7 +80,10 @@ system_bringup
 ## 3. 总体消息流
 
 ```text
-offline_voice
+speech_command_node
+  │ /question
+  ▼
+voice_task_adapter
   │ /voice/task_request
   ▼
 task_orchestrator
@@ -96,7 +107,8 @@ llm_adapter
 task_orchestrator
   │ /voice/speak
   ▼
-tts
+tts_bridge
+  │ 调用现有 speech_command/scripts/tts_http.py
   │ /voice/speak_done
   ▼
 task_orchestrator
@@ -110,6 +122,25 @@ task_orchestrator
   ▼
 COMPLETE
 ```
+
+### 3.1 现有模块适配策略
+
+第一版不直接修改语音 C++ 主节点。新增两个轻量适配节点，避免再次打开麦克风、串口或扬声器：
+
+- `voice_task_adapter`：
+  - 订阅现有 `/question`；
+  - 从固定比赛句式中提取两个规范母类；
+  - 生成 `task_id`；
+  - 发布 `/voice/task_request`。
+- `tts_bridge`：
+  - 订阅 `/voice/speak`；
+  - 调用现有 `tts_http.py`；
+  - 播放函数返回后发布 `/voice/speak_done`；
+  - 同一 `speech_id` 只播放一次。
+
+`llm_spark` 的单目标接口需要升级为本设计的双目标协议。升级前，编排器先使用模拟 LLM topic 完成测试；升级后保持 topic 名不变。
+
+现有语音识别是否改为完全离线 IAT 属于语音模块的独立后续任务，不阻塞编排器状态机开发。编排器只依赖 `/voice/task_request`，不依赖识别引擎是本地还是云端。
 
 ## 4. 统一协议约定
 
@@ -133,7 +164,7 @@ COMPLETE
 
 | Topic | 发布方 | 订阅方 | 用途 |
 |---|---|---|---|
-| `/voice/task_request` | 离线语音 | `task_orchestrator` | 两个目标母类和原始指令 |
+| `/voice/task_request` | `voice_task_adapter` | `task_orchestrator` | 两个目标母类和原始指令 |
 | `/task/pickup_navigation_goal` | `task_orchestrator` | 前段导航 | 前往物品区观察点 |
 | `/task/pickup_arrived` | 前段导航 | `task_orchestrator` | 观察点到达或失败 |
 | `/qr_item_search/start` | `task_orchestrator` | QR 包 | 启动三二维码搜索 |
@@ -141,13 +172,19 @@ COMPLETE
 | `/qr_item_search/result` | QR 包 | `task_orchestrator` | 搜索状态和三个候选 |
 | `/llm/classify/request` | `task_orchestrator` | LLM 适配器 | 两个目标母类和三个候选 |
 | `/llm/classify/result` | LLM 适配器 | `task_orchestrator` | 实物和仿真双分类结果 |
-| `/voice/speak` | `task_orchestrator` | TTS | 固定格式播报文本 |
-| `/voice/speak_done` | TTS | `task_orchestrator` | 播报成功或失败 |
+| `/voice/speak` | `task_orchestrator` | `tts_bridge` | 固定格式播报文本 |
+| `/voice/speak_done` | `tts_bridge` | `task_orchestrator` | 播报成功或失败 |
 | `/task/delivery_navigation_goal` | `task_orchestrator` | 避障导航 | 前往实物目标车间 |
 | `/task/delivery_arrived` | 避障导航 | `task_orchestrator` | 目标车间到达或失败 |
 | `/task/cancel` | 人工或安全模块 | `task_orchestrator` | 取消当前任务 |
 | `/task/status` | `task_orchestrator` | 调试与上层模块 | 全流程状态、错误和完成信息 |
 | `/system/module_status` | 各常驻模块 | `task_orchestrator` | 模块 ready/error 与配置版本 |
+
+此外保留现有适配输入：
+
+| Topic | 发布方 | 订阅方 | 用途 |
+|---|---|---|---|
+| `/question` | `speech_command_node` | `voice_task_adapter` | 原始识别文本 |
 
 ## 6. 消息定义
 
@@ -524,6 +561,11 @@ QR 包内部超时建议为 75 秒，编排器等待 QR 为 90 秒，保留 15 �
 - 去重、迟到消息忽略、取消和错误状态；
 - 命令行模拟测试。
 
+同一 ROS 包内还实现两个边界适配器：
+
+- `voice_task_adapter_node.py`
+- `tts_bridge_node.py`
+
 暂不实现：
 
 - 运行中重启其他节点；
@@ -538,12 +580,14 @@ QR 包内部超时建议为 75 秒，编排器等待 QR 为 90 秒，保留 15 �
 
 1. 建立 `task_orchestrator` ROS 包骨架。
 2. 编写纯 Python 协议解析与固定分类映射。
-3. 编写纯 Python 状态机和输出 action。
-4. 编写单元测试，覆盖正常流程、重复消息、迟到消息、超时和取消。
-5. 编写 ROS node 适配层。
-6. 使用命令行模拟语音、导航、QR、LLM 和 TTS。
-7. 接入现有 QR 与 LLM。
-8. 接入离线语音和前段导航。
-9. 接入 TTS 完成回执和避障导航目标。
+3. 编写语音固定句式解析器和 `voice_task_adapter`。
+4. 编写纯 Python 状态机和输出 action。
+5. 编写单元测试，覆盖正常流程、重复消息、迟到消息、超时和取消。
+6. 编写 ROS node 适配层。
+7. 编写 `tts_bridge` 并模拟播报完成回执。
+8. 使用命令行模拟语音、导航、QR、LLM 和 TTS。
+9. 升级现有 `llm_spark` 双目标协议。
+10. 接入现有 QR、语音和前段导航。
+11. 接入 TTS 完成回执和避障导航目标。
 
 每一步通过 review 和测试后单独本地提交。
