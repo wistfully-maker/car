@@ -194,6 +194,12 @@ git commit -m "build: scaffold task orchestrator package"
 
 ```python
 import unittest
+import sys
+from pathlib import Path
+
+
+SOURCE_ROOT = Path(__file__).resolve().parents[1] / "src"
+sys.path.insert(0, str(SOURCE_ROOT))
 
 from task_orchestrator.categories import (
     category_config,
@@ -232,11 +238,13 @@ if __name__ == "__main__":
 - [ ] **步骤 2：运行测试并确认导入失败**
 
 ```powershell
-$env:PYTHONPATH='ucar_ws/src/task_orchestrator/src'
-python -m unittest ucar_ws/src/task_orchestrator/test/test_categories.py -v
+python ucar_ws/src/task_orchestrator/test/test_categories.py -v
 ```
 
 预期结果：测试失败，提示缺少 `task_orchestrator.categories`。
+
+测试文件通过自身位置计算 `src` 目录并加入 `sys.path`。这样可以避开
+Windows Python 在处理含中文父目录的 `PYTHONPATH` 时出现的编码问题。
 
 - [ ] **步骤 3：实现 `categories.py`**
 
