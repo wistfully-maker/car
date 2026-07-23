@@ -13,12 +13,14 @@ class PackageConfigTests(unittest.TestCase):
             "package.xml",
             "CMakeLists.txt",
             "setup.py",
+            "README.md",
             "src/task_orchestrator/__init__.py",
             "config/orchestrator.yaml",
             "launch/task_orchestrator.launch",
             "scripts/task_orchestrator_node.py",
             "scripts/voice_task_adapter_node.py",
             "scripts/tts_bridge_node.py",
+            "test/manual_simulation.md",
         ):
             self.assertTrue((ROOT / relative).is_file(), relative)
 
@@ -172,6 +174,35 @@ class PackageConfigTests(unittest.TestCase):
         ):
             if ("scripts/%s" % script) in cmake:
                 self.assertTrue((ROOT / "scripts" / script).is_file(), script)
+
+    def test_manual_simulation_uses_current_protocol(self):
+        manual = (ROOT / "test/manual_simulation.md").read_text(
+            encoding="utf-8"
+        )
+        normalized = manual.replace('\\"', '"')
+        for required in (
+            "physical_target_category",
+            "simulation_target_category",
+            '"status": "ready"',
+            '"status": "arrived"',
+            '"order": 1',
+            '"item_name": "手机"',
+            '"physical":',
+            '"simulation":',
+            '"target_workshop"',
+            '"selected_item"',
+            '"reason": "operator_cancel"',
+        ):
+            self.assertIn(required, normalized)
+        for obsolete in (
+            '"physical_category"',
+            '"simulation_category"',
+            '"sequence"',
+            '"classification"',
+            '"destination"',
+            '"item":',
+        ):
+            self.assertNotIn(obsolete, normalized)
 
 
 if __name__ == "__main__":

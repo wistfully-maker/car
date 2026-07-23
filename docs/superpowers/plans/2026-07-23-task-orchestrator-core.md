@@ -813,14 +813,19 @@ git commit -m "feat: bridge orchestrator speech to existing TTS"
 - [ ] **步骤 1：启动任务编排器包**
 
 ```bash
-roslaunch task_orchestrator task_orchestrator.launch
+roslaunch task_orchestrator task_orchestrator.launch \
+  enable_tts_bridge:=false
 ```
+
+手动发布 `/voice/speak_done` 时必须关闭真实 TTS 桥接；验证真实播报时使用
+默认启动，并且不要再人工发布完成消息。
 
 - [ ] **步骤 2：模拟各个外部模块**
 
 使用不同终端监听输出 topic，并发布以下模拟消息：
 
 - `/question`;
+- `/task/dependencies_ready`，包含当前 `task_id` 和 `status: "ready"`；
 - `/task/pickup_arrived`;
 - `/qr_item_search/result`;
 - `/llm/classify/result`;
@@ -828,6 +833,8 @@ roslaunch task_orchestrator task_orchestrator.launch
 - `/task/delivery_arrived`.
 
 全程使用同一个 `task_id`，其他 ID 使用编排器实际发布出来的值。
+所有模拟消息必须使用任务 4 的正式字段，并通过 `rostopic pub -1` 只发送
+一次。完整可复制命令见 `test/manual_simulation.md`。
 
 - [ ] **步骤 3：核对严格格式的播报文本**
 

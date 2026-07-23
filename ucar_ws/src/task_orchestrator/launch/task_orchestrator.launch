@@ -1,4 +1,7 @@
 <launch>
+  <arg name="enable_voice_adapter" default="true"/>
+  <arg name="enable_tts_bridge" default="true"/>
+
   <node pkg="task_orchestrator"
         type="task_orchestrator_node.py"
         name="task_orchestrator"
@@ -9,14 +12,16 @@
   <node pkg="task_orchestrator"
         type="voice_task_adapter_node.py"
         name="voice_task_adapter"
-        output="screen">
+        output="screen"
+        if="$(arg enable_voice_adapter)">
     <rosparam command="load"
               file="$(find task_orchestrator)/config/orchestrator.yaml"/>
   </node>
   <node pkg="task_orchestrator"
         type="tts_bridge_node.py"
         name="tts_bridge"
-        output="screen">
+        output="screen"
+        if="$(arg enable_tts_bridge)">
     <rosparam command="load"
               file="$(find task_orchestrator)/config/orchestrator.yaml"/>
   </node>
