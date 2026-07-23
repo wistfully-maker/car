@@ -1,7 +1,8 @@
 # llm_spark
 
 讯飞星火 X2 的 ROS 1 Noetic 双目标分类节点。订阅编排器的 protocol v1 请求，
-从三个 QR 候选中分别选择实物目标和仿真目标，并返回带原始 identity 的结果。
+并行执行两个短分类请求，从三个 QR 候选中分别选择实物目标和仿真目标，最后返回
+带原始 identity 的原子结果。类别、车间和候选顺序由本地可信映射补齐并校验。
 
 ## 启动
 
@@ -46,7 +47,7 @@ roslaunch llm_spark llm_spark.launch
 ## 参数
 
 - `~url`：Spark X2 HTTP 地址；
-- `~request_timeout`：单次 HTTP 超时，默认 30 秒；
+- `~request_timeout`：单次 HTTP 超时，默认 90 秒；
 - `~api_password`：可选私有参数，优先于 `SPARK_API_PASSWORD`。
 
 ## 测试

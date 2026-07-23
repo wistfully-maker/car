@@ -1,7 +1,7 @@
 <launch>
   <arg name="url"
        default="https://spark-api-open.xf-yun.com/x2/chat/completions"/>
-  <arg name="request_timeout" default="30.0"/>
+  <arg name="request_timeout" default="90.0"/>
 
   <node pkg="llm_spark"
         type="spark_llm_node.py"

@@ -109,6 +109,57 @@ def build_prompt(request):
     )
 
 
+def build_selection_prompt(request, target_category):
+    target_category = _category(target_category, "target_category")
+    candidate_names = "、".join(
+        item["item_name"] for item in request["candidates"]
+    )
+    return """目标母类：{category}
+候选物品：{candidates}
+
+判断候选物品中哪一个属于目标母类。只能返回候选中的一个名称。
+严格输出 JSON：{{"selected_item":"物品名称"}}""".format(
+        category=target_category,
+        candidates=candidate_names,
+    )
+
+
+def build_result_from_items(request, physical_item, simulation_item):
+    candidate_orders = {
+        item["item_name"]: item["order"]
+        for item in request["candidates"]
+    }
+
+    def trusted_selection(item, category, field):
+        item = _text(item, field)
+        if item not in candidate_orders:
+            raise ProtocolError("%s is not a candidate" % field)
+        return {
+            "selected_order": candidate_orders[item],
+            "selected_item": item,
+            "category": category,
+            "workshop": CATEGORY_WORKSHOPS[category],
+        }
+
+    return {
+        "protocol_version": PROTOCOL_VERSION,
+        "task_id": request["task_id"],
+        "request_id": request["request_id"],
+        "status": "success",
+        "physical": trusted_selection(
+            physical_item,
+            request["physical_target_category"],
+            "physical.selected_item",
+        ),
+        "simulation": trusted_selection(
+            simulation_item,
+            request["simulation_target_category"],
+            "simulation.selected_item",
+        ),
+        "message": "",
+    }
+
+
 def _selection(value, field, expected_category, candidates):
     if not isinstance(value, dict):
         raise ProtocolError("%s must be an object" % field)

@@ -5,6 +5,7 @@
 import json
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 
 import requests
 import rospy
@@ -13,20 +14,20 @@ from std_msgs.msg import String
 from llm_spark.protocol import (
     ProtocolError,
     build_error_result,
-    build_prompt,
-    build_success_result,
+    build_result_from_items,
+    build_selection_prompt,
     parse_request,
 )
 
 
-SYSTEM_PROMPT = """你是智慧工厂机器人分类决策模块。
+SYSTEM_PROMPT = """你是智慧工厂机器人分类模块。
 产品类别和车间只有：
 - 食品 -> 食品加工车间
 - 日用品 -> 日用品加工车间
 - 电子产品 -> 电子产品生产车间
 
-必须分别为实物目标和仿真目标选择一个候选物品。只能从候选列表选择，类别和车间
-必须与各自目标母类一致。只输出 JSON，不要解释，不要使用 Markdown。"""
+根据目标母类从候选列表选择唯一物品。只输出要求的 JSON，不要解释或使用
+Markdown。"""
 
 
 def clean_json(text):
@@ -44,7 +45,7 @@ class SparkLLMNode:
             "https://spark-api-open.xf-yun.com/x2/chat/completions",
         )
         self.request_timeout = float(
-            rospy.get_param("~request_timeout", 30.0)
+            rospy.get_param("~request_timeout", 90.0)
         )
         self.api_password = rospy.get_param(
             "~api_password",
@@ -93,6 +94,26 @@ class SparkLLMNode:
         ))
 
     def call_spark(self, request):
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            physical_future = executor.submit(
+                self.call_selection,
+                request,
+                request["physical_target_category"],
+            )
+            simulation_future = executor.submit(
+                self.call_selection,
+                request,
+                request["simulation_target_category"],
+            )
+            physical_item = physical_future.result()
+            simulation_item = simulation_future.result()
+        return build_result_from_items(
+            request,
+            physical_item,
+            simulation_item,
+        )
+
+    def call_selection(self, request, target_category):
         response = requests.post(
             self.url,
             headers={
@@ -103,7 +124,13 @@ class SparkLLMNode:
                 "model": "spark-x",
                 "messages": [
                     {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": build_prompt(request)},
+                    {
+                        "role": "user",
+                        "content": build_selection_prompt(
+                            request,
+                            target_category,
+                        ),
+                    },
                 ],
             },
             timeout=self.request_timeout,
@@ -112,7 +139,9 @@ class SparkLLMNode:
         response_json = response.json()
         answer = response_json["choices"][0]["message"]["content"]
         model_result = json.loads(clean_json(answer))
-        return build_success_result(request, model_result)
+        if not isinstance(model_result, dict):
+            raise ProtocolError("model result must be an object")
+        return model_result.get("selected_item")
 
 
 if __name__ == "__main__":

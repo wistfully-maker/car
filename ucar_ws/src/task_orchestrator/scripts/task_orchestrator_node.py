@@ -24,7 +24,7 @@ DEFAULT_TIMEOUTS = {
     "dependency_ready": 30.0,
     "pickup_navigation": 300.0,
     "qr_search": 120.0,
-    "llm_classification": 60.0,
+    "llm_classification": 120.0,
     "speech": 60.0,
     "delivery_navigation": 300.0,
     "cancel_ack": 15.0,

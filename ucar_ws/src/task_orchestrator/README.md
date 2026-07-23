@@ -147,7 +147,7 @@ rosrun task_orchestrator task_orchestrator_node.py \
   _timeouts/dependency_ready:=30.0 \
   _timeouts/pickup_navigation:=300.0 \
   _timeouts/qr_search:=120.0 \
-  _timeouts/llm_classification:=60.0 \
+  _timeouts/llm_classification:=120.0 \
   _timeouts/speech:=60.0 \
   _timeouts/delivery_navigation:=300.0 \
   _timeouts/cancel_ack:=15.0
@@ -254,7 +254,7 @@ timeouts:
   dependency_ready: 30.0
   pickup_navigation: 300.0
   qr_search: 120.0
-  llm_classification: 60.0
+  llm_classification: 120.0
   speech: 60.0
   delivery_navigation: 300.0
   cancel_ack: 15.0
