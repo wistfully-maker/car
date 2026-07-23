@@ -7,6 +7,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def string_literal(node):
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if type(node).__name__ == "Str":
+        return node.s
+    return None
+
+
 class PackageConfigTests(unittest.TestCase):
     def test_required_files_exist(self):
         for relative in (
@@ -37,9 +45,9 @@ class PackageConfigTests(unittest.TestCase):
             function = node.func
             if not isinstance(function, ast.Attribute) or not node.args:
                 continue
-            if not isinstance(node.args[0], ast.Constant):
+            topic = string_literal(node.args[0])
+            if topic is None:
                 continue
-            topic = node.args[0].value
             if function.attr == "Publisher":
                 publisher_topics.add(topic)
                 self.assertEqual("String", node.args[1].id)
@@ -126,9 +134,9 @@ class PackageConfigTests(unittest.TestCase):
             function = node.func
             if not isinstance(function, ast.Attribute) or not node.args:
                 continue
-            if not isinstance(node.args[0], ast.Constant):
+            topic = string_literal(node.args[0])
+            if topic is None:
                 continue
-            topic = node.args[0].value
             if function.attr == "Publisher":
                 publisher_topics.add(topic)
                 self.assertEqual("String", node.args[1].id)
@@ -152,9 +160,9 @@ class PackageConfigTests(unittest.TestCase):
             function = node.func
             if not isinstance(function, ast.Attribute) or not node.args:
                 continue
-            if not isinstance(node.args[0], ast.Constant):
+            topic = string_literal(node.args[0])
+            if topic is None:
                 continue
-            topic = node.args[0].value
             if function.attr == "Publisher":
                 publisher_topics.add(topic)
                 self.assertEqual("String", node.args[1].id)
