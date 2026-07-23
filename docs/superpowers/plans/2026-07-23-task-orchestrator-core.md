@@ -412,12 +412,19 @@ parse_cancel(raw_json, expected_task_id)
 
 测试必须验证：
 
-- protocol version is integer `1`;
+- `protocol_version` 必须是整数 `1`，布尔值 `true` 也不能冒充版本号；
 - 类别属于可信类别集合；
 - 二维码 `complete` 结果恰好包含三个互不重复的顺序号、名称和 URL；
+- QR 的 `searching` 只表示中间状态，不会被误判为完成；
+- LLM 选择的 order、名称、类别和车间必须能与本地上下文相互校验；
+- `failed` 或 `error` 状态必须附带非空错误信息；
 - 身份标识不匹配的消息会被拒绝。
 
 - [ ] **步骤 2：运行测试并确认失败**
+
+```powershell
+python ucar_ws/src/task_orchestrator/test/test_protocol.py -v
+```
 
 预期结果：提示缺少协议解析函数。
 
@@ -446,6 +453,10 @@ def require_text(value, field):
 每完成一个解析函数，只运行对应测试。不要在一次编辑中同时实现全部解析器。
 
 - [ ] **步骤 5：运行完整协议测试集**
+
+```powershell
+python ucar_ws/src/task_orchestrator/test/test_protocol.py -v
+```
 
 预期结果：全部协议测试在 Python 3.7 下通过。
 
