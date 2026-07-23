@@ -310,6 +310,12 @@ git commit -m "feat: add trusted task category mapping"
 
 ```python
 import unittest
+import sys
+from pathlib import Path
+
+
+SOURCE_ROOT = Path(__file__).resolve().parents[1] / "src"
+sys.path.insert(0, str(SOURCE_ROOT))
 
 from task_orchestrator.voice_parser import parse_categories
 
@@ -343,6 +349,10 @@ if __name__ == "__main__":
 
 - [ ] **步骤 2：运行测试并确认失败**
 
+```powershell
+python ucar_ws/src/task_orchestrator/test/test_voice_parser.py -v
+```
+
 预期结果：提示缺少 `voice_parser`。
 
 - [ ] **步骤 3：实现最小化、确定性的解析器**
@@ -364,6 +374,10 @@ def parse_categories(text):
 ```
 
 - [ ] **步骤 4：运行测试**
+
+```powershell
+python ucar_ws/src/task_orchestrator/test/test_voice_parser.py -v
+```
 
 预期结果：4 项测试全部通过。
 
