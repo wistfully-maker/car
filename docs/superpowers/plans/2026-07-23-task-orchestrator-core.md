@@ -492,13 +492,17 @@ git commit -m "feat: validate orchestrator protocol messages"
 
 依次输入：
 
-1. task request;
-2. dependencies ready;
-3. pickup arrived;
-4. QR complete;
+1. 合法的双母类任务请求；
+2. 依赖模块全部 ready；
+3. 到达物品领取区观察点；
+4. QR 返回三个完整候选；
 5. LLM 成功结果；
-6. speech done;
-7. delivery arrived.
+6. 播报成功完成；
+7. 到达实物目标车间。
+
+测试消息必须使用任务 4 已确认的正式字段。例如任务请求使用
+`physical_target_category` 和 `simulation_target_category`，QR 候选使用
+`order` 和 `item_name`，LLM 结果同时包含 `physical` 与 `simulation`。
 
 断言状态依次为：
 
@@ -513,6 +517,10 @@ COMPLETE
 ```
 
 - [ ] **步骤 2：运行测试并确认失败**
+
+```powershell
+python ucar_ws/src/task_orchestrator/test/test_orchestrator.py -v
+```
 
 预期结果：提示缺少 `TaskOrchestrator`。
 
@@ -537,11 +545,11 @@ self.last_status = None
 
 每次状态转换都必须：
 
-1. validate current state;
-2. validate identities;
-3. mutate state once;
-4. set the next deadline;
-5. return actions.
+1. 校验当前状态；
+2. 校验当前任务和阶段 identity；
+3. 只改变一次状态；
+4. 设置下一阶段的独立 deadline；
+5. 返回需要发布的动作。
 
 - [ ] **步骤 5：添加失败路径测试**
 
@@ -557,15 +565,21 @@ self.last_status = None
 
 覆盖以下情况：
 
-- duplicate same `task_id`;
-- different `task_id` while busy;
-- stale `search_id`;
-- stale `request_id`;
-- stale `speech_id`;
+- 重复的相同 `task_id`；
+- 忙碌时收到不同 `task_id`；
+- 过期 `search_id`；
+- 过期 `request_id`；
+- 过期 `speech_id`；
 - 重复收到成功结果；
 - 在每个活动状态中取消任务。
 
 - [ ] **步骤 7：运行完整纯 Python 测试集**
+
+```powershell
+python -m unittest discover `
+  -s ucar_ws/src/task_orchestrator/test `
+  -p "test_*.py" -v
+```
 
 预期结果：不导入 `rospy`，全部测试通过。
 
