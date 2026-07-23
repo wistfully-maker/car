@@ -702,15 +702,32 @@ git commit -m "feat: expose orchestrator ROS topics"
 
 每次收到非空 `/question` 时：
 
-1. call `parse_categories`;
-2. generate one UUID task ID;
-3. publish protocol-v1 JSON;
-4. reject text that does not contain exactly two categories;
-5. suppress an identical text received again within a configurable short debounce window.
+1. 调用 `parse_categories`；
+2. 生成一个 UUID 任务 ID；
+3. 发布 protocol v1 JSON；
+4. 使用正式字段 `physical_target_category`、
+   `simulation_target_category` 和 `raw_text`；
+5. 拒绝不包含恰好两个母类的文本；
+6. 在可配置的短去重窗口内抑制完全相同的识别文本。
+
+把不依赖 ROS 的逻辑放入
+`src/task_orchestrator/voice_adapter.py`，通过注入 clock 和 ID 工厂进行
+单元测试。`voice_task_adapter_node.py` 只负责 ROS 收发。
 
 - [ ] **步骤 3：运行单元测试和包测试**
 
-预期结果：解析器测试和 AST 测试全部通过。
+```powershell
+python ucar_ws/src/task_orchestrator/test/test_voice_adapter.py -v
+python -m unittest discover `
+  -s ucar_ws/src/task_orchestrator/test `
+  -p "test_*.py" -v
+```
+
+预期结果：适配逻辑、解析器和 AST 测试全部通过。
+
+创建脚本后，将 `scripts/voice_task_adapter_node.py` 加入
+`catkin_install_python()`，并在统一 launch 中常驻启动；不要在任务开始时
+动态启动或重启语音节点。
 
 - [ ] **步骤 4：让 Codex 审查并提交**
 

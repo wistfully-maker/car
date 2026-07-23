@@ -6,3 +6,6 @@ timeouts:
   speech: 60.0
   delivery_navigation: 300.0
   cancel_ack: 15.0
+
+voice_adapter:
+  debounce_seconds: 2.0

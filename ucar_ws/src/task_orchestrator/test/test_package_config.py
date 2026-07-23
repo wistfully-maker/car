@@ -17,6 +17,7 @@ class PackageConfigTests(unittest.TestCase):
             "config/orchestrator.yaml",
             "launch/task_orchestrator.launch",
             "scripts/task_orchestrator_node.py",
+            "scripts/voice_task_adapter_node.py",
         ):
             self.assertTrue((ROOT / relative).is_file(), relative)
 
@@ -71,11 +72,15 @@ class PackageConfigTests(unittest.TestCase):
 
     def test_launch_loads_parameters_inside_node_namespace(self):
         root = ET.parse(ROOT / "launch/task_orchestrator.launch").getroot()
-        node = root.find("node")
-        self.assertIsNotNone(node)
-        rosparam = node.find("rosparam")
-        self.assertIsNotNone(rosparam)
-        self.assertEqual("load", rosparam.attrib["command"])
+        nodes = {node.attrib["name"]: node for node in root.findall("node")}
+        self.assertEqual(
+            {"task_orchestrator", "voice_task_adapter"},
+            set(nodes),
+        )
+        for node in nodes.values():
+            rosparam = node.find("rosparam")
+            self.assertIsNotNone(rosparam)
+            self.assertEqual("load", rosparam.attrib["command"])
 
     def test_ros_adapter_uses_protocol_layer_and_public_core_api(self):
         source = (ROOT / "scripts/task_orchestrator_node.py").read_text(
@@ -104,6 +109,32 @@ class PackageConfigTests(unittest.TestCase):
         ]
         self.assertEqual(1, len(ready_calls))
         self.assertEqual([], ready_calls[0].args)
+
+    def test_voice_adapter_declares_exact_string_topics(self):
+        source = (ROOT / "scripts/voice_task_adapter_node.py").read_text(
+            encoding="utf-8"
+        )
+        tree = ast.parse(source)
+        publisher_topics = set()
+        subscriber_topics = set()
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            function = node.func
+            if not isinstance(function, ast.Attribute) or not node.args:
+                continue
+            if not isinstance(node.args[0], ast.Constant):
+                continue
+            topic = node.args[0].value
+            if function.attr == "Publisher":
+                publisher_topics.add(topic)
+                self.assertEqual("String", node.args[1].id)
+            elif function.attr == "Subscriber":
+                subscriber_topics.add(topic)
+                self.assertEqual("String", node.args[1].id)
+
+        self.assertIn("/voice/task_request", publisher_topics)
+        self.assertIn("/question", subscriber_topics)
 
     def test_cmake_installs_only_scripts_that_exist(self):
         cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")

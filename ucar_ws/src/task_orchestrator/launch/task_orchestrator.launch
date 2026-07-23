@@ -6,4 +6,11 @@
     <rosparam command="load"
               file="$(find task_orchestrator)/config/orchestrator.yaml"/>
   </node>
+  <node pkg="task_orchestrator"
+        type="voice_task_adapter_node.py"
+        name="voice_task_adapter"
+        output="screen">
+    <rosparam command="load"
+              file="$(find task_orchestrator)/config/orchestrator.yaml"/>
+  </node>
 </launch>
