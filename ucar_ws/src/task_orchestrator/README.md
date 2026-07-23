@@ -146,7 +146,7 @@ source ~/ucar_ws/devel/setup.bash
 rosrun task_orchestrator task_orchestrator_node.py \
   _timeouts/dependency_ready:=30.0 \
   _timeouts/pickup_navigation:=300.0 \
-  _timeouts/qr_search:=90.0 \
+  _timeouts/qr_search:=120.0 \
   _timeouts/llm_classification:=60.0 \
   _timeouts/speech:=60.0 \
   _timeouts/delivery_navigation:=300.0 \
@@ -253,7 +253,7 @@ IDLE
 timeouts:
   dependency_ready: 30.0
   pickup_navigation: 300.0
-  qr_search: 90.0
+  qr_search: 120.0
   llm_classification: 60.0
   speech: 60.0
   delivery_navigation: 300.0
@@ -275,7 +275,7 @@ tts_bridge:
 |---|---|---|
 | `dependency_ready` | 等待依赖就绪 | 调试时可增大；正式运行应由健康检查尽快返回 |
 | `pickup_navigation` | 导航到取货点 | 当前 300 秒，场地路线稳定后再缩短 |
-| `qr_search` | 等待三个 QR 候选 | 当前 90 秒，应大于 QR 节点一轮搜索上限 |
+| `qr_search` | 等待三个 QR 候选 | 当前 120 秒，大于 QR 节点 100 秒搜索上限 |
 | `llm_classification` | 等待双目标推理 | 网络不稳定时增大，不建议低于实际最慢响应 |
 | `speech` | 等待播报完成 | 必须大于 TTS 下载和播放总时长 |
 | `delivery_navigation` | 导航到实物车间 | 当前 300 秒，场地路线稳定后再缩短 |
