@@ -12,6 +12,7 @@ from task_orchestrator.protocol import (
     ProtocolError,
     parse_arrival,
     parse_cancel,
+    parse_dependencies_ready,
     parse_llm_result,
     parse_qr_result,
     parse_speech_done,
@@ -24,6 +25,24 @@ def encode(value):
 
 
 class ProtocolTests(unittest.TestCase):
+    def test_dependencies_ready_validates_task_identity(self):
+        message = {
+            "protocol_version": 1,
+            "task_id": "task-001",
+            "status": "ready",
+        }
+        self.assertEqual(
+            "ready",
+            parse_dependencies_ready(
+                encode(message), "task-001"
+            )["status"],
+        )
+        with self.assertRaises(ProtocolError):
+            parse_dependencies_ready(encode(message), "stale-task")
+        message["status"] = "starting"
+        with self.assertRaises(ProtocolError):
+            parse_dependencies_ready(encode(message), "task-001")
+
     def test_parses_valid_task_request(self):
         result = parse_task_request(
             encode(

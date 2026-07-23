@@ -180,6 +180,12 @@ COMPLETE
 | `/task/status` | `task_orchestrator` | 调试与上层模块 | 全流程状态、错误和完成信息 |
 | `/system/module_status` | 各常驻模块 | `task_orchestrator` | 模块 ready/error 与配置版本 |
 
+在各现有模块尚未统一实现 `/system/module_status` 发布前，核心联调阶段临时
+使用 `/task/dependencies_ready` 作为依赖检查门控。其 JSON 必须包含当前
+`task_id` 和 `status: "ready"`，只能让 `CHECKING_DEPENDENCIES` 进入下一
+状态。后续由模块健康状态聚合器生成同等事件，不能由赛事流程长期依赖人工
+发布该 topic。
+
 此外保留现有适配输入：
 
 | Topic | 发布方 | 订阅方 | 用途 |

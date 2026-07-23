@@ -1,0 +1,9 @@
+<launch>
+  <node pkg="task_orchestrator"
+        type="task_orchestrator_node.py"
+        name="task_orchestrator"
+        output="screen">
+    <rosparam command="load"
+              file="$(find task_orchestrator)/config/orchestrator.yaml"/>
+  </node>
+</launch>

@@ -86,6 +86,15 @@ def parse_task_request(raw_json):
     return message
 
 
+def parse_dependencies_ready(raw_json, expected_task_id):
+    message = load_object(raw_json)
+    _require_identity(message, "task_id", expected_task_id)
+    status = require_text(message.get("status"), "status")
+    if status != "ready":
+        raise ProtocolError("dependency status must be ready")
+    return message
+
+
 def parse_arrival(raw_json, expected_task_id, expected_goal_id):
     message = load_object(raw_json)
     _require_identity(message, "task_id", expected_task_id)

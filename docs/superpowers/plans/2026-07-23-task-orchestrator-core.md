@@ -401,6 +401,7 @@ git commit -m "feat: parse dual-category voice commands"
 
 ```python
 parse_task_request(raw_json)
+parse_dependencies_ready(raw_json, expected_task_id)
 parse_arrival(raw_json, expected_task_id, expected_goal_id)
 parse_qr_result(raw_json, expected_task_id, expected_search_id)
 parse_llm_result(raw_json, context)
@@ -630,34 +631,48 @@ timeouts:
 - 捕获回调异常并发布错误状态；
 - never execute `roslaunch`, `rosrun`, or `rosnode kill`.
 
+任务 6 使用临时集成门控 `/task/dependencies_ready`。消息必须携带
+`protocol_version: 1`、当前 `task_id` 和 `status: "ready"`。后续接入
+各常驻模块的 `/system/module_status` 后，由健康状态聚合器生成该门控，
+状态机本身不需要改变。
+
 - [ ] **步骤 4：创建 launch 文件**
 
-当任务 6～8 中的三个节点脚本全部创建后，在 `CMakeLists.txt` 末尾添加：
+任务 6 只安装当前已经存在的主节点：
 
 ```cmake
 catkin_install_python(PROGRAMS
   scripts/task_orchestrator_node.py
-  scripts/voice_task_adapter_node.py
-  scripts/tts_bridge_node.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 ```
 
+任务 7 和任务 8 创建另外两个脚本后，再把它们逐项加入，不能提前引用
+不存在的文件。
+
 ```xml
 <launch>
-  <rosparam command="load" file="$(find task_orchestrator)/config/orchestrator.yaml"/>
   <node pkg="task_orchestrator"
         type="task_orchestrator_node.py"
         name="task_orchestrator"
-        output="screen"/>
+        output="screen">
+    <rosparam command="load"
+              file="$(find task_orchestrator)/config/orchestrator.yaml"/>
+  </node>
 </launch>
 ```
 
+`rosparam` 必须放在 `<node>` 内部，使 YAML 中的 `timeouts` 加载到节点私有
+命名空间，与代码读取的 `~timeouts` 一致。
+
 - [ ] **步骤 5：运行包测试和 `py_compile`**
 
-```bash
-python3 -m py_compile scripts/task_orchestrator_node.py
-python3 -m unittest discover -s test -p 'test_*.py' -v
+```powershell
+python -m py_compile `
+  ucar_ws/src/task_orchestrator/scripts/task_orchestrator_node.py
+python -m unittest discover `
+  -s ucar_ws/src/task_orchestrator/test `
+  -p "test_*.py" -v
 ```
 
 - [ ] **步骤 6：让 Codex 审查并提交**

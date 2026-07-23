@@ -9,3 +9,8 @@ find_package(catkin REQUIRED COMPONENTS
 catkin_python_setup()
 catkin_package()
 
+catkin_install_python(PROGRAMS
+  scripts/task_orchestrator_node.py
+  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
+

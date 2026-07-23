@@ -294,6 +294,10 @@ class TaskOrchestrator:
         self._transition(self.CANCELLED)
         self._publish_status("cancelled", message.get("reason") or "cancelled")
 
+    def on_internal_error(self, message):
+        if self.state in self._ACTIVE_STATES:
+            self._fail(message or "internal orchestrator error")
+
     def tick(self):
         if self.state not in self._ACTIVE_STATES or self.deadline is None:
             return

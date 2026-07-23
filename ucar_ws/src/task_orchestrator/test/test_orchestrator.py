@@ -200,6 +200,16 @@ class OrchestratorHappyPathTests(unittest.TestCase):
 
 
 class OrchestratorFailureTests(unittest.TestCase):
+    def test_adapter_internal_error_uses_public_failure_api(self):
+        h = Harness()
+        h.reach("WAITING_LLM")
+        h.orch.on_internal_error("callback crashed")
+        self.assertEqual("ERROR", h.orch.state)
+        self.assertEqual(
+            "callback crashed",
+            h.actions("publish_status")[-1]["message"],
+        )
+
     def test_stage_failures_enter_error_without_downstream_action(self):
         cases = (
             ("NAVIGATING_TO_PICKUP", lambda h: h.pickup_arrived("failed")),
