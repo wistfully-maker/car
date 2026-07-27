@@ -588,7 +588,7 @@ git commit -m "feat: add conservative holonomic DWA profile"
 - 删除：`ucar_ws/src/ucar_nav/launch/config/amcl/amcl_omni.launch`
 - 删除：`ucar_ws/src/ucar_nav/launch/config/amcl/amcl_diff.launch`
 - 删除：`ucar_ws/src/ucar_nav/launch/config/move_base/*.yaml`
-- 保留：`ucar_ws/src/ucar_nav/launch/config/rviz/tebrviz.rviz`
+- 删除：`ucar_ws/src/ucar_nav/launch/config/rviz/tebrviz.rviz`
 
 - [ ] **步骤 1：将当前 AMCL 全向参数转换为唯一 YAML**
 
@@ -650,6 +650,7 @@ launch/config/move_base/move_base_params.yaml
 launch/config/move_base/my_navigation.yaml
 launch/config/move_base/dwa_local_planner_params.yaml
 launch/config/move_base/teb_local_planner_params.yaml
+launch/config/rviz/tebrviz.rviz
 ```
 
 - [ ] **步骤 3：运行完整静态测试**
