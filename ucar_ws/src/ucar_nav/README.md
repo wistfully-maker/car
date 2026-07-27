@@ -64,7 +64,8 @@ ucar_navigation.launch
 ```powershell
 cd D:\program_sec\智能车\.worktrees\navigation-safety
 
-tar -czf "$env:TEMP\ucar_nav-deploy.tar.gz" `
+tar --exclude="__pycache__" --exclude="*.pyc" `
+  -czf "$env:TEMP\ucar_nav-deploy.tar.gz" `
   -C .\ucar_ws\src ucar_nav
 
 scp "$env:TEMP\ucar_nav-deploy.tar.gz" `

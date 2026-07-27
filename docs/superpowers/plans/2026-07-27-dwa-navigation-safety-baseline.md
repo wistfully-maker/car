@@ -907,7 +907,8 @@ printf '%s\n' "$HOME/ucar_nav_backups/ucar_nav-${stamp}"
 - [ ] **步骤 3：从 Windows 部署**
 
 ```powershell
-tar -czf "$env:TEMP\ucar_nav-deploy.tar.gz" `
+tar --exclude="__pycache__" --exclude="*.pyc" `
+  -czf "$env:TEMP\ucar_nav-deploy.tar.gz" `
   -C D:\program_sec\智能车\.worktrees\navigation-safety\ucar_ws\src `
   ucar_nav
 
