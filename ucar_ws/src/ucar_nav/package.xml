@@ -58,9 +58,19 @@
   <build_export_depend>rospy</build_export_depend>
   <build_export_depend>std_msgs</build_export_depend>
   <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>amcl</exec_depend>
+  <exec_depend>dwa_local_planner</exec_depend>
+  <exec_depend>global_planner</exec_depend>
+  <exec_depend>map_server</exec_depend>
+  <exec_depend>move_base</exec_depend>
   <exec_depend>roscpp</exec_depend>
   <exec_depend>rospy</exec_depend>
   <exec_depend>std_msgs</exec_depend>
+  <exec_depend>tf</exec_depend>
+  <exec_depend>ucar_controller</exec_depend>
+  <exec_depend>usb_cam</exec_depend>
+  <exec_depend>ydlidar</exec_depend>
+  <test_depend>python3-yaml</test_depend>
 
 
   <!-- The export tag contains other, unspecified, tags -->
