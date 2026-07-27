@@ -160,6 +160,18 @@ include_directories(
 
 ## Mark executable scripts (Python etc.) for installation
 ## in contrast to setup.py, you can choose the destination
+install(PROGRAMS
+  scripts/capture_nav_diagnostics.sh
+  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
+
+install(DIRECTORY
+  launch
+  config
+  maps
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+)
+
 # install(PROGRAMS
 #   scripts/my_python_script
 #   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
