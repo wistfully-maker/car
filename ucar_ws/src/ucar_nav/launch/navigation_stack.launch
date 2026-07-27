@@ -1,0 +1,47 @@
+<launch>
+  <arg name="map_file"
+       default="$(find ucar_nav)/maps/map.yaml"/>
+
+  <node name="map_server"
+        pkg="map_server"
+        type="map_server"
+        args="$(arg map_file)"
+        output="screen">
+    <param name="frame_id" value="map"/>
+  </node>
+
+  <node name="amcl"
+        pkg="amcl"
+        type="amcl"
+        output="screen">
+    <rosparam command="load"
+              file="$(find ucar_nav)/config/amcl/amcl_omni.yaml"/>
+  </node>
+
+  <node name="move_base"
+        pkg="move_base"
+        type="move_base"
+        output="screen"
+        respawn="false">
+    <param name="base_global_planner"
+           value="global_planner/GlobalPlanner"/>
+    <param name="base_local_planner"
+           value="dwa_local_planner/DWAPlannerROS"/>
+    <rosparam command="load"
+              file="$(find ucar_nav)/config/costmap/common.yaml"
+              ns="global_costmap"/>
+    <rosparam command="load"
+              file="$(find ucar_nav)/config/costmap/common.yaml"
+              ns="local_costmap"/>
+    <rosparam command="load"
+              file="$(find ucar_nav)/config/costmap/global.yaml"/>
+    <rosparam command="load"
+              file="$(find ucar_nav)/config/costmap/local.yaml"/>
+    <rosparam command="load"
+              file="$(find ucar_nav)/config/global_planner.yaml"/>
+    <rosparam command="load"
+              file="$(find ucar_nav)/config/local_planners/dwa_safe.yaml"/>
+    <rosparam command="load"
+              file="$(find ucar_nav)/config/move_base.yaml"/>
+  </node>
+</launch>
