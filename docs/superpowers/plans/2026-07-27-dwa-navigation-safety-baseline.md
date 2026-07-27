@@ -873,7 +873,7 @@ git commit -m "docs: add DWA navigation operations guide"
 **文件：**
 
 - 部署：`ucar_ws/src/ucar_nav/**`
-- 备份：小车 `/home/ucar/ucar_ws/src/ucar_nav.backup-<时间>`
+- 备份：小车 `/home/ucar/ucar_nav_backups/ucar_nav-<时间>`
 
 - [ ] **步骤 1：确认车上导航节点全部停止**
 
@@ -896,9 +896,10 @@ rosnode ping -c 1 /move_base
 
 ```bash
 stamp="$(date +%Y%m%d-%H%M%S)"
+mkdir -p "$HOME/ucar_nav_backups"
 cp -a ~/ucar_ws/src/ucar_nav \
-  "$HOME/ucar_ws/src/ucar_nav.backup-${stamp}"
-printf '%s\n' "$HOME/ucar_ws/src/ucar_nav.backup-${stamp}"
+  "$HOME/ucar_nav_backups/ucar_nav-${stamp}"
+printf '%s\n' "$HOME/ucar_nav_backups/ucar_nav-${stamp}"
 ```
 
 记录实际备份路径到 HANDOFF。
@@ -906,9 +907,21 @@ printf '%s\n' "$HOME/ucar_ws/src/ucar_nav.backup-${stamp}"
 - [ ] **步骤 3：从 Windows 部署**
 
 ```powershell
-scp -r `
-  D:\program_sec\智能车\.worktrees\navigation-safety\ucar_ws\src\ucar_nav `
-  ucar@172.20.10.4:/home/ucar/ucar_ws/src/
+tar -czf "$env:TEMP\ucar_nav-deploy.tar.gz" `
+  -C D:\program_sec\智能车\.worktrees\navigation-safety\ucar_ws\src `
+  ucar_nav
+
+scp "$env:TEMP\ucar_nav-deploy.tar.gz" `
+  ucar@172.20.10.4:/tmp/ucar_nav-deploy.tar.gz
+```
+
+在小车端将归档解压到唯一临时目录，再同步到已确认的包目录：
+
+```bash
+staging="$(mktemp -d /tmp/ucar-nav-deploy.XXXXXX)"
+tar -xzf /tmp/ucar_nav-deploy.tar.gz -C "$staging"
+rsync -a --delete "$staging/ucar_nav/" \
+  "$HOME/ucar_ws/src/ucar_nav/"
 ```
 
 - [ ] **步骤 4：车端编译**

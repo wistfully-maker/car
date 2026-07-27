@@ -57,29 +57,45 @@ ucar_navigation.launch
 
 ## 3. 部署前准备
 
-### 3.1 Windows 上传
+### 3.1 Windows 打包并上传到暂存区
 
 在 PowerShell：
 
 ```powershell
 cd D:\program_sec\智能车\.worktrees\navigation-safety
 
-scp -r .\ucar_ws\src\ucar_nav `
-  ucar@172.20.10.4:/home/ucar/ucar_ws/src/
+tar -czf "$env:TEMP\ucar_nav-deploy.tar.gz" `
+  -C .\ucar_ws\src ucar_nav
+
+scp "$env:TEMP\ucar_nav-deploy.tar.gz" `
+  ucar@172.20.10.4:/tmp/ucar_nav-deploy.tar.gz
 
 ssh ucar@172.20.10.4
 ```
 
-首次覆盖前必须先在小车备份：
+不要直接用 `scp -r` 覆盖正式目录，因为它不会删除已经从新版移除的旧参数文件。
+
+### 3.2 车端备份与同步
+
+备份必须放在 catkin 工作空间外，避免 catkin 扫描出两个同名 `ucar_nav` 包：
 
 ```bash
 stamp="$(date +%Y%m%d-%H%M%S)"
+mkdir -p "$HOME/ucar_nav_backups"
 cp -a ~/ucar_ws/src/ucar_nav \
-  "$HOME/ucar_ws/src/ucar_nav.backup-${stamp}"
-printf '%s\n' "$HOME/ucar_ws/src/ucar_nav.backup-${stamp}"
+  "$HOME/ucar_nav_backups/ucar_nav-${stamp}"
+printf '%s\n' "$HOME/ucar_nav_backups/ucar_nav-${stamp}"
+
+staging="$(mktemp -d /tmp/ucar-nav-deploy.XXXXXX)"
+tar -xzf /tmp/ucar_nav-deploy.tar.gz -C "$staging"
+rsync -a --delete "$staging/ucar_nav/" \
+  "$HOME/ucar_ws/src/ucar_nav/"
 ```
 
-### 3.2 编译
+`rsync --delete` 只允许将已经核对的暂存包同步到明确的
+`/home/ucar/ucar_ws/src/ucar_nav/`，不得对 `src/` 或工作空间根目录执行。
+
+### 3.3 编译
 
 ```bash
 source /opt/ros/noetic/setup.bash

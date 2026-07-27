@@ -115,12 +115,14 @@ map.pgm:
 
 ## 8. 小车备份与部署记录
 
-当前新版尚未部署，因此尚无本轮备份路径。执行部署前必须：
+当前新版尚未部署，因此尚无本轮备份路径。备份必须位于 catkin 工作空间外，执行
+部署前必须：
 
 ```bash
 stamp="$(date +%Y%m%d-%H%M%S)"
+mkdir -p "$HOME/ucar_nav_backups"
 cp -a ~/ucar_ws/src/ucar_nav \
-  "$HOME/ucar_ws/src/ucar_nav.backup-${stamp}"
+  "$HOME/ucar_nav_backups/ucar_nav-${stamp}"
 ```
 
 部署完成后将实际备份路径写回本节。

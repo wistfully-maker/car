@@ -113,6 +113,12 @@ class NavigationConfigTests(unittest.TestCase):
         self.assertFalse(move_base["recovery_behavior_enabled"])
         self.assertFalse(move_base["clearing_rotation_allowed"])
 
+    def test_docs_keep_backups_outside_catkin_source(self):
+        for relative_path in ("README.md", "HANDOFF.md"):
+            text = (PACKAGE / relative_path).read_text(encoding="utf-8")
+            self.assertNotIn("ucar_ws/src/ucar_nav.backup", text)
+            self.assertIn("ucar_nav_backups", text)
+
 
 if __name__ == "__main__":
     unittest.main()
