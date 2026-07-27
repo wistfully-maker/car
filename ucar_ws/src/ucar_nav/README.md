@@ -402,6 +402,21 @@ rosparam get /move_base/local_costmap/inflation_layer
 - 低速原地旋转；
 - 检查实际方向、里程计方向和停止距离。
 
+使用受限测试脚本一次只测试一个轴：
+
+```bash
+rosrun ucar_nav controlled_twist_test.py --x 0.10 --duration 2.0
+rosrun ucar_nav controlled_twist_test.py --x -0.10 --duration 2.0
+rosrun ucar_nav controlled_twist_test.py --y 0.08 --duration 2.0
+rosrun ucar_nav controlled_twist_test.py --y -0.08 --duration 2.0
+rosrun ucar_nav controlled_twist_test.py --yaw 0.20 --duration 2.0
+rosrun ucar_nav controlled_twist_test.py --yaw -0.20 --duration 2.0
+```
+
+脚本限制平移绝对值不超过 `0.10 m/s`、旋转绝对值不超过
+`0.25 rad/s`、持续时间不超过 2 秒，并在结束或异常时连续发送零速度。它只用于
+有人现场看护的底盘运动学测试，不用于比赛导航。
+
 ### 第 2 级：单墙
 
 - 平行墙面低速直行；
@@ -504,10 +519,11 @@ python -m unittest discover `
 
 截至本 README 初稿：
 
-- Windows 静态配置测试：9 项通过；
+- Windows 静态配置与受控运动脚本测试：15 项通过；
 - 车端部署与构建：已完成，原包备份见 `HANDOFF.md`；
 - 无运动参数验证：已通过，未观察到 `/cmd_vel` 输出；
 - 雷达 TF 与导航 TF 链：已在静止实车上验证；
+- 空旷地六方向运动学：已通过；
 - 直角弯三次验收：尚未执行；
 - 完整路线三次验收：尚未执行。
 

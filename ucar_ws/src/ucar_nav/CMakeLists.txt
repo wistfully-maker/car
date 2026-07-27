@@ -162,6 +162,7 @@ include_directories(
 ## in contrast to setup.py, you can choose the destination
 install(PROGRAMS
   scripts/capture_nav_diagnostics.sh
+  scripts/controlled_twist_test.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
