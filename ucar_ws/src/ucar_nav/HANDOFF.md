@@ -111,12 +111,32 @@ map.pgm:
 
 | 日期 | Commit | 地图 | 起点/目标 | 最大速度 | 最小墙距 | 耗时 | 结果 |
 |---|---|---|---|---:|---:|---:|---|
-| 2026-07-27 | 初始安全配置 | `map.yaml` | 未进行运动测试 | 0.25 m/s | 未测量 | 未测量 | 等待部署 |
+| 2026-07-27 | `efb4418` | `map.yaml` | 无目标运行检查 | 0.25 m/s | 未测量 | 未测量 | 通过；未发送目标、无 `/cmd_vel` 输出 |
 
 ## 8. 小车备份与部署记录
 
-当前新版尚未部署，因此尚无本轮备份路径。备份必须位于 catkin 工作空间外，执行
-部署前必须：
+安全基线已部署至 `/home/ucar/ucar_ws/src/ucar_nav`。原导航包备份位于：
+
+```text
+/home/ucar/ucar_nav_backups/ucar_nav-pre-dwa-20260727-01
+```
+
+部署后已确认：
+
+- 备份中存在 `package.xml`；
+- 车端包与部署暂存目录逐文件一致；
+- 新的 `config/local_planners/dwa_safe.yaml` 存在；
+- 旧 TEB 参数和 RViz 文件已移除；
+- `catkin_make --pkg ucar_nav` 成功；
+- 三个 launch 文件均可由 `roslaunch --nodes` 正确解析；
+- 无目标启动时雷达约 10 Hz、里程计约 20 Hz；
+- `base_link -> laser_frame` 为 `[0, 0, 0.13]`，旋转为单位四元数；
+- `map -> base_link`、局部代价地图均可正常读取；
+- 运行日志没有 ERROR，3 秒观察期内 `/cmd_vel` 无输出；
+- 诊断快照位于 `/tmp/ucar-nav-diagnostics-no-goal/20260727-120038`；
+- 检查结束后已关闭本轮节点，尚未进行运动测试。
+
+后续再次部署时，备份仍必须位于 catkin 工作空间外：
 
 ```bash
 stamp="$(date +%Y%m%d-%H%M%S)"
