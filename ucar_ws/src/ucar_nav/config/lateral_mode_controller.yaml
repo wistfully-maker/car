@@ -1,0 +1,16 @@
+controller_rate: 5.0
+plan_topic: /move_base/NavfnROS/plan
+map_frame: map
+base_frame: base_link
+lookahead_distance: 0.8
+resample_spacing: 0.10
+corner_enter_angle_deg: 45.0
+corner_exit_angle_deg: 10.0
+heading_exit_tolerance_deg: 10.0
+exit_hold_time: 0.5
+plan_timeout: 1.0
+straight_max_vel_y: 0.02
+straight_acc_lim_y: 0.20
+corner_max_vel_y: 0.18
+corner_acc_lim_y: 0.60
+reconfigure_namespace: /move_base/TebLocalPlannerROS
