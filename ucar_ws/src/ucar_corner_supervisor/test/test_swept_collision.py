@@ -55,7 +55,7 @@ class SweptCollisionTests(unittest.TestCase):
 
     def test_wall_in_outer_corner_sweep_blocks_turn(self):
         grid = empty_grid()
-        set_cost(grid, 0.14, 0.17, 254)
+        set_cost(grid, 0.17, 0.07, 254)
         result = check_rotation_sweep(
             grid,
             pose=(0.0, 0.0, 0.0),
@@ -108,7 +108,7 @@ class SweptCollisionTests(unittest.TestCase):
 
     def test_clockwise_turn_checks_full_sweep(self):
         grid = empty_grid()
-        set_cost(grid, 0.14, -0.17, 254)
+        set_cost(grid, 0.17, -0.07, 254)
         result = check_rotation_sweep(
             grid,
             pose=(0.0, 0.0, 0.0),
