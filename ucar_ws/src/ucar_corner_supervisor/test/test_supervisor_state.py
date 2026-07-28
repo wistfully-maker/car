@@ -101,6 +101,13 @@ class SupervisorStateTests(unittest.TestCase):
         self.assertEqual(result.state, "FOLLOWING")
         self.assertEqual(result.command, (0.0, 0.0, 0.0))
 
+    def test_stale_raw_command_cannot_trigger_a_near_corner(self):
+        result = self.update(
+            raw_fresh=False, corner=corner(distance=0.20)
+        )
+        self.assertEqual(result.state, "FOLLOWING")
+        self.assertEqual(result.command, (0.0, 0.0, 0.0))
+
     def test_missing_tf_during_goal_enters_error(self):
         result = self.update(tf_valid=False)
         self.assertEqual(result.state, "ERROR")

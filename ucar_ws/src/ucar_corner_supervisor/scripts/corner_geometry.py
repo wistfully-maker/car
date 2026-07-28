@@ -114,6 +114,10 @@ class Supervisor:
                 self.state, (0.0, 0.0, self._turn_command(yaw))
             )
 
+        if not raw_fresh:
+            self.state = "FOLLOWING"
+            return self._stop("raw velocity command is stale")
+
         if self.corner_suppressed:
             if corner is None or corner.distance >= self.config.release_distance:
                 self.corner_suppressed = False
@@ -127,8 +131,6 @@ class Supervisor:
             )
 
         self.state = "FOLLOWING"
-        if not raw_fresh:
-            return self._stop("raw velocity command is stale")
         x, y, theta = raw_command
         lateral_limit = self.config.following_max_lateral
         y = max(-lateral_limit, min(lateral_limit, y))
