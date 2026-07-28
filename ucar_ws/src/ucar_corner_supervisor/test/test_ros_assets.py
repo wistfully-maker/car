@@ -57,6 +57,18 @@ class RosAssetTests(unittest.TestCase):
         self.assertEqual(nodes[0].attrib["type"], "corner_supervisor_node.py")
         self.assertEqual(root.findall("include"), [])
 
+    def test_integration_launch_wraps_navigation_without_legacy_controller(self):
+        root = ET.parse(
+            str(PACKAGE_DIR / "launch/navigation_with_corner_supervisor.launch")
+        ).getroot()
+        xml = ET.tostring(root, encoding="unicode")
+        self.assertIn('from="/cmd_vel"', xml)
+        self.assertIn('to="/move_base/cmd_vel_raw"', xml)
+        self.assertIn('name="enable_lateral_mode_controller"', xml)
+        self.assertIn('value="false"', xml)
+        self.assertIn("navigation_stack.launch", xml)
+        self.assertIn("corner_supervisor.launch", xml)
+
 
 if __name__ == "__main__":
     unittest.main()

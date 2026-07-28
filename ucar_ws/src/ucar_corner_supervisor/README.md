@@ -90,6 +90,16 @@ rospack find ucar_corner_supervisor
 
 本包启动后不会自行发车；没有活动目标时始终输出零速度。
 
+若希望在不修改 `ucar_nav` 的情况下完成一次独立实测，可在关闭旧导航 launch 后使用：
+
+```bash
+roslaunch ucar_corner_supervisor navigation_with_corner_supervisor.launch
+```
+
+该入口会复用 `ucar_nav/navigation_stack.launch`，强制关闭旧横移控制器，只在其作用域内
+把 `/cmd_vel` 重映射为 `/move_base/cmd_vel_raw`，并启动监督器。底盘和雷达 bringup
+仍需提前运行。
+
 ## 5. 停止
 
 前台运行时按 `Ctrl+C`。若在其他终端或后台运行：
