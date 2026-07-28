@@ -185,6 +185,14 @@ class NavigationConfigTests(unittest.TestCase):
             if group is not teb_group:
                 self.assertEqual([], group.findall("include"))
 
+    def test_lateral_controller_keeps_sparse_navfn_plan_valid(self):
+        controller = load_yaml("config/lateral_mode_controller.yaml")
+        self.assertGreaterEqual(
+            controller["plan_timeout"],
+            300.0,
+            "Navfn may publish only when replanning, not every control cycle",
+        )
+
     def test_teb_safe_profile_matches_current_safety_limits(self):
         teb = load_yaml(
             "config/local_planners/teb_safe.yaml"
