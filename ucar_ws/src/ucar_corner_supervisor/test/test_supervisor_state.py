@@ -62,6 +62,33 @@ class SupervisorStateTests(unittest.TestCase):
         self.assertEqual(result.command[:2], (0.0, 0.0))
         self.assertAlmostEqual(result.command[2], 0.35)
 
+    def test_unreliable_near_corner_enters_blocked(self):
+        result = self.update(
+            corner=corner(distance=0.24), corner_confident=False
+        )
+        self.assertEqual(result.state, "BLOCKED")
+        self.assertEqual(result.command, (0.0, 0.0, 0.0))
+
+    def test_unsafe_sweep_blocks_turn_entry(self):
+        result = self.update(
+            corner=corner(distance=0.24), sweep_safe=False
+        )
+        self.assertEqual(result.state, "BLOCKED")
+        self.assertEqual(result.command, (0.0, 0.0, 0.0))
+
+    def test_new_obstacle_during_turn_enters_blocked(self):
+        self.update(corner=corner(distance=0.24))
+        result = self.update(now=0.1, sweep_safe=False)
+        self.assertEqual(result.state, "BLOCKED")
+        self.assertEqual(result.command, (0.0, 0.0, 0.0))
+
+    def test_blocked_latches_until_goal_is_cleared(self):
+        self.update(corner=corner(distance=0.24), sweep_safe=False)
+        still_blocked = self.update(now=1.0, corner=None, sweep_safe=True)
+        cleared = self.update(now=1.1, goal_active=False)
+        self.assertEqual(still_blocked.state, "BLOCKED")
+        self.assertEqual(cleared.state, "IDLE")
+
     def test_turning_uses_minimum_angular_speed_near_target(self):
         self.update(corner=corner(distance=0.24))
         result = self.update(now=0.1, yaw=math.radians(80))

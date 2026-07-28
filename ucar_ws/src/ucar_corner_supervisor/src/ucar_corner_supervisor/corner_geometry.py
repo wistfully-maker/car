@@ -74,11 +74,13 @@ class Supervisor:
         yaw,
         corner,
         raw_command,
+        corner_confident=True,
+        sweep_safe=True,
     ):
         if not goal_active:
             self._clear_goal_state()
             return self._stop()
-        if self.state == "ERROR":
+        if self.state in ("ERROR", "BLOCKED"):
             return self._stop("supervisor error is latched until the goal clears")
         if not tf_valid:
             self.state = "ERROR"
@@ -88,6 +90,9 @@ class Supervisor:
             self.state = "FOLLOWING"
 
         if self.state in ("TURNING", "EXIT_ALIGN"):
+            if not sweep_safe:
+                self.state = "BLOCKED"
+                return self._stop("rotation sweep became unsafe")
             if not raw_fresh:
                 self.state = "ERROR"
                 return self._stop("raw velocity command became stale during turn")
@@ -120,6 +125,12 @@ class Supervisor:
             if corner is None or corner.distance >= self.config.release_distance:
                 self.corner_suppressed = False
         elif corner is not None and corner.distance <= self.config.trigger_distance:
+            if not corner_confident:
+                self.state = "BLOCKED"
+                return self._stop("corner direction fit is unreliable")
+            if not sweep_safe:
+                self.state = "BLOCKED"
+                return self._stop("rotation sweep is unsafe")
             self.state = "TURNING"
             self.target_heading = corner.exit_heading
             self.turn_started_at = now
