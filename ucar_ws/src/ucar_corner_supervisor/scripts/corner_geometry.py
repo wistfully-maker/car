@@ -14,6 +14,120 @@ class CornerObservation:
     point: tuple
 
 
+@dataclass(frozen=True)
+class SupervisorConfig:
+    trigger_distance: float = 0.25
+    release_distance: float = 0.45
+    following_max_lateral: float = 0.02
+    turn_max_angular: float = 0.35
+    turn_min_angular: float = 0.18
+    turn_kp: float = 0.9
+    heading_tolerance: float = math.radians(8.0)
+    heading_hold_time: float = 0.30
+    turn_timeout: float = 8.0
+
+
+@dataclass(frozen=True)
+class SupervisorResult:
+    state: str
+    command: tuple
+    message: str = ""
+
+
+class Supervisor:
+    """Deterministic velocity-mux state machine, independent of ROS."""
+
+    def __init__(self, config):
+        self.config = config
+        self.state = "IDLE"
+        self.target_heading = None
+        self.turn_started_at = None
+        self.aligned_since = None
+        self.corner_suppressed = False
+
+    def _stop(self, message=""):
+        return SupervisorResult(self.state, (0.0, 0.0, 0.0), message)
+
+    def _clear_goal_state(self):
+        self.state = "IDLE"
+        self.target_heading = None
+        self.turn_started_at = None
+        self.aligned_since = None
+        self.corner_suppressed = False
+
+    def _turn_command(self, yaw):
+        error = normalize_angle(self.target_heading - yaw)
+        if abs(error) <= self.config.heading_tolerance:
+            return 0.0
+        speed = min(self.config.turn_max_angular, self.config.turn_kp * abs(error))
+        speed = max(self.config.turn_min_angular, speed)
+        return math.copysign(speed, error)
+
+    def update(
+        self,
+        now,
+        goal_active,
+        raw_fresh,
+        tf_valid,
+        yaw,
+        corner,
+        raw_command,
+    ):
+        if not goal_active:
+            self._clear_goal_state()
+            return self._stop()
+        if self.state == "ERROR":
+            return self._stop("supervisor error is latched until the goal clears")
+        if not tf_valid:
+            self.state = "ERROR"
+            return self._stop("map to base_link transform is unavailable")
+
+        if self.state == "IDLE":
+            self.state = "FOLLOWING"
+
+        if self.state in ("TURNING", "EXIT_ALIGN"):
+            if now - self.turn_started_at > self.config.turn_timeout:
+                self.state = "ERROR"
+                return self._stop("turn timeout")
+            heading_error = abs(normalize_angle(self.target_heading - yaw))
+            if heading_error <= self.config.heading_tolerance:
+                if self.aligned_since is None:
+                    self.aligned_since = now
+                self.state = "EXIT_ALIGN"
+                if now - self.aligned_since >= self.config.heading_hold_time:
+                    self.state = "FOLLOWING"
+                    self.target_heading = None
+                    self.turn_started_at = None
+                    self.aligned_since = None
+                    self.corner_suppressed = True
+                return self._stop()
+            self.aligned_since = None
+            self.state = "TURNING"
+            return SupervisorResult(
+                self.state, (0.0, 0.0, self._turn_command(yaw))
+            )
+
+        if self.corner_suppressed:
+            if corner is None or corner.distance > self.config.release_distance:
+                self.corner_suppressed = False
+        elif corner is not None and corner.distance <= self.config.trigger_distance:
+            self.state = "TURNING"
+            self.target_heading = corner.exit_heading
+            self.turn_started_at = now
+            self.aligned_since = None
+            return SupervisorResult(
+                self.state, (0.0, 0.0, self._turn_command(yaw))
+            )
+
+        self.state = "FOLLOWING"
+        if not raw_fresh:
+            return self._stop("raw velocity command is stale")
+        x, y, theta = raw_command
+        lateral_limit = self.config.following_max_lateral
+        y = max(-lateral_limit, min(lateral_limit, y))
+        return SupervisorResult(self.state, (x, y, theta))
+
+
 def normalize_angle(angle):
     """Return an angle in [-pi, pi)."""
     return (angle + math.pi) % (2.0 * math.pi) - math.pi
