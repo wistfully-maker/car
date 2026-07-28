@@ -65,7 +65,7 @@ class TebLateralModeController:
             rospy.get_param("~corner_max_vel_x_backwards", 0.02)
         )
         self.corner_max_vel_y = float(
-            rospy.get_param("~corner_max_vel_y", 0.18)
+            rospy.get_param("~corner_max_vel_y", 0.10)
         )
         self.corner_acc_lim_y = float(
             rospy.get_param("~corner_acc_lim_y", 0.60)

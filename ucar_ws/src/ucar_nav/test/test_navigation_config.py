@@ -199,6 +199,7 @@ class NavigationConfigTests(unittest.TestCase):
         self.assertEqual(0.10, controller["straight_max_vel_x_backwards"])
         self.assertEqual(0.20, controller["corner_max_vel_x"])
         self.assertEqual(0.02, controller["corner_max_vel_x_backwards"])
+        self.assertEqual(0.10, controller["corner_max_vel_y"])
 
     def test_teb_safe_profile_matches_current_safety_limits(self):
         teb = load_yaml(

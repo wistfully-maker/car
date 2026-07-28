@@ -535,7 +535,7 @@ python -m unittest discover `
 TEB 负责局部轨迹，并由 `teb_lateral_mode_controller` 根据前方路径曲率切换横移能力：
 
 - `STRAIGHT`：直线路段限制横移，`max_vel_y=0.02 m/s`、`acc_lim_y=0.20 m/s²`；
-- `CORNER`：前方出现大角度弯道时允许横移，`max_vel_y=0.18 m/s`、
+- `CORNER`：前方出现大角度弯道时允许横移，`max_vel_y=0.10 m/s`、
   `acc_lim_y=0.60 m/s²`；
 - 出弯后，只有前方路径重新变直、车头与出口方向误差不超过 10°，并连续保持
   0.5 秒，才恢复 `STRAIGHT`。
@@ -621,7 +621,7 @@ config/lateral_mode_controller.yaml
 | `straight_acc_lim_y` | 0.20 m/s² | 直线路段横移加速度 |
 | `corner_max_vel_x` | 0.20 m/s | 弯道路段最大前进速度 |
 | `corner_max_vel_x_backwards` | 0.02 m/s | 弯道路段最大后退速度 |
-| `corner_max_vel_y` | 0.18 m/s | 弯道路段最大横移速度 |
+| `corner_max_vel_y` | 0.10 m/s | 弯道路段最大横移速度 |
 | `corner_acc_lim_y` | 0.60 m/s² | 弯道路段横移加速度 |
 
 修改 YAML 后应重启导航 launch。第一轮实测只根据诊断单项调整：

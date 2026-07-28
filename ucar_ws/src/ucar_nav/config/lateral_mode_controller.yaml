@@ -15,6 +15,6 @@ straight_max_vel_y: 0.02
 straight_acc_lim_y: 0.20
 corner_max_vel_x: 0.20
 corner_max_vel_x_backwards: 0.02
-corner_max_vel_y: 0.18
+corner_max_vel_y: 0.10
 corner_acc_lim_y: 0.60
 reconfigure_namespace: /move_base/TebLocalPlannerROS
