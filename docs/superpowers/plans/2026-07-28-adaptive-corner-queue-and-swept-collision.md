@@ -80,7 +80,7 @@ self.assertIsNotNone(result.blocking_cell)
 - [ ] **Step 3: 最小实现**
 
 实现 `GridMap`、世界/栅格转换、多边形点包含判断、旋转 footprint 和
-`check_rotation_sweep()`，代价值 `>=253` 或未知/越界即不安全。
+`check_rotation_sweep()`，`OccupancyGrid` 代价值 `>=100` 或未知/越界即不安全。
 
 - [ ] **Step 4: 运行测试并提交**
 

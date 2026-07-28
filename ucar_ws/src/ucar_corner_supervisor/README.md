@@ -126,6 +126,7 @@ rostopic echo /ucar_corner_supervisor/diagnostic
 - `FOLLOWING`：转发 TEB 指令，横移受限；
 - `TURNING`：已到拐点，停止平移并原地转向；
 - `EXIT_ALIGN`：角度已进入容差，正在等待稳定保持；
+- `BLOCKED`：拐角拟合不可靠、局部代价地图过期或旋转扫掠会碰撞；
 - `ERROR`：TF 丢失或转向超时，输出零速度；清除当前目标后才能复位。
 
 常用检查：
@@ -157,10 +158,15 @@ rostopic info /cmd_vel
 | `raw_command_timeout` | 0.5 s | TEB 指令超时即停车 |
 | `ownership_check_interval` | 0.5 s | 运行中复查 `/cmd_vel` 是否出现冲突发布者 |
 | `path_timeout` | 0 | 0 表示活动目标期间保留最后一条路径，避免低频重规划漏弯 |
-| `path_search_distance` | 1.2 m | 沿路径向前寻找拐点的距离 |
 | `min_corner_angle_deg` | 45° | 超过此角度才按大弯处理；误触发时提高 |
-| `path_resample_spacing` | 0.05 m | 路径几何计算采样间距 |
-| `direction_window` | 0.20 m | 拐角前后方向估计窗口；路径毛刺多时适当增大 |
+| `path_simplify_tolerance` | 0.08 m | RDP 路径简化容差；太大可能吞掉短弯，太小会保留锯齿 |
+| `min_stable_segment_length` | 0.15 m | 入口和出口稳定线段的最低长度 |
+| `max_fit_residual` | 0.08 m | 直线拟合允许的最大横向残差 |
+| `same_turn_merge_distance` | 0.20 m | 同方向重复候选拐点的合并距离；反方向拐点不会合并 |
+| `costmap_timeout` | 1.5 s | 局部代价地图最大允许数据年龄 |
+| `lethal_cost_threshold` | 100 | OccupancyGrid 中判为墙或致命障碍的值 |
+| `sweep_angle_step_deg` | 3° | 旋转扫掠检查的角度采样步长 |
+| `footprint` | 0.342×0.256 m | 小车矩形外轮廓，必须覆盖车壳突出部分 |
 | `corner_trigger_distance` | 0.25 m | 距拐点多近才停车转向；提前转弯时减小 |
 | `corner_release_distance` | 0.45 m | 防止同一拐点反复触发 |
 | `following_max_lateral` | 0.02 m/s | 直线跟踪允许的极小横移；左右摆动时减小 |
@@ -178,6 +184,11 @@ rostopic info /cmd_vel
 3. 转向过冲/转不动：分别微调 `turn_max_angular`、`turn_min_angular` 和 `turn_kp`。
 
 每次只改一类参数，并记录该轮日志，否则无法判断因果。
+
+诊断中的 `corner_count` 表示当前路径前方识别出的拐点数量；`entry_heading_deg` 和
+`exit_heading_deg` 是稳定线段拟合方向。`corner_confidence` 为 `false` 或
+`sweep_safe` 为 `false` 时禁止发车，应先检查路径拟合和 `blocking_cell`，不能通过
+增大速度绕过。
 
 ## 8. 首次实车验收
 

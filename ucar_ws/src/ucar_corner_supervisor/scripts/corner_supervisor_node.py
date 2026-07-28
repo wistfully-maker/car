@@ -8,22 +8,28 @@ import threading
 
 from actionlib_msgs.msg import GoalStatus, GoalStatusArray
 from geometry_msgs.msg import Twist
-from nav_msgs.msg import Path
+from nav_msgs.msg import OccupancyGrid, Path
 import rosgraph
 import rospy
 from std_msgs.msg import String
 import tf2_ros
 
 from ucar_corner_supervisor.corner_geometry import (
+    CornerObservation,
     Supervisor,
     SupervisorConfig,
-    find_first_corner,
+)
+from ucar_corner_supervisor.path_corners import extract_corner_plan
+from ucar_corner_supervisor.swept_collision import (
+    GridMap,
+    check_rotation_sweep,
 )
 
 
 RAW_COMMAND_TOPIC = "/move_base/cmd_vel_raw"
 GLOBAL_PLAN_TOPIC = "/move_base/NavfnROS/plan"
 MOVE_BASE_STATUS_TOPIC = "/move_base/status"
+COSTMAP_TOPIC = "/move_base/local_costmap/costmap"
 OUTPUT_COMMAND_TOPIC = "/cmd_vel"
 STATE_TOPIC = "~state"
 DIAGNOSTIC_TOPIC = "~diagnostic"
@@ -45,6 +51,9 @@ class CornerSupervisorNode:
         self._path = []
         self._path_stamp = None
         self._goal_active = False
+        self._costmap = None
+        self._costmap_stamp = None
+        self._costmap_frame = None
         self._last_state = None
         self._last_ownership_check = None
 
@@ -56,17 +65,44 @@ class CornerSupervisorNode:
         self._ownership_check_interval = float(
             rospy.get_param("~ownership_check_interval", 0.5)
         )
-        self._search_distance = float(
-            rospy.get_param("~path_search_distance", 1.2)
-        )
         self._min_corner_angle = math.radians(
             float(rospy.get_param("~min_corner_angle_deg", 45.0))
         )
-        self._spacing = float(
-            rospy.get_param("~path_resample_spacing", 0.05)
+        self._simplify_tolerance = float(
+            rospy.get_param("~path_simplify_tolerance", 0.08)
         )
-        self._direction_window = float(
-            rospy.get_param("~direction_window", 0.20)
+        self._min_segment_length = float(
+            rospy.get_param("~min_stable_segment_length", 0.15)
+        )
+        self._max_fit_residual = float(
+            rospy.get_param("~max_fit_residual", 0.08)
+        )
+        self._same_turn_merge_distance = float(
+            rospy.get_param("~same_turn_merge_distance", 0.20)
+        )
+        self._costmap_timeout = float(
+            rospy.get_param("~costmap_timeout", 0.5)
+        )
+        self._lethal_cost_threshold = int(
+            rospy.get_param("~lethal_cost_threshold", 253)
+        )
+        self._sweep_angle_step = math.radians(
+            float(rospy.get_param("~sweep_angle_step_deg", 3.0))
+        )
+        self._footprint = [
+            (float(point[0]), float(point[1]))
+            for point in rospy.get_param(
+                "~footprint",
+                [
+                    [0.171, -0.128],
+                    [0.171, 0.128],
+                    [-0.171, 0.128],
+                    [-0.171, -0.128],
+                ],
+            )
+        ]
+        self._costmap_topic = rospy.get_param(
+            "~costmap_topic", COSTMAP_TOPIC
         )
         config = SupervisorConfig(
             trigger_distance=float(
@@ -115,6 +151,12 @@ class CornerSupervisorNode:
             MOVE_BASE_STATUS_TOPIC,
             GoalStatusArray,
             self._status_callback,
+            queue_size=1,
+        )
+        rospy.Subscriber(
+            self._costmap_topic,
+            OccupancyGrid,
+            self._costmap_callback,
             queue_size=1,
         )
 
@@ -171,6 +213,20 @@ class CornerSupervisorNode:
                 self._path = []
                 self._path_stamp = None
             self._goal_active = goal_active
+
+    def _costmap_callback(self, message):
+        grid = GridMap(
+            width=message.info.width,
+            height=message.info.height,
+            resolution=message.info.resolution,
+            origin_x=message.info.origin.position.x,
+            origin_y=message.info.origin.position.y,
+            data=list(message.data),
+        )
+        with self._lock:
+            self._costmap = grid
+            self._costmap_stamp = rospy.Time.now()
+            self._costmap_frame = message.header.frame_id
 
     @staticmethod
     def _remaining_path(path, x, y):
@@ -230,6 +286,9 @@ class CornerSupervisorNode:
             path = list(self._path)
             path_stamp = self._path_stamp
             goal_active = self._goal_active
+            costmap = self._costmap
+            costmap_stamp = self._costmap_stamp
+            costmap_frame = self._costmap_frame
 
         raw_fresh = (
             raw_stamp is not None
@@ -240,17 +299,82 @@ class CornerSupervisorNode:
             or (now - path_stamp).to_sec() <= self._path_timeout
         )
         observation = None
+        planned_corner = None
+        corner_count = 0
         if tf_valid and path_fresh:
             remaining = self._remaining_path(
                 path, translation.x, translation.y
             )
-            observation = find_first_corner(
+            corners = extract_corner_plan(
                 remaining,
-                search_distance=self._search_distance,
-                min_angle=self._min_corner_angle,
-                spacing=self._spacing,
-                direction_window=self._direction_window,
+                simplify_tolerance=self._simplify_tolerance,
+                min_corner_angle=self._min_corner_angle,
+                min_segment_length=self._min_segment_length,
+                max_fit_residual=self._max_fit_residual,
+                same_turn_merge_distance=self._same_turn_merge_distance,
             )
+            corner_count = len(corners)
+            if corners:
+                planned_corner = corners[0]
+                observation = CornerObservation(
+                    distance=planned_corner.path_distance,
+                    turn_angle=planned_corner.turn_angle,
+                    exit_heading=planned_corner.exit_heading,
+                    point=planned_corner.point,
+                )
+
+        costmap_fresh = (
+            costmap is not None
+            and costmap_stamp is not None
+            and (now - costmap_stamp).to_sec() <= self._costmap_timeout
+        )
+        sweep_safe = True
+        sweep_result = None
+        sweep_target = self._supervisor.target_heading
+        if sweep_target is None and observation is not None:
+            sweep_target = observation.exit_heading
+        if sweep_target is not None:
+            sweep_safe = False
+            if costmap_fresh and costmap_frame:
+                try:
+                    costmap_transform = self._tf_buffer.lookup_transform(
+                        costmap_frame,
+                        "base_link",
+                        rospy.Time(0),
+                        rospy.Duration(0.05),
+                    )
+                    local_translation = (
+                        costmap_transform.transform.translation
+                    )
+                    local_yaw = quaternion_yaw(
+                        costmap_transform.transform.rotation
+                    )
+                    local_target = local_yaw + (
+                        (sweep_target - yaw + math.pi)
+                        % (2.0 * math.pi)
+                        - math.pi
+                    )
+                    sweep_result = check_rotation_sweep(
+                        costmap,
+                        pose=(
+                            local_translation.x,
+                            local_translation.y,
+                            local_yaw,
+                        ),
+                        target_yaw=local_target,
+                        footprint=self._footprint,
+                        angle_step=self._sweep_angle_step,
+                        lethal_threshold=self._lethal_cost_threshold,
+                    )
+                    sweep_safe = sweep_result.safe
+                except (
+                    tf2_ros.LookupException,
+                    tf2_ros.ConnectivityException,
+                    tf2_ros.ExtrapolationException,
+                ) as error:
+                    rospy.logwarn_throttle(
+                        2.0, "corner supervisor costmap TF: %s", error
+                    )
 
         result = self._supervisor.update(
             now=now.to_sec(),
@@ -260,6 +384,10 @@ class CornerSupervisorNode:
             yaw=yaw,
             corner=observation,
             raw_command=raw_command,
+            corner_confident=(
+                planned_corner.confident if planned_corner else True
+            ),
+            sweep_safe=sweep_safe,
         )
         self._publish_command(result.command)
         if result.state != self._last_state:
@@ -277,6 +405,49 @@ class CornerSupervisorNode:
                         "corner_angle_deg": (
                             math.degrees(observation.turn_angle)
                             if observation
+                            else None
+                        ),
+                        "corner_count": corner_count,
+                        "corner_confidence": (
+                            planned_corner.confident
+                            if planned_corner
+                            else None
+                        ),
+                        "entry_heading_deg": (
+                            math.degrees(planned_corner.entry_heading)
+                            if planned_corner
+                            else None
+                        ),
+                        "exit_heading_deg": (
+                            math.degrees(planned_corner.exit_heading)
+                            if planned_corner
+                            else None
+                        ),
+                        "entry_fit_length": (
+                            planned_corner.entry_fit.length
+                            if planned_corner
+                            else None
+                        ),
+                        "exit_fit_length": (
+                            planned_corner.exit_fit.length
+                            if planned_corner
+                            else None
+                        ),
+                        "entry_fit_residual": (
+                            planned_corner.entry_fit.max_residual
+                            if planned_corner
+                            else None
+                        ),
+                        "exit_fit_residual": (
+                            planned_corner.exit_fit.max_residual
+                            if planned_corner
+                            else None
+                        ),
+                        "costmap_fresh": costmap_fresh,
+                        "sweep_safe": sweep_safe,
+                        "blocking_cell": (
+                            sweep_result.blocking_cell
+                            if sweep_result
                             else None
                         ),
                         "raw_fresh": raw_fresh,

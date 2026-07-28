@@ -4,10 +4,21 @@ ownership_check_interval: 0.5
 # 0 表示在当前 move_base 目标有效期间保留最后一条全局路径，避免低频重规划时丢拐角。
 path_timeout: 0.0
 
-path_search_distance: 1.2
 min_corner_angle_deg: 45.0
-path_resample_spacing: 0.05
-direction_window: 0.20
+path_simplify_tolerance: 0.08
+min_stable_segment_length: 0.15
+max_fit_residual: 0.08
+same_turn_merge_distance: 0.20
+
+costmap_topic: /move_base/local_costmap/costmap
+costmap_timeout: 1.5
+lethal_cost_threshold: 100
+sweep_angle_step_deg: 3.0
+footprint:
+  - [ 0.171, -0.128 ]
+  - [ 0.171,  0.128 ]
+  - [-0.171,  0.128 ]
+  - [-0.171, -0.128 ]
 
 corner_trigger_distance: 0.25
 corner_release_distance: 0.45

@@ -19,9 +19,14 @@ class RosAssetTests(unittest.TestCase):
             "/move_base/cmd_vel_raw",
             "/move_base/NavfnROS/plan",
             "/move_base/status",
+            "/move_base/local_costmap/costmap",
             "/cmd_vel",
             "~state",
             "getSystemState",
+            "extract_corner_plan",
+            "check_rotation_sweep",
+            "corner_confidence",
+            "sweep_safe",
         ):
             self.assertIn(interface, source)
 
@@ -32,11 +37,9 @@ class RosAssetTests(unittest.TestCase):
         for parameter in (
             "controller_rate",
             "raw_command_timeout",
-            "path_search_distance",
             "corner_trigger_distance",
             "corner_release_distance",
             "min_corner_angle_deg",
-            "path_resample_spacing",
             "following_max_lateral",
             "turn_max_angular",
             "turn_min_angular",
@@ -44,6 +47,14 @@ class RosAssetTests(unittest.TestCase):
             "heading_tolerance_deg",
             "heading_hold_time",
             "turn_timeout",
+            "path_simplify_tolerance",
+            "min_stable_segment_length",
+            "max_fit_residual",
+            "same_turn_merge_distance",
+            "costmap_timeout",
+            "lethal_cost_threshold",
+            "sweep_angle_step_deg",
+            "footprint",
         ):
             self.assertIn(parameter + ":", config)
 

@@ -80,6 +80,19 @@ class SweptCollisionTests(unittest.TestCase):
         )
         self.assertTrue(result.safe)
 
+    def test_cell_intersecting_footprint_edge_is_unsafe(self):
+        grid = empty_grid()
+        set_cost(grid, 0.17, 0.0, 254)
+        result = check_rotation_sweep(
+            grid,
+            pose=(0.0, 0.0, 0.0),
+            target_yaw=0.0,
+            footprint=FOOTPRINT,
+            angle_step=math.radians(3.0),
+            lethal_threshold=253,
+        )
+        self.assertFalse(result.safe)
+
     def test_unknown_cell_under_footprint_is_unsafe(self):
         grid = empty_grid()
         set_cost(grid, 0.0, 0.0, -1)

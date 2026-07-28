@@ -69,9 +69,10 @@
 在进入 `TURNING` 前，以当前 `map -> base_link` 位姿为中心，将矩形 footprint 从当前
 航向按不大于 `3°` 的步长旋转到目标航向。每一个角度都栅格化 footprint 多边形：
 
-- 任一覆盖栅格代价值达到 `253`，判定扫掠碰撞；
+- 任一覆盖栅格在 `OccupancyGrid` 中达到 `100`，判定扫掠碰撞；
 - footprint 超出 costmap，判定不安全；
-- costmap 超过 `0.5 s` 未更新，判定不安全。
+- costmap 超过 `1.5 s` 未更新，判定不安全。当前发布频率为 `1 Hz`，因此不能使用
+  `0.5 s` 超时。
 
 只有完整扫掠无碰撞才进入 `TURNING`。转动过程中每个控制周期重新检查“当前角度到目标
 角度”的剩余扫掠；若变为不安全，状态进入 `BLOCKED` 并持续输出零速度。
@@ -102,8 +103,8 @@ IDLE
 - `same_turn_merge_distance: 0.20`
 - `corner_release_margin: 0.10`
 - `costmap_topic: /move_base/local_costmap/costmap`
-- `costmap_timeout: 0.5`
-- `lethal_cost_threshold: 253`
+- `costmap_timeout: 1.5`
+- `lethal_cost_threshold: 100`
 - `sweep_angle_step_deg: 3.0`
 - `footprint: [[0.171,-0.128],[0.171,0.128],[-0.171,0.128],[-0.171,-0.128]]`
 
