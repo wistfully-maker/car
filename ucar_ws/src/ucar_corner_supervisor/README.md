@@ -160,9 +160,11 @@ rostopic info /cmd_vel
 | `path_timeout` | 0 | 0 表示活动目标期间保留最后一条路径，避免低频重规划漏弯 |
 | `min_corner_angle_deg` | 45° | 超过此角度才按大弯处理；误触发时提高 |
 | `path_simplify_tolerance` | 0.08 m | RDP 路径简化容差；太大可能吞掉短弯，太小会保留锯齿 |
-| `min_stable_segment_length` | 0.15 m | 入口和出口稳定线段的最低长度 |
+| `min_stable_segment_length` | 0.08 m | 入口和出口稳定线段的最低长度，允许紧邻连续弯 |
 | `max_fit_residual` | 0.08 m | 直线拟合允许的最大横向残差 |
-| `same_turn_merge_distance` | 0.20 m | 同方向重复候选拐点的合并距离；反方向拐点不会合并 |
+| `same_turn_merge_distance` | 0.05 m | 仅合并极近的同方向重复候选；反方向拐点不会合并 |
+| `path_resample_spacing` | 0.05 m | RDP 前的等弧长重采样间距，消除原路径点密度影响 |
+| `corner_release_margin` | 0.10 m | 沿路径通过当前拐点后推进队列的余量 |
 | `costmap_timeout` | 1.5 s | 局部代价地图最大允许数据年龄 |
 | `lethal_cost_threshold` | 100 | OccupancyGrid 中判为墙或致命障碍的值 |
 | `sweep_angle_step_deg` | 3° | 旋转扫掠检查的角度采样步长 |

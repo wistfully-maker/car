@@ -50,6 +50,12 @@ class CornerSupervisorNode:
         self._raw_stamp = None
         self._path = []
         self._path_stamp = None
+        self._path_revision = 0
+        self._planned_revision = -1
+        self._planned_path = []
+        self._planned_distances = []
+        self._planned_corners = []
+        self._corner_index = 0
         self._goal_active = False
         self._costmap = None
         self._costmap_stamp = None
@@ -72,13 +78,19 @@ class CornerSupervisorNode:
             rospy.get_param("~path_simplify_tolerance", 0.08)
         )
         self._min_segment_length = float(
-            rospy.get_param("~min_stable_segment_length", 0.15)
+            rospy.get_param("~min_stable_segment_length", 0.08)
         )
         self._max_fit_residual = float(
             rospy.get_param("~max_fit_residual", 0.08)
         )
         self._same_turn_merge_distance = float(
-            rospy.get_param("~same_turn_merge_distance", 0.20)
+            rospy.get_param("~same_turn_merge_distance", 0.05)
+        )
+        self._path_resample_spacing = float(
+            rospy.get_param("~path_resample_spacing", 0.05)
+        )
+        self._corner_release_margin = float(
+            rospy.get_param("~corner_release_margin", 0.10)
         )
         self._costmap_timeout = float(
             rospy.get_param("~costmap_timeout", 0.5)
@@ -202,6 +214,7 @@ class CornerSupervisorNode:
                 for pose in message.poses
             ]
             self._path_stamp = rospy.Time.now()
+            self._path_revision += 1
 
     def _status_callback(self, message):
         active_codes = (GoalStatus.PENDING, GoalStatus.ACTIVE)
@@ -212,6 +225,10 @@ class CornerSupervisorNode:
             if goal_active and not self._goal_active:
                 self._path = []
                 self._path_stamp = None
+                self._planned_path = []
+                self._planned_distances = []
+                self._planned_corners = []
+                self._corner_index = 0
             self._goal_active = goal_active
 
     def _costmap_callback(self, message):
@@ -222,6 +239,7 @@ class CornerSupervisorNode:
             origin_x=message.info.origin.position.x,
             origin_y=message.info.origin.position.y,
             data=list(message.data),
+            origin_yaw=quaternion_yaw(message.info.origin.orientation),
         )
         with self._lock:
             self._costmap = grid
@@ -238,6 +256,28 @@ class CornerSupervisorNode:
             + (path[index][1] - y) ** 2,
         )
         return path[nearest:]
+
+    @staticmethod
+    def _nearest_path_index(path, x, y):
+        if not path:
+            return None
+        return min(
+            range(len(path)),
+            key=lambda index: (path[index][0] - x) ** 2
+            + (path[index][1] - y) ** 2,
+        )
+
+    @staticmethod
+    def _path_distances(path):
+        distances = [0.0]
+        for first, second in zip(path, path[1:]):
+            distances.append(
+                distances[-1]
+                + math.hypot(
+                    second[0] - first[0], second[1] - first[1]
+                )
+            )
+        return distances
 
     def _control_callback(self, _event):
         now = rospy.Time.now()
@@ -285,6 +325,7 @@ class CornerSupervisorNode:
             raw_stamp = self._raw_stamp
             path = list(self._path)
             path_stamp = self._path_stamp
+            path_revision = self._path_revision
             goal_active = self._goal_active
             costmap = self._costmap
             costmap_stamp = self._costmap_stamp
@@ -300,24 +341,48 @@ class CornerSupervisorNode:
         )
         observation = None
         planned_corner = None
-        corner_count = 0
+        corner_count = len(self._planned_corners)
         if tf_valid and path_fresh:
-            remaining = self._remaining_path(
-                path, translation.x, translation.y
+            if (
+                path_revision != self._planned_revision
+                and self._supervisor.state in ("IDLE", "FOLLOWING")
+            ):
+                self._planned_path = path
+                self._planned_distances = self._path_distances(path)
+                self._planned_corners = extract_corner_plan(
+                    path,
+                    simplify_tolerance=self._simplify_tolerance,
+                    min_corner_angle=self._min_corner_angle,
+                    min_segment_length=self._min_segment_length,
+                    max_fit_residual=self._max_fit_residual,
+                    same_turn_merge_distance=self._same_turn_merge_distance,
+                    resample_spacing=self._path_resample_spacing,
+                )
+                self._corner_index = 0
+                self._planned_revision = path_revision
+            nearest_index = self._nearest_path_index(
+                self._planned_path, translation.x, translation.y
             )
-            corners = extract_corner_plan(
-                remaining,
-                simplify_tolerance=self._simplify_tolerance,
-                min_corner_angle=self._min_corner_angle,
-                min_segment_length=self._min_segment_length,
-                max_fit_residual=self._max_fit_residual,
-                same_turn_merge_distance=self._same_turn_merge_distance,
+            progress = (
+                self._planned_distances[nearest_index]
+                if nearest_index is not None
+                else 0.0
             )
-            corner_count = len(corners)
-            if corners:
-                planned_corner = corners[0]
+            while (
+                self._corner_index < len(self._planned_corners)
+                and self._planned_corners[
+                    self._corner_index
+                ].path_distance
+                < progress - self._corner_release_margin
+            ):
+                self._corner_index += 1
+            corner_count = len(self._planned_corners) - self._corner_index
+            if self._corner_index < len(self._planned_corners):
+                planned_corner = self._planned_corners[self._corner_index]
                 observation = CornerObservation(
-                    distance=planned_corner.path_distance,
+                    distance=max(
+                        0.0, planned_corner.path_distance - progress
+                    ),
                     turn_angle=planned_corner.turn_angle,
                     exit_heading=planned_corner.exit_heading,
                     point=planned_corner.point,
@@ -376,6 +441,7 @@ class CornerSupervisorNode:
                         2.0, "corner supervisor costmap TF: %s", error
                     )
 
+        previous_state = self._supervisor.state
         result = self._supervisor.update(
             now=now.to_sec(),
             goal_active=goal_active,
@@ -388,7 +454,18 @@ class CornerSupervisorNode:
                 planned_corner.confident if planned_corner else True
             ),
             sweep_safe=sweep_safe,
+            corner_id=(
+                (self._planned_revision, self._corner_index)
+                if planned_corner
+                else None
+            ),
         )
+        if (
+            previous_state in ("TURNING", "EXIT_ALIGN")
+            and result.state == "FOLLOWING"
+            and self._corner_index < len(self._planned_corners)
+        ):
+            self._corner_index += 1
         self._publish_command(result.command)
         if result.state != self._last_state:
             rospy.loginfo("corner supervisor state: %s", result.state)

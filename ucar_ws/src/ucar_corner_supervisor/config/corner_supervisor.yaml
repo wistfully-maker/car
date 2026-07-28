@@ -6,9 +6,11 @@ path_timeout: 0.0
 
 min_corner_angle_deg: 45.0
 path_simplify_tolerance: 0.08
-min_stable_segment_length: 0.15
+min_stable_segment_length: 0.08
 max_fit_residual: 0.08
-same_turn_merge_distance: 0.20
+same_turn_merge_distance: 0.05
+path_resample_spacing: 0.05
+corner_release_margin: 0.10
 
 costmap_topic: /move_base/local_costmap/costmap
 costmap_timeout: 1.5

@@ -132,6 +132,27 @@ class SweptCollisionTests(unittest.TestCase):
         )
         self.assertFalse(result.safe)
 
+    def test_rotated_grid_origin_maps_world_footprint_correctly(self):
+        grid = GridMap(
+            width=20,
+            height=20,
+            resolution=0.1,
+            origin_x=1.0,
+            origin_y=2.0,
+            origin_yaw=math.pi / 2.0,
+            data=[0] * 400,
+        )
+        grid.data[5 * grid.width + 5] = 100
+        result = check_rotation_sweep(
+            grid,
+            pose=(0.45, 2.55, 0.0),
+            target_yaw=0.0,
+            footprint=FOOTPRINT,
+            angle_step=math.radians(3.0),
+            lethal_threshold=100,
+        )
+        self.assertFalse(result.safe)
+
 
 if __name__ == "__main__":
     unittest.main()

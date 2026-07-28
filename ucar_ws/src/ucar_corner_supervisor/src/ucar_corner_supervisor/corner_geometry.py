@@ -42,6 +42,8 @@ class Supervisor:
         self.turn_started_at = None
         self.aligned_since = None
         self.corner_suppressed = False
+        self.active_corner_id = None
+        self.completed_corner_id = None
 
     def _stop(self, message=""):
         return SupervisorResult(self.state, (0.0, 0.0, 0.0), message)
@@ -52,6 +54,8 @@ class Supervisor:
         self.turn_started_at = None
         self.aligned_since = None
         self.corner_suppressed = False
+        self.active_corner_id = None
+        self.completed_corner_id = None
 
     def fail(self, message):
         self.state = "ERROR"
@@ -76,6 +80,7 @@ class Supervisor:
         raw_command,
         corner_confident=True,
         sweep_safe=True,
+        corner_id=None,
     ):
         if not goal_active:
             self._clear_goal_state()
@@ -110,6 +115,8 @@ class Supervisor:
                     self.turn_started_at = None
                     self.aligned_since = None
                     self.corner_suppressed = True
+                    self.completed_corner_id = self.active_corner_id
+                    self.active_corner_id = None
                 return self._stop()
             self.aligned_since = None
             self.state = "TURNING"
@@ -121,10 +128,23 @@ class Supervisor:
             self.state = "FOLLOWING"
             return self._stop("raw velocity command is stale")
 
+        effective_corner_id = (
+            corner_id
+            if corner_id is not None
+            else (corner.point if corner is not None else None)
+        )
         if self.corner_suppressed:
-            if corner is None or corner.distance >= self.config.release_distance:
+            if (
+                effective_corner_id != self.completed_corner_id
+                or corner is None
+                or corner.distance >= self.config.release_distance
+            ):
                 self.corner_suppressed = False
-        elif corner is not None and corner.distance <= self.config.trigger_distance:
+        if (
+            not self.corner_suppressed
+            and corner is not None
+            and corner.distance <= self.config.trigger_distance
+        ):
             if not corner_confident:
                 self.state = "BLOCKED"
                 return self._stop("corner direction fit is unreliable")
@@ -133,6 +153,7 @@ class Supervisor:
                 return self._stop("rotation sweep is unsafe")
             self.state = "TURNING"
             self.target_heading = corner.exit_heading
+            self.active_corner_id = effective_corner_id
             self.turn_started_at = now
             self.aligned_since = None
             return SupervisorResult(

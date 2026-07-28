@@ -43,8 +43,8 @@
 - 最大正交残差；
 - 使用点数。
 
-默认最低稳定长度 `0.15 m`、最大残差 `0.08 m`。连续弯之间只有短直线时允许使用
-`0.15 m`；若仍不足，则该拐点标为低置信度并禁止自动转向。
+默认最低稳定长度 `0.08 m`、最大残差 `0.08 m`。连续弯之间只有短直线时允许使用
+`0.08 m`；若仍不足，则该拐点标为低置信度并禁止自动转向。
 
 ### 3.4 拐点队列
 
@@ -98,9 +98,9 @@ IDLE
 ## 6. ROS 参数
 
 - `path_simplify_tolerance: 0.08`
-- `min_stable_segment_length: 0.15`
+- `min_stable_segment_length: 0.08`
 - `max_fit_residual: 0.08`
-- `same_turn_merge_distance: 0.20`
+- `same_turn_merge_distance: 0.05`
 - `corner_release_margin: 0.10`
 - `costmap_topic: /move_base/local_costmap/costmap`
 - `costmap_timeout: 1.5`

@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 import math
 
-from .corner_geometry import normalize_angle
+from .corner_geometry import normalize_angle, resample_polyline
 
 
 @dataclass(frozen=True)
@@ -111,6 +111,7 @@ def extract_corner_plan(
     min_segment_length,
     max_fit_residual,
     same_turn_merge_distance,
+    resample_spacing=0.05,
 ):
     clean = []
     for point in points:
@@ -121,6 +122,7 @@ def extract_corner_plan(
             clean.append(point)
     if len(clean) < 3:
         return []
+    clean = resample_polyline(clean, resample_spacing)
 
     cumulative = _cumulative_distances(clean)
     simplified = _rdp_indices(clean, simplify_tolerance)

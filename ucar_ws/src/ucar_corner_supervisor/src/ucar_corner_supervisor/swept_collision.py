@@ -14,6 +14,7 @@ class GridMap:
     origin_x: float
     origin_y: float
     data: list
+    origin_yaw: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -118,14 +119,23 @@ def _polygon_intersects_cell(polygon, minimum_x, minimum_y, size):
 
 
 def _polygon_cells(grid, polygon):
-    minimum_x = min(point[0] for point in polygon)
-    maximum_x = max(point[0] for point in polygon)
-    minimum_y = min(point[1] for point in polygon)
-    maximum_y = max(point[1] for point in polygon)
-    first_column = int(math.floor((minimum_x - grid.origin_x) / grid.resolution))
-    last_column = int(math.floor((maximum_x - grid.origin_x) / grid.resolution))
-    first_row = int(math.floor((minimum_y - grid.origin_y) / grid.resolution))
-    last_row = int(math.floor((maximum_y - grid.origin_y) / grid.resolution))
+    cosine = math.cos(grid.origin_yaw)
+    sine = math.sin(grid.origin_yaw)
+    local_polygon = []
+    for point in polygon:
+        dx = point[0] - grid.origin_x
+        dy = point[1] - grid.origin_y
+        local_polygon.append(
+            (cosine * dx + sine * dy, -sine * dx + cosine * dy)
+        )
+    minimum_x = min(point[0] for point in local_polygon)
+    maximum_x = max(point[0] for point in local_polygon)
+    minimum_y = min(point[1] for point in local_polygon)
+    maximum_y = max(point[1] for point in local_polygon)
+    first_column = int(math.floor(minimum_x / grid.resolution))
+    last_column = int(math.floor(maximum_x / grid.resolution))
+    first_row = int(math.floor(minimum_y / grid.resolution))
+    last_row = int(math.floor(maximum_y / grid.resolution))
     if (
         first_column < 0
         or first_row < 0
@@ -136,10 +146,10 @@ def _polygon_cells(grid, polygon):
     cells = []
     for row in range(first_row, last_row + 1):
         for column in range(first_column, last_column + 1):
-            minimum_cell_x = grid.origin_x + column * grid.resolution
-            minimum_cell_y = grid.origin_y + row * grid.resolution
+            minimum_cell_x = column * grid.resolution
+            minimum_cell_y = row * grid.resolution
             if _polygon_intersects_cell(
-                polygon,
+                local_polygon,
                 minimum_cell_x,
                 minimum_cell_y,
                 grid.resolution,

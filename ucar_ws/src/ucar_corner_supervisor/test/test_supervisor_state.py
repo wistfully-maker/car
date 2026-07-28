@@ -172,6 +172,36 @@ class SupervisorStateTests(unittest.TestCase):
         )
         self.assertEqual(result.state, "TURNING")
 
+    def test_different_tight_corner_triggers_immediately_after_first(self):
+        first = corner(distance=0.20, exit_heading=math.pi / 2.0)
+        second = CornerObservation(
+            distance=0.10,
+            turn_angle=-math.pi / 2.0,
+            exit_heading=0.0,
+            point=(0.10, 0.10),
+        )
+        self.update(corner=first, corner_id="corner-1")
+        self.update(
+            now=0.1,
+            yaw=math.radians(89),
+            corner=first,
+            corner_id="corner-1",
+        )
+        self.update(
+            now=0.41,
+            yaw=math.radians(90),
+            corner=first,
+            corner_id="corner-1",
+        )
+        result = self.update(
+            now=0.42,
+            yaw=math.radians(90),
+            corner=second,
+            corner_id="corner-2",
+        )
+        self.assertEqual(result.state, "TURNING")
+        self.assertLess(result.command[2], 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

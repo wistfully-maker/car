@@ -51,6 +51,8 @@ class RosAssetTests(unittest.TestCase):
             "min_stable_segment_length",
             "max_fit_residual",
             "same_turn_merge_distance",
+            "path_resample_spacing",
+            "corner_release_margin",
             "costmap_timeout",
             "lethal_cost_threshold",
             "sweep_angle_step_deg",
