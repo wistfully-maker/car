@@ -165,6 +165,8 @@ rostopic info /cmd_vel
 | `same_turn_merge_distance` | 0.05 m | 仅合并极近的同方向重复候选；反方向拐点不会合并 |
 | `path_resample_spacing` | 0.05 m | RDP 前的等弧长重采样间距，消除原路径点密度影响 |
 | `corner_release_margin` | 0.10 m | 沿路径通过当前拐点后推进队列的余量 |
+| `completed_corner_match_distance` | 0.25 m | 重规划后匹配已完成物理拐点的位置容差 |
+| `completed_corner_match_heading_deg` | 20° | 重规划后匹配已完成拐点的出口方向容差 |
 | `costmap_timeout` | 1.5 s | 局部代价地图最大允许数据年龄 |
 | `lethal_cost_threshold` | 100 | OccupancyGrid 中判为墙或致命障碍的值 |
 | `sweep_angle_step_deg` | 3° | 旋转扫掠检查的角度采样步长 |

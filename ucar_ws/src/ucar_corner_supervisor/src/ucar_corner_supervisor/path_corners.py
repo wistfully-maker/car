@@ -26,6 +26,74 @@ class PlannedCorner:
     confident: bool
 
 
+class CornerQueue:
+    """Corner progress that survives global-path revisions."""
+
+    def __init__(self, match_distance=0.25, match_heading=math.radians(20.0)):
+        self.match_distance = float(match_distance)
+        self.match_heading = float(match_heading)
+        self._completed = []
+        self._pending = []
+        self._index = 0
+
+    def reset(self):
+        self._completed = []
+        self._pending = []
+        self._index = 0
+
+    def _matches_completed(self, candidate):
+        return any(
+            math.hypot(
+                candidate.point[0] - completed.point[0],
+                candidate.point[1] - completed.point[1],
+            )
+            <= self.match_distance
+            and abs(
+                normalize_angle(
+                    candidate.exit_heading - completed.exit_heading
+                )
+            )
+            <= self.match_heading
+            for completed in self._completed
+        )
+
+    def replace(self, corners):
+        self._pending = [
+            corner
+            for corner in corners
+            if not self._matches_completed(corner)
+        ]
+        self._index = 0
+
+    def current(self):
+        if self._index >= len(self._pending):
+            return None
+        return self._pending[self._index]
+
+    def current_identity(self):
+        corner = self.current()
+        if corner is None:
+            return None
+        return (
+            round(corner.point[0] / 0.05),
+            round(corner.point[1] / 0.05),
+            round(corner.exit_heading / math.radians(10.0)),
+        )
+
+    def complete_current(self):
+        corner = self.current()
+        if corner is not None:
+            self._completed.append(corner)
+            self._index += 1
+
+    def skip_current(self):
+        if self.current() is not None:
+            self._index += 1
+
+    def remaining_count(self):
+        return max(0, len(self._pending) - self._index)
+
+
 def _point_segment_distance(point, start, end):
     dx = end[0] - start[0]
     dy = end[1] - start[1]

@@ -9,7 +9,10 @@ import unittest
 PACKAGE_SOURCE = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(PACKAGE_SOURCE))
 
-from ucar_corner_supervisor.path_corners import extract_corner_plan
+from ucar_corner_supervisor.path_corners import (
+    CornerQueue,
+    extract_corner_plan,
+)
 
 
 def extract(points, minimum_length=0.08, simplify_tolerance=0.04):
@@ -115,6 +118,23 @@ class PathCornerTests(unittest.TestCase):
         corner = extract([(0, 0), (1, 0), (1, 1)])[0]
         self.assertGreaterEqual(corner.entry_fit.point_count, 10)
         self.assertGreaterEqual(corner.exit_fit.point_count, 10)
+
+    def test_replan_after_first_turn_keeps_second_corner_active(self):
+        points = [(0, 0), (1, 0), (1, 0.10), (2, 0.10)]
+        original = extract(points)
+        queue = CornerQueue(match_distance=0.25, match_heading=0.35)
+        queue.replace(original)
+        first_identity = queue.current_identity()
+        queue.complete_current()
+
+        shifted_replan = extract(
+            [(0.02, 0), (1.03, 0.01), (1.02, 0.11), (2.0, 0.10)]
+        )
+        queue.replace(shifted_replan)
+
+        self.assertEqual(queue.remaining_count(), 1)
+        self.assertNotEqual(queue.current_identity(), first_identity)
+        self.assertLess(queue.current().turn_angle, 0.0)
 
 
 if __name__ == "__main__":

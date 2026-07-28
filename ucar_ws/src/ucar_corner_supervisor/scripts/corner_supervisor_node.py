@@ -19,7 +19,10 @@ from ucar_corner_supervisor.corner_geometry import (
     Supervisor,
     SupervisorConfig,
 )
-from ucar_corner_supervisor.path_corners import extract_corner_plan
+from ucar_corner_supervisor.path_corners import (
+    CornerQueue,
+    extract_corner_plan,
+)
 from ucar_corner_supervisor.swept_collision import (
     GridMap,
     check_rotation_sweep,
@@ -54,8 +57,6 @@ class CornerSupervisorNode:
         self._planned_revision = -1
         self._planned_path = []
         self._planned_distances = []
-        self._planned_corners = []
-        self._corner_index = 0
         self._goal_active = False
         self._costmap = None
         self._costmap_stamp = None
@@ -91,6 +92,20 @@ class CornerSupervisorNode:
         )
         self._corner_release_margin = float(
             rospy.get_param("~corner_release_margin", 0.10)
+        )
+        self._completed_match_distance = float(
+            rospy.get_param("~completed_corner_match_distance", 0.25)
+        )
+        self._completed_match_heading = math.radians(
+            float(
+                rospy.get_param(
+                    "~completed_corner_match_heading_deg", 20.0
+                )
+            )
+        )
+        self._corner_queue = CornerQueue(
+            match_distance=self._completed_match_distance,
+            match_heading=self._completed_match_heading,
         )
         self._costmap_timeout = float(
             rospy.get_param("~costmap_timeout", 0.5)
@@ -227,8 +242,7 @@ class CornerSupervisorNode:
                 self._path_stamp = None
                 self._planned_path = []
                 self._planned_distances = []
-                self._planned_corners = []
-                self._corner_index = 0
+                self._corner_queue.reset()
             self._goal_active = goal_active
 
     def _costmap_callback(self, message):
@@ -341,7 +355,7 @@ class CornerSupervisorNode:
         )
         observation = None
         planned_corner = None
-        corner_count = len(self._planned_corners)
+        corner_count = self._corner_queue.remaining_count()
         if tf_valid and path_fresh:
             if (
                 path_revision != self._planned_revision
@@ -349,7 +363,7 @@ class CornerSupervisorNode:
             ):
                 self._planned_path = path
                 self._planned_distances = self._path_distances(path)
-                self._planned_corners = extract_corner_plan(
+                new_corners = extract_corner_plan(
                     path,
                     simplify_tolerance=self._simplify_tolerance,
                     min_corner_angle=self._min_corner_angle,
@@ -358,7 +372,7 @@ class CornerSupervisorNode:
                     same_turn_merge_distance=self._same_turn_merge_distance,
                     resample_spacing=self._path_resample_spacing,
                 )
-                self._corner_index = 0
+                self._corner_queue.replace(new_corners)
                 self._planned_revision = path_revision
             nearest_index = self._nearest_path_index(
                 self._planned_path, translation.x, translation.y
@@ -369,16 +383,14 @@ class CornerSupervisorNode:
                 else 0.0
             )
             while (
-                self._corner_index < len(self._planned_corners)
-                and self._planned_corners[
-                    self._corner_index
-                ].path_distance
+                self._corner_queue.current() is not None
+                and self._corner_queue.current().path_distance
                 < progress - self._corner_release_margin
             ):
-                self._corner_index += 1
-            corner_count = len(self._planned_corners) - self._corner_index
-            if self._corner_index < len(self._planned_corners):
-                planned_corner = self._planned_corners[self._corner_index]
+                self._corner_queue.skip_current()
+            corner_count = self._corner_queue.remaining_count()
+            planned_corner = self._corner_queue.current()
+            if planned_corner is not None:
                 observation = CornerObservation(
                     distance=max(
                         0.0, planned_corner.path_distance - progress
@@ -455,17 +467,15 @@ class CornerSupervisorNode:
             ),
             sweep_safe=sweep_safe,
             corner_id=(
-                (self._planned_revision, self._corner_index)
-                if planned_corner
-                else None
+                self._corner_queue.current_identity()
             ),
         )
         if (
             previous_state in ("TURNING", "EXIT_ALIGN")
             and result.state == "FOLLOWING"
-            and self._corner_index < len(self._planned_corners)
+            and self._corner_queue.current() is not None
         ):
-            self._corner_index += 1
+            self._corner_queue.complete_current()
         self._publish_command(result.command)
         if result.state != self._last_state:
             rospy.loginfo("corner supervisor state: %s", result.state)
