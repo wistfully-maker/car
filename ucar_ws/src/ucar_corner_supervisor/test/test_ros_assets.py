@@ -21,6 +21,7 @@ class RosAssetTests(unittest.TestCase):
             "/move_base/status",
             "/cmd_vel",
             "~state",
+            "getSystemState",
         ):
             self.assertIn(interface, source)
 

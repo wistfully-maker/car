@@ -145,6 +145,7 @@ rostopic info /cmd_vel
 |---|---:|---|
 | `controller_rate` | 20 Hz | 输出频率；底盘仍顿挫时先测原始话题频率，不盲目提高 |
 | `raw_command_timeout` | 0.5 s | TEB 指令超时即停车 |
+| `ownership_check_interval` | 0.5 s | 运行中复查 `/cmd_vel` 是否出现冲突发布者 |
 | `path_timeout` | 0 | 0 表示活动目标期间保留最后一条路径，避免低频重规划漏弯 |
 | `path_search_distance` | 1.2 m | 沿路径向前寻找拐点的距离 |
 | `min_corner_angle_deg` | 45° | 超过此角度才按大弯处理；误触发时提高 |

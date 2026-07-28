@@ -55,6 +55,10 @@ class Supervisor:
         self.aligned_since = None
         self.corner_suppressed = False
 
+    def fail(self, message):
+        self.state = "ERROR"
+        return self._stop(message)
+
     def _turn_command(self, yaw):
         error = normalize_angle(self.target_heading - yaw)
         if abs(error) <= self.config.heading_tolerance:
@@ -86,6 +90,9 @@ class Supervisor:
             self.state = "FOLLOWING"
 
         if self.state in ("TURNING", "EXIT_ALIGN"):
+            if not raw_fresh:
+                self.state = "ERROR"
+                return self._stop("raw velocity command became stale during turn")
             if now - self.turn_started_at > self.config.turn_timeout:
                 self.state = "ERROR"
                 return self._stop("turn timeout")
@@ -108,7 +115,7 @@ class Supervisor:
             )
 
         if self.corner_suppressed:
-            if corner is None or corner.distance > self.config.release_distance:
+            if corner is None or corner.distance >= self.config.release_distance:
                 self.corner_suppressed = False
         elif corner is not None and corner.distance <= self.config.trigger_distance:
             self.state = "TURNING"

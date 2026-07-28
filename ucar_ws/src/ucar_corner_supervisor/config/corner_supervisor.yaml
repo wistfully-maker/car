@@ -1,5 +1,6 @@
 controller_rate: 20.0
 raw_command_timeout: 0.5
+ownership_check_interval: 0.5
 # 0 表示在当前 move_base 目标有效期间保留最后一条全局路径，避免低频重规划时丢拐角。
 path_timeout: 0.0
 

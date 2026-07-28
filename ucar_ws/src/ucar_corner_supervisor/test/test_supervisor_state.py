@@ -90,6 +90,12 @@ class SupervisorStateTests(unittest.TestCase):
         self.assertEqual(result.state, "ERROR")
         self.assertEqual(result.command, (0.0, 0.0, 0.0))
 
+    def test_stale_raw_command_during_turn_enters_error_and_stops(self):
+        self.update(corner=corner(distance=0.24))
+        result = self.update(now=0.6, raw_fresh=False)
+        self.assertEqual(result.state, "ERROR")
+        self.assertEqual(result.command, (0.0, 0.0, 0.0))
+
     def test_stale_raw_command_stops_without_leaving_following(self):
         result = self.update(raw_fresh=False)
         self.assertEqual(result.state, "FOLLOWING")
@@ -119,6 +125,18 @@ class SupervisorStateTests(unittest.TestCase):
             now=0.7, yaw=math.radians(90), corner=corner(distance=0.20)
         )
         self.assertEqual(retriggered.state, "TURNING")
+
+    def test_same_corner_releases_at_exact_release_distance(self):
+        self.update(corner=corner(distance=0.24))
+        self.update(now=0.1, yaw=math.radians(89))
+        self.update(now=0.41, yaw=math.radians(90))
+        self.update(
+            now=0.5, yaw=math.radians(90), corner=corner(distance=0.45)
+        )
+        result = self.update(
+            now=0.6, yaw=math.radians(90), corner=corner(distance=0.20)
+        )
+        self.assertEqual(result.state, "TURNING")
 
 
 if __name__ == "__main__":

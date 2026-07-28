@@ -46,12 +46,16 @@ class CornerSupervisorNode:
         self._path_stamp = None
         self._goal_active = False
         self._last_state = None
+        self._last_ownership_check = None
 
         self._rate = float(rospy.get_param("~controller_rate", 20.0))
         self._raw_timeout = float(
             rospy.get_param("~raw_command_timeout", 0.5)
         )
         self._path_timeout = float(rospy.get_param("~path_timeout", 0.0))
+        self._ownership_check_interval = float(
+            rospy.get_param("~ownership_check_interval", 0.5)
+        )
         self._search_distance = float(
             rospy.get_param("~path_search_distance", 1.2)
         )
@@ -122,12 +126,16 @@ class CornerSupervisorNode:
         )
 
     @staticmethod
-    def _assert_cmd_vel_is_unowned():
+    def _cmd_vel_publishers():
         publishers, _, _ = rosgraph.Master(rospy.get_name()).getSystemState()
-        owners = next(
+        return next(
             (nodes for topic, nodes in publishers if topic == OUTPUT_COMMAND_TOPIC),
             [],
         )
+
+    @classmethod
+    def _assert_cmd_vel_is_unowned(cls):
+        owners = cls._cmd_vel_publishers()
         if owners:
             raise RuntimeError(
                 "{} already has publishers: {}. Remap move_base output to {} "
@@ -177,6 +185,28 @@ class CornerSupervisorNode:
 
     def _control_callback(self, _event):
         now = rospy.Time.now()
+        if (
+            self._last_ownership_check is None
+            or (now - self._last_ownership_check).to_sec()
+            >= self._ownership_check_interval
+        ):
+            self._last_ownership_check = now
+            try:
+                other_publishers = [
+                    owner
+                    for owner in self._cmd_vel_publishers()
+                    if owner != rospy.get_name()
+                ]
+                if other_publishers:
+                    message = "conflicting /cmd_vel publishers: {}".format(
+                        ", ".join(other_publishers)
+                    )
+                    rospy.logerr_throttle(2.0, message)
+                    self._supervisor.fail(message)
+            except rosgraph.masterapi.Error as error:
+                rospy.logwarn_throttle(
+                    2.0, "cannot verify /cmd_vel ownership: %s", error
+                )
         try:
             transform = self._tf_buffer.lookup_transform(
                 "map", "base_link", rospy.Time(0), rospy.Duration(0.05)
