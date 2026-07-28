@@ -528,3 +528,131 @@ python -m unittest discover `
 - 完整路线三次验收：尚未执行。
 
 只有上述实车项目完成并写入 `HANDOFF.md` 后，才可将本配置称为实车稳定版本。
+
+## 15. Navfn + TEB 精确横移模式（当前实验方案）
+
+当前用于实测的 Profile 是 `navfn_teb_corner`。它使用 Navfn 生成全局路径，
+TEB 负责局部轨迹，并由 `teb_lateral_mode_controller` 根据前方路径曲率切换横移能力：
+
+- `STRAIGHT`：直线路段限制横移，`max_vel_y=0.02 m/s`、`acc_lim_y=0.20 m/s²`；
+- `CORNER`：前方出现大角度弯道时允许横移，`max_vel_y=0.18 m/s`、
+  `acc_lim_y=0.60 m/s²`；
+- 出弯后，只有前方路径重新变直、车头与出口方向误差不超过 10°，并连续保持
+  0.5 秒，才恢复 `STRAIGHT`。
+
+控制器只修改上述两个 TEB 参数，不修改前进速度、旋转速度、障碍距离或代价地图。
+全局路径或 TF 超时后会回退到 `STRAIGHT`。
+
+### 15.1 启动
+
+硬件层已经运行时：
+
+```bash
+source /opt/ros/noetic/setup.bash
+source ~/ucar_ws/devel/setup.bash
+
+roslaunch ucar_nav navigation_stack.launch \
+  navigation_profile:=navfn_teb_corner \
+  enable_lateral_mode_controller:=true
+```
+
+需要临时关闭曲率控制、只使用 YAML 固定值时：
+
+```bash
+roslaunch ucar_nav navigation_stack.launch \
+  navigation_profile:=navfn_teb_corner \
+  enable_lateral_mode_controller:=false
+```
+
+### 15.2 一键初始化 AMCL
+
+小车放在地图固定起点 `(0, 0, 0)` 后执行：
+
+```bash
+rosrun ucar_nav initialize_amcl.py
+```
+
+若实际起始位姿不同，可临时传参（yaw 单位为弧度）：
+
+```bash
+rosrun ucar_nav initialize_amcl.py \
+  _x:=0.0 _y:=0.0 _yaw:=0.0 \
+  _covariance_x:=0.10 _covariance_y:=0.10 \
+  _covariance_yaw:=0.0685
+```
+
+脚本会等待 AMCL 订阅 `/initialpose`，成功后只发布一次；10 秒内没有订阅者则返回
+退出码 2。它目前不由导航 launch 自动执行，避免小车摆放位置变化时写入错误位姿。
+
+### 15.3 观察模式与实时参数
+
+```bash
+rostopic echo /navigation/lateral_mode
+rostopic echo /navigation/lateral_mode_diagnostics
+
+rosrun dynamic_reconfigure dynparam get \
+  /move_base/TebLocalPlannerROS max_vel_y
+
+rosrun dynamic_reconfigure dynparam get \
+  /move_base/TebLocalPlannerROS acc_lim_y
+```
+
+诊断 JSON 包含当前模式、已应用模式、前方转角、出口方向、分析路径长度、最近路径点
+索引和错误信息。若 `mode` 已变化但 `applied_mode` 未变化，应检查
+`/move_base/TebLocalPlannerROS` dynamic reconfigure 服务是否存在。
+
+### 15.4 调参位置
+
+所有模式切换参数位于：
+
+```text
+config/lateral_mode_controller.yaml
+```
+
+| 参数 | 默认值 | 作用 |
+|---|---:|---|
+| `lookahead_distance` | 0.8 m | 向前分析的全局路径长度 |
+| `resample_spacing` | 0.10 m | 路径等弧长重采样间隔 |
+| `corner_enter_angle_deg` | 45° | 达到该转角进入弯道模式 |
+| `corner_exit_angle_deg` | 10° | 低于该转角才允许退出 |
+| `heading_exit_tolerance_deg` | 10° | 出弯时车头方向允许误差 |
+| `exit_hold_time` | 0.5 s | 满足退出条件的持续时间 |
+| `plan_timeout` | 1.0 s | 全局路径失效判定时间 |
+| `straight_max_vel_y` | 0.02 m/s | 直线路段最大横移速度 |
+| `straight_acc_lim_y` | 0.20 m/s² | 直线路段横移加速度 |
+| `corner_max_vel_y` | 0.18 m/s | 弯道路段最大横移速度 |
+| `corner_acc_lim_y` | 0.60 m/s² | 弯道路段横移加速度 |
+
+修改 YAML 后应重启导航 launch。第一轮实测只根据诊断单项调整：
+
+- 太晚进入弯道：增大 `lookahead_distance`，例如 `0.8 -> 1.0`；
+- 直线误判为弯道：提高 `corner_enter_angle_deg`，例如 `45 -> 55`；
+- 出弯后长期保持横移：适当增大 `corner_exit_angle_deg` 或
+  `heading_exit_tolerance_deg`，一次只改一个；
+- 弯道仍缺少调整能力：先确认确实进入 `CORNER`，再提高
+  `corner_max_vel_y`，不要同时修改多个参数。
+
+TEB 的静态默认值在：
+
+```text
+config/local_planners/teb_corner_safe.yaml
+```
+
+该文件默认使用直线模式值，并保持优化迭代为 `no_inner_iterations=2`、
+`no_outer_iterations=1`，防止再次出现约 1 秒一次的低频控制。
+
+### 15.5 实车记录
+
+```bash
+rosbag record -O ~/ucar_nav_bags/navfn-teb-lateral.bag \
+  /tf /tf_static /scan /odom /amcl_pose \
+  /move_base/NavfnROS/plan \
+  /move_base/TebLocalPlannerROS/local_plan \
+  /move_base/local_costmap/costmap \
+  /navigation/lateral_mode \
+  /navigation/lateral_mode_diagnostics \
+  /cmd_vel /move_base/status
+```
+
+发车前先确认 AMCL 初始位姿，再观察一轮无运动状态。实测时记录直线、入弯、弯中、
+出弯四阶段的模式；出现碰撞趋势立即人工停止。
