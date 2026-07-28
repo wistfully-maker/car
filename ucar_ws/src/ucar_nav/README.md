@@ -590,11 +590,8 @@ rosrun ucar_nav initialize_amcl.py \
 rostopic echo /navigation/lateral_mode
 rostopic echo /navigation/lateral_mode_diagnostics
 
-rosrun dynamic_reconfigure dynparam get \
-  /move_base/TebLocalPlannerROS max_vel_y
-
-rosrun dynamic_reconfigure dynparam get \
-  /move_base/TebLocalPlannerROS acc_lim_y
+rosparam get /move_base/TebLocalPlannerROS/max_vel_y
+rosparam get /move_base/TebLocalPlannerROS/acc_lim_y
 ```
 
 诊断 JSON 包含当前模式、已应用模式、前方转角、出口方向、分析路径长度、最近路径点
