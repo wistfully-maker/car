@@ -142,14 +142,14 @@ Navfn 只负责生成全局路径，不控制底盘。
 ## 6. TEB 过弯基线
 
 ```yaml
-max_vel_x: 0.20
-max_vel_x_backwards: 0.08
-max_vel_y: 0.08
-max_vel_theta: 0.40
+max_vel_x: 0.45
+max_vel_x_backwards: 0.20
+max_vel_y: 0.20
+max_vel_theta: 0.60
 
-acc_lim_x: 0.50
-acc_lim_y: 0.50
-acc_lim_theta: 0.80
+acc_lim_x: 0.80
+acc_lim_y: 0.80
+acc_lim_theta: 1.50
 
 max_global_plan_lookahead_dist: 0.8
 global_plan_viapoint_sep: 0.15
@@ -170,16 +170,16 @@ enable_homotopy_class_planning: false
 ## 7. DWA 过弯基线
 
 ```yaml
-max_vel_x: 0.20
-min_vel_x: -0.08
-max_vel_y: 0.08
-min_vel_y: -0.08
-max_vel_theta: 0.40
+max_vel_x: 0.45
+min_vel_x: -0.20
+max_vel_y: 0.20
+min_vel_y: -0.20
+max_vel_theta: 0.60
 min_vel_theta: 0.18
 
 acc_lim_x: 0.80
 acc_lim_y: 0.80
-acc_lim_theta: 1.20
+acc_lim_theta: 1.50
 
 sim_time: 1.2
 vx_samples: 8
@@ -192,7 +192,8 @@ occdist_scale: 0.20
 stop_time_buffer: 0.50
 ```
 
-DWA 与 TEB 使用相同速度上限。提高路径和障碍权重，优先保证沿全局路径且不扫墙。
+DWA 与 TEB 使用相同底盘运动学上限，不加载额外安全限速覆盖层。提高路径和障碍
+权重，优先保证沿全局路径且不扫墙。
 
 ## 8. 测试流程
 
