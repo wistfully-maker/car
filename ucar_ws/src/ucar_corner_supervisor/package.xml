@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>ucar_corner_supervisor</name>
+  <version>0.1.0</version>
+  <description>Corner-aware velocity supervisor for U-CAR navigation.</description>
+
+  <maintainer email="ucar@example.com">U-CAR Team</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <depend>actionlib_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>rospy</depend>
+  <depend>std_msgs</depend>
+  <depend>tf2_ros</depend>
+
+  <export/>
+</package>
