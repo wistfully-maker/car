@@ -2,6 +2,7 @@
   <!-- Four explicit comparison profiles; map and AMCL remain common. -->
   <arg name="map_file" default="$(find ucar_nav)/maps/map.yaml"/>
   <arg name="navigation_profile" default="navfn_teb_corner"/>
+  <arg name="enable_lateral_mode_controller" default="true"/>
 
   <group if="$(eval arg('navigation_profile') == 'navfn_teb_corner')">
     <param name="/move_base/base_global_planner" value="navfn/NavfnROS"/>
@@ -13,6 +14,8 @@
     <rosparam command="load" file="$(find ucar_nav)/config/costmap/local_teb.yaml" ns="/move_base"/>
     <rosparam command="load" file="$(find ucar_nav)/config/costmap/global_teb.yaml" ns="/move_base"/>
     <rosparam command="load" file="$(find ucar_nav)/config/move_base_teb.yaml" ns="/move_base"/>
+    <include if="$(arg enable_lateral_mode_controller)"
+             file="$(find ucar_nav)/launch/teb_lateral_mode_controller.launch"/>
   </group>
 
   <group if="$(eval arg('navigation_profile') == 'navfn_dwa_corner')">

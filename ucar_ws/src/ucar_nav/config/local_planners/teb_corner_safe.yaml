@@ -3,11 +3,11 @@ TebLocalPlannerROS:
   map_frame: map
 
   max_vel_x: 0.45
-  max_vel_x_backwards: 0.20
-  max_vel_y: 0.20
+  max_vel_x_backwards: 0.10
+  max_vel_y: 0.02
   max_vel_theta: 0.60
   acc_lim_x: 0.80
-  acc_lim_y: 0.80
+  acc_lim_y: 0.20
   acc_lim_theta: 1.50
   min_turning_radius: 0.0
 
@@ -23,8 +23,8 @@ TebLocalPlannerROS:
   yaw_goal_tolerance: 0.15
   free_goal_vel: false
 
-  min_obstacle_dist: 0.08
-  inflation_dist: 0.20
+  min_obstacle_dist: 0.15
+  inflation_dist: 0.30
   include_costmap_obstacles: true
   costmap_obstacles_behind_robot_dist: 1.0
 
@@ -46,8 +46,8 @@ TebLocalPlannerROS:
   no_inner_iterations: 2
   no_outer_iterations: 1
   penalty_epsilon: 0.05
-  weight_kinematics_nh: 1.0
-  weight_kinematics_forward_drive: 1.0
+  weight_kinematics_nh: 20.0
+  weight_kinematics_forward_drive: 20.0
   weight_max_vel_y: 2.0
   weight_optimaltime: 1.0
   weight_obstacle: 100.0

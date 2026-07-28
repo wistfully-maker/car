@@ -8,10 +8,13 @@ project(ucar_nav)
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
 ## is used, also find other catkin packages
 find_package(catkin REQUIRED COMPONENTS
+  dynamic_reconfigure
+  geometry_msgs
   nav_msgs
   roscpp
   rospy
   std_msgs
+  tf2_ros
 )
 
 ## System dependencies are found with CMake's conventions
@@ -162,7 +165,11 @@ include_directories(
 ## in contrast to setup.py, you can choose the destination
 install(PROGRAMS
   scripts/capture_nav_diagnostics.sh
+  scripts/controlled_nav_goal.py
   scripts/controlled_twist_test.py
+  scripts/initialize_amcl.py
+  scripts/lateral_mode_logic.py
+  scripts/teb_lateral_mode_controller.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
