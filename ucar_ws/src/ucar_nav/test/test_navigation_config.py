@@ -43,6 +43,31 @@ class NavigationConfigTests(unittest.TestCase):
                 relative_path,
             )
 
+    def test_corner_profile_files_exist(self):
+        required = (
+            "config/profiles/navfn_teb_corner.yaml",
+            "config/profiles/navfn_dwa_corner.yaml",
+            "config/profiles/legacy_0717_teb.yaml",
+            "config/profiles/legacy_0721_dwa.yaml",
+        )
+        for relative_path in required:
+            self.assertTrue(
+                (PACKAGE / relative_path).is_file(),
+                relative_path,
+            )
+
+    def test_corner_profiles_share_kinematic_limits(self):
+        teb = load_yaml("config/local_planners/teb_corner_safe.yaml")[
+            "TebLocalPlannerROS"
+        ]
+        dwa = load_yaml("config/local_planners/dwa_corner_safe.yaml")[
+            "DWAPlannerROS"
+        ]
+        for planner in (teb, dwa):
+            self.assertEqual(0.45, planner["max_vel_x"])
+            self.assertEqual(0.20, planner["max_vel_y"])
+            self.assertEqual(0.60, planner["max_vel_theta"])
+
     def test_launch_files_are_valid_xml(self):
         for path in LAUNCH.glob("*.launch"):
             ET.parse(path)
