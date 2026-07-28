@@ -37,7 +37,14 @@ class PackageConfigTests(unittest.TestCase):
         cmake = (PACKAGE_DIR / "CMakeLists.txt").read_text(encoding="utf-8")
         self.assertIn("catkin_install_python", cmake)
         self.assertIn("scripts/corner_supervisor_node.py", cmake)
-        self.assertIn("scripts/corner_geometry.py", cmake)
+        self.assertIn("catkin_python_setup()", cmake)
+        self.assertTrue((PACKAGE_DIR / "setup.py").is_file())
+        self.assertTrue(
+            (
+                PACKAGE_DIR
+                / "src/ucar_corner_supervisor/corner_geometry.py"
+            ).is_file()
+        )
 
 
 if __name__ == "__main__":

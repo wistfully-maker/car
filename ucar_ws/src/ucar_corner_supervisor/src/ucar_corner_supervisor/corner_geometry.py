@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 """Pure geometry and control primitives used by the ROS supervisor node."""
 
 from dataclasses import dataclass

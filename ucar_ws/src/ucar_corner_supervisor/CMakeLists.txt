@@ -11,10 +11,10 @@ find_package(catkin REQUIRED COMPONENTS
   tf2_ros
 )
 
+catkin_python_setup()
 catkin_package()
 
 catkin_install_python(PROGRAMS
-  scripts/corner_geometry.py
   scripts/corner_supervisor_node.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

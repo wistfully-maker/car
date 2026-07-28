@@ -14,7 +14,7 @@ import rospy
 from std_msgs.msg import String
 import tf2_ros
 
-from corner_geometry import (
+from ucar_corner_supervisor.corner_geometry import (
     Supervisor,
     SupervisorConfig,
     find_first_corner,

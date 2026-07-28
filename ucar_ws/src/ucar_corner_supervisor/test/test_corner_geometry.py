@@ -6,10 +6,14 @@ import sys
 import unittest
 
 
-SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
-sys.path.insert(0, str(SCRIPTS_DIR))
+PACKAGE_SOURCE = Path(__file__).resolve().parents[1] / "src"
+sys.path.insert(0, str(PACKAGE_SOURCE))
 
-from corner_geometry import find_first_corner, normalize_angle, resample_polyline
+from ucar_corner_supervisor.corner_geometry import (
+    find_first_corner,
+    normalize_angle,
+    resample_polyline,
+)
 
 
 class CornerGeometryTests(unittest.TestCase):
