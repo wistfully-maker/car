@@ -8,6 +8,7 @@ import threading
 
 from actionlib_msgs.msg import GoalStatus, GoalStatusArray
 from geometry_msgs.msg import Twist
+from map_msgs.msg import OccupancyGridUpdate
 from nav_msgs.msg import OccupancyGrid, Path
 import rosgraph
 import rospy
@@ -25,6 +26,7 @@ from ucar_corner_supervisor.path_corners import (
 )
 from ucar_corner_supervisor.swept_collision import (
     GridMap,
+    apply_grid_update,
     check_rotation_sweep,
 )
 
@@ -33,6 +35,7 @@ RAW_COMMAND_TOPIC = "/move_base/cmd_vel_raw"
 GLOBAL_PLAN_TOPIC = "/move_base/NavfnROS/plan"
 MOVE_BASE_STATUS_TOPIC = "/move_base/status"
 COSTMAP_TOPIC = "/move_base/local_costmap/costmap"
+COSTMAP_UPDATE_TOPIC = "/move_base/local_costmap/costmap_updates"
 OUTPUT_COMMAND_TOPIC = "/cmd_vel"
 STATE_TOPIC = "~state"
 DIAGNOSTIC_TOPIC = "~diagnostic"
@@ -131,6 +134,9 @@ class CornerSupervisorNode:
         self._costmap_topic = rospy.get_param(
             "~costmap_topic", COSTMAP_TOPIC
         )
+        self._costmap_update_topic = rospy.get_param(
+            "~costmap_update_topic", COSTMAP_UPDATE_TOPIC
+        )
         config = SupervisorConfig(
             trigger_distance=float(
                 rospy.get_param("~corner_trigger_distance", 0.25)
@@ -185,6 +191,12 @@ class CornerSupervisorNode:
             OccupancyGrid,
             self._costmap_callback,
             queue_size=1,
+        )
+        rospy.Subscriber(
+            self._costmap_update_topic,
+            OccupancyGridUpdate,
+            self._costmap_update_callback,
+            queue_size=10,
         )
 
         self._tf_buffer = tf2_ros.Buffer(cache_time=rospy.Duration(10.0))
@@ -259,6 +271,40 @@ class CornerSupervisorNode:
             self._costmap = grid
             self._costmap_stamp = rospy.Time.now()
             self._costmap_frame = message.header.frame_id
+
+    def _costmap_update_callback(self, message):
+        with self._lock:
+            current = self._costmap
+            if current is None:
+                rospy.logwarn_throttle(
+                    2.0, "ignoring costmap update before the full map"
+                )
+                return
+            updated = GridMap(
+                width=current.width,
+                height=current.height,
+                resolution=current.resolution,
+                origin_x=current.origin_x,
+                origin_y=current.origin_y,
+                data=list(current.data),
+                origin_yaw=current.origin_yaw,
+            )
+            try:
+                apply_grid_update(
+                    updated,
+                    message.x,
+                    message.y,
+                    message.width,
+                    message.height,
+                    list(message.data),
+                )
+            except ValueError as error:
+                rospy.logwarn_throttle(
+                    2.0, "invalid local costmap update: %s", error
+                )
+                return
+            self._costmap = updated
+            self._costmap_stamp = rospy.Time.now()
 
     @staticmethod
     def _remaining_path(path, x, y):

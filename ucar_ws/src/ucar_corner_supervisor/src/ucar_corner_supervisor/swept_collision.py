@@ -24,6 +24,22 @@ class SweepResult:
     reason: str = ""
 
 
+def apply_grid_update(grid, x, y, width, height, data):
+    """Apply one row-major OccupancyGridUpdate to an existing grid."""
+    if x < 0 or y < 0 or width < 0 or height < 0:
+        raise ValueError("grid update dimensions must be non-negative")
+    if x + width > grid.width or y + height > grid.height:
+        raise ValueError("grid update lies outside the current grid")
+    if len(data) != width * height:
+        raise ValueError("grid update data length does not match its dimensions")
+    for row in range(height):
+        source_start = row * width
+        target_start = (y + row) * grid.width + x
+        grid.data[target_start : target_start + width] = data[
+            source_start : source_start + width
+        ]
+
+
 def _transform_polygon(footprint, x, y, yaw):
     cosine = math.cos(yaw)
     sine = math.sin(yaw)

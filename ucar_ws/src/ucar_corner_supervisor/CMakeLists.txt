@@ -4,6 +4,7 @@ project(ucar_corner_supervisor)
 find_package(catkin REQUIRED COMPONENTS
   actionlib_msgs
   geometry_msgs
+  map_msgs
   nav_msgs
   rosgraph
   rospy

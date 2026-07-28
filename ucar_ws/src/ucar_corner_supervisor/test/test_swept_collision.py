@@ -11,6 +11,7 @@ sys.path.insert(0, str(PACKAGE_SOURCE))
 
 from ucar_corner_supervisor.swept_collision import (
     GridMap,
+    apply_grid_update,
     check_rotation_sweep,
 )
 
@@ -152,6 +153,37 @@ class SweptCollisionTests(unittest.TestCase):
             lethal_threshold=100,
         )
         self.assertFalse(result.safe)
+
+    def test_incremental_update_changes_exact_grid_region(self):
+        grid = GridMap(
+            width=4,
+            height=3,
+            resolution=0.1,
+            origin_x=0.0,
+            origin_y=0.0,
+            data=[0] * 12,
+        )
+        apply_grid_update(
+            grid,
+            x=1,
+            y=1,
+            width=2,
+            height=2,
+            data=[10, 11, 20, 21],
+        )
+        self.assertEqual(grid.data, [0, 0, 0, 0, 0, 10, 11, 0, 0, 20, 21, 0])
+
+    def test_incremental_update_rejects_out_of_bounds_region(self):
+        grid = empty_grid()
+        with self.assertRaises(ValueError):
+            apply_grid_update(
+                grid,
+                x=99,
+                y=99,
+                width=2,
+                height=2,
+                data=[1, 2, 3, 4],
+            )
 
 
 if __name__ == "__main__":

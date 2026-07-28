@@ -168,6 +168,8 @@ rostopic info /cmd_vel
 | `completed_corner_match_distance` | 0.25 m | 重规划后匹配已完成物理拐点的位置容差 |
 | `completed_corner_match_heading_deg` | 20° | 重规划后匹配已完成拐点的出口方向容差 |
 | `costmap_timeout` | 1.5 s | 局部代价地图最大允许数据年龄 |
+| `costmap_topic` | `/move_base/local_costmap/costmap` | 完整局部代价地图；用于初始化尺寸、原点和数据 |
+| `costmap_update_topic` | `/move_base/local_costmap/costmap_updates` | 增量代价地图；持续合并并刷新地图时效性 |
 | `lethal_cost_threshold` | 100 | OccupancyGrid 中判为墙或致命障碍的值 |
 | `sweep_angle_step_deg` | 3° | 旋转扫掠检查的角度采样步长 |
 | `footprint` | 0.342×0.256 m | 小车矩形外轮廓，必须覆盖车壳突出部分 |

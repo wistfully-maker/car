@@ -15,6 +15,7 @@ completed_corner_match_distance: 0.25
 completed_corner_match_heading_deg: 20.0
 
 costmap_topic: /move_base/local_costmap/costmap
+costmap_update_topic: /move_base/local_costmap/costmap_updates
 costmap_timeout: 1.5
 lethal_cost_threshold: 100
 sweep_angle_step_deg: 3.0
