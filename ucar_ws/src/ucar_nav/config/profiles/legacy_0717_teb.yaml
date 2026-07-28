@@ -1,0 +1,12 @@
+# July 17 legacy baseline.  Uses the current competition map via launch arg.
+profile: legacy_0717_teb
+map: maps/map.yaml
+global_planner: global_planner/GlobalPlanner
+local_planner: teb_local_planner/TebLocalPlannerROS
+parameter_files:
+  - config/legacy/0717/global_planner.yaml
+  - config/legacy/0717/teb.yaml
+  - config/legacy/0717/common.yaml
+  - config/legacy/0717/local.yaml
+  - config/legacy/0717/global.yaml
+  - config/legacy/0717/move_base.yaml
