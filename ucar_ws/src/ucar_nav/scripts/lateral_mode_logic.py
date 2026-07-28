@@ -142,18 +142,26 @@ def analyze_path(points, lookahead_distance, resample_spacing):
 
 def mode_parameters(
     mode,
+    straight_max_vel_x,
+    straight_max_vel_x_backwards,
     straight_max_vel_y,
     straight_acc_lim_y,
+    corner_max_vel_x,
+    corner_max_vel_x_backwards,
     corner_max_vel_y,
     corner_acc_lim_y,
 ):
     if mode == "STRAIGHT":
         return {
+            "max_vel_x": straight_max_vel_x,
+            "max_vel_x_backwards": straight_max_vel_x_backwards,
             "max_vel_y": straight_max_vel_y,
             "acc_lim_y": straight_acc_lim_y,
         }
     if mode == "CORNER":
         return {
+            "max_vel_x": corner_max_vel_x,
+            "max_vel_x_backwards": corner_max_vel_x_backwards,
             "max_vel_y": corner_max_vel_y,
             "acc_lim_y": corner_acc_lim_y,
         }

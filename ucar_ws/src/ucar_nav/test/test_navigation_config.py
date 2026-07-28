@@ -193,6 +193,13 @@ class NavigationConfigTests(unittest.TestCase):
             "Navfn may publish only when replanning, not every control cycle",
         )
 
+    def test_lateral_controller_slows_forward_motion_only_in_corners(self):
+        controller = load_yaml("config/lateral_mode_controller.yaml")
+        self.assertEqual(0.45, controller["straight_max_vel_x"])
+        self.assertEqual(0.10, controller["straight_max_vel_x_backwards"])
+        self.assertEqual(0.20, controller["corner_max_vel_x"])
+        self.assertEqual(0.02, controller["corner_max_vel_x_backwards"])
+
     def test_teb_safe_profile_matches_current_safety_limits(self):
         teb = load_yaml(
             "config/local_planners/teb_safe.yaml"

@@ -9,8 +9,12 @@ corner_exit_angle_deg: 10.0
 heading_exit_tolerance_deg: 10.0
 exit_hold_time: 0.5
 plan_timeout: 300.0
+straight_max_vel_x: 0.45
+straight_max_vel_x_backwards: 0.10
 straight_max_vel_y: 0.02
 straight_acc_lim_y: 0.20
+corner_max_vel_x: 0.20
+corner_max_vel_x_backwards: 0.02
 corner_max_vel_y: 0.18
 corner_acc_lim_y: 0.60
 reconfigure_namespace: /move_base/TebLocalPlannerROS

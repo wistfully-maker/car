@@ -46,11 +46,23 @@ class TebLateralModeController:
             rospy.get_param("~resample_spacing", 0.10)
         )
         self.plan_timeout = float(rospy.get_param("~plan_timeout", 1.0))
+        self.straight_max_vel_x = float(
+            rospy.get_param("~straight_max_vel_x", 0.45)
+        )
+        self.straight_max_vel_x_backwards = float(
+            rospy.get_param("~straight_max_vel_x_backwards", 0.10)
+        )
         self.straight_max_vel_y = float(
             rospy.get_param("~straight_max_vel_y", 0.02)
         )
         self.straight_acc_lim_y = float(
             rospy.get_param("~straight_acc_lim_y", 0.20)
+        )
+        self.corner_max_vel_x = float(
+            rospy.get_param("~corner_max_vel_x", 0.20)
+        )
+        self.corner_max_vel_x_backwards = float(
+            rospy.get_param("~corner_max_vel_x_backwards", 0.02)
         )
         self.corner_max_vel_y = float(
             rospy.get_param("~corner_max_vel_y", 0.18)
@@ -121,8 +133,12 @@ class TebLateralModeController:
             return
         target = mode_parameters(
             mode,
+            self.straight_max_vel_x,
+            self.straight_max_vel_x_backwards,
             self.straight_max_vel_y,
             self.straight_acc_lim_y,
+            self.corner_max_vel_x,
+            self.corner_max_vel_x_backwards,
             self.corner_max_vel_y,
             self.corner_acc_lim_y,
         )
@@ -131,8 +147,9 @@ class TebLateralModeController:
             self.applied_mode = mode
             self.last_error = ""
             rospy.loginfo(
-                "TEB lateral mode=%s max_vel_y=%.3f acc_lim_y=%.3f",
+                "TEB lateral mode=%s max_vel_x=%.3f max_vel_y=%.3f acc_lim_y=%.3f",
                 mode,
+                target["max_vel_x"],
                 target["max_vel_y"],
                 target["acc_lim_y"],
             )

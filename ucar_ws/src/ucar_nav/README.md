@@ -615,8 +615,12 @@ config/lateral_mode_controller.yaml
 | `heading_exit_tolerance_deg` | 10° | 出弯时车头方向允许误差 |
 | `exit_hold_time` | 0.5 s | 满足退出条件的持续时间 |
 | `plan_timeout` | 300 s | 稀疏发布的 Navfn 全局路径缓存时间 |
+| `straight_max_vel_x` | 0.45 m/s | 直线路段最大前进速度 |
+| `straight_max_vel_x_backwards` | 0.10 m/s | 直线路段最大后退速度 |
 | `straight_max_vel_y` | 0.02 m/s | 直线路段最大横移速度 |
 | `straight_acc_lim_y` | 0.20 m/s² | 直线路段横移加速度 |
+| `corner_max_vel_x` | 0.20 m/s | 弯道路段最大前进速度 |
+| `corner_max_vel_x_backwards` | 0.02 m/s | 弯道路段最大后退速度 |
 | `corner_max_vel_y` | 0.18 m/s | 弯道路段最大横移速度 |
 | `corner_acc_lim_y` | 0.60 m/s² | 弯道路段横移加速度 |
 

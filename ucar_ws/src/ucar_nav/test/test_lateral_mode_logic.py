@@ -107,19 +107,35 @@ class LateralModeStateMachineTests(unittest.TestCase):
 class ModeParameterTests(unittest.TestCase):
     def test_straight_parameters(self):
         self.assertEqual(
-            {"max_vel_y": 0.02, "acc_lim_y": 0.20},
-            logic.mode_parameters("STRAIGHT", 0.02, 0.20, 0.18, 0.60),
+            {
+                "max_vel_x": 0.45,
+                "max_vel_x_backwards": 0.10,
+                "max_vel_y": 0.02,
+                "acc_lim_y": 0.20,
+            },
+            logic.mode_parameters(
+                "STRAIGHT", 0.45, 0.10, 0.02, 0.20, 0.20, 0.02, 0.18, 0.60
+            ),
         )
 
     def test_corner_parameters(self):
         self.assertEqual(
-            {"max_vel_y": 0.18, "acc_lim_y": 0.60},
-            logic.mode_parameters("CORNER", 0.02, 0.20, 0.18, 0.60),
+            {
+                "max_vel_x": 0.20,
+                "max_vel_x_backwards": 0.02,
+                "max_vel_y": 0.18,
+                "acc_lim_y": 0.60,
+            },
+            logic.mode_parameters(
+                "CORNER", 0.45, 0.10, 0.02, 0.20, 0.20, 0.02, 0.18, 0.60
+            ),
         )
 
     def test_unknown_mode_is_rejected(self):
         with self.assertRaises(ValueError):
-            logic.mode_parameters("UNKNOWN", 0.02, 0.20, 0.18, 0.60)
+            logic.mode_parameters(
+                "UNKNOWN", 0.45, 0.10, 0.02, 0.20, 0.20, 0.02, 0.18, 0.60
+            )
 
 
 if __name__ == "__main__":
