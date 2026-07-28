@@ -7,7 +7,12 @@
 1. `NavfnROS + TEB`；
 2. `NavfnROS + DWA`。
 
-两套方案使用相同地图、航点、车体轮廓、代价地图安全边界和速度上限，
+同时纳入两份曾经能够完成导航的历史压缩包，建立两个独立的 legacy 对照配置：
+
+3. 2026-07-17 `GlobalPlanner + TEB`；
+4. 2026-07-21 `AstarPlannerRos + DWA`。
+
+四套方案使用相同地图、航点、车体轮廓和首轮速度上限，
 通过同一起点到 `/home/ucar/waypoints.xml` 航点的实车测试比较效果。
 
 本阶段只解决稳定生成全局路径和通过固定直角弯，不接入任务编排器，也不追求比赛
@@ -29,10 +34,36 @@ global_planner:=navfn
 local_planner:=dwa
 ```
 
+历史配置通过独立 profile 选择：
+
+```text
+navigation_profile:=legacy_0717_teb
+navigation_profile:=legacy_0721_dwa
+```
+
 保留 `global_planner/GlobalPlanner` 作为诊断回退选项，但首轮实车只比较
-`NavfnROS + TEB` 和 `NavfnROS + DWA`。
+两套 corner-safe 配置和两套 legacy 配置。
 
 任意一次启动只能加载一个全局规划器和一个局部规划器的参数。
+
+## 2.1 历史压缩包来源
+
+历史配置来源和校验值：
+
+```text
+E:\ucar_ws_backup.tar.gz
+SHA256 4962E3BF5B6D5B3D017DD2337B9CA909EE1084ECF4E189B998022D2E0BF56C0B
+
+E:\ucar_wsbackup.tar.gz
+SHA256 3D768C9C8E51F2E58C032B3C719B9EC3DDA47B650C578EA3D3B0CFA2C48F3BA4
+```
+
+只提取并整理 `ucar_nav` 的导航配置，不复制 `build`、`devel` 或整个工作空间。
+原始文件保存在工作区外的只读参考目录：
+
+```text
+D:\program_sec\智能车\external\original_navigation_archives_20260728
+```
 
 ## 3. 不修改的基准
 
@@ -54,6 +85,9 @@ footprint:
 
 每轮测试从相同物理起点重新初始化 AMCL。只有当 Navfn 在小车静止时仍不能为原航点
 生成路径，才检查起点格、目标格及通道代价值；不提前修改地图或航点。
+
+两套 legacy 配置原本引用 `maps/map_new.yaml`。整理后的 profile 必须改为当前
+`maps/map.yaml`，不得把压缩包内旧地图部署为比赛地图。
 
 ## 4. 代价地图
 
@@ -168,6 +202,20 @@ DWA 与 TEB 使用相同速度上限。提高路径和障碍权重，优先保�
 
 1. `NavfnROS + TEB`；
 2. `NavfnROS + DWA`。
+3. `legacy_0717_teb`；
+4. `legacy_0721_dwa`。
+
+两套 legacy 配置首轮保留原始规划器、评分和代价地图参数，但通过独立覆盖层统一限制：
+
+```yaml
+max_vel_x: 0.20
+max_vel_x_backwards: 0.08
+max_vel_y: 0.08
+max_vel_theta: 0.40
+```
+
+`legacy_0717_teb` 原文件中的 `2.4 m/s` 和 `legacy_0721_dwa` 原文件中的
+`0.45 m/s` 不用于首轮测试。只有低速完成航点后，才允许单变量提高速度。
 
 每轮：
 
@@ -195,6 +243,6 @@ DWA 与 TEB 使用相同速度上限。提高路径和障碍权重，优先保�
 
 ## 10. 回退
 
-现有配置和Git历史保持不删除。新配置使用独立文件，启动参数决定加载哪套方案。
-若两套 `corner_safe` 配置均失败，可切回现有配置或从导入提交 `aaa6cb3` 提取最初
-配置进行独立对照，不直接覆盖当前工作文件。
+现有配置、Git历史和两份压缩包保持不删除。所有新配置使用独立文件，启动参数决定
+加载哪套方案。四套方案均失败时，仍可切回当前配置或从导入提交 `aaa6cb3` 提取
+最初配置进行独立对照，不直接覆盖当前工作文件。
