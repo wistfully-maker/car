@@ -365,7 +365,7 @@ class NavigationConfigTests(unittest.TestCase):
             args,
         )
 
-    def test_base_command_timeout_exceeds_slowest_control_period(self):
+    def test_base_command_timeout_matches_teb_control_period(self):
         root = ET.parse(LAUNCH / "robot_base_bringup.launch").getroot()
         timeout_param = root.find(
             "param[@name='/base_driver/cmd_timeout']"
@@ -375,7 +375,7 @@ class NavigationConfigTests(unittest.TestCase):
         teb_period = 1.0 / load_yaml(
             "config/move_base_teb.yaml"
         )["controller_frequency"]
-        self.assertGreaterEqual(timeout, 2.0 * teb_period)
+        self.assertAlmostEqual(timeout, teb_period)
 
     def test_common_costmap_uses_safe_polygon_and_laser(self):
         common = load_yaml("config/costmap/common.yaml")
