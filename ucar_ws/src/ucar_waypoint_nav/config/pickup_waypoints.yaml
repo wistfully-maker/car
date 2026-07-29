@@ -1,0 +1,42 @@
+version: 1
+frame_id: map
+map_sha256: 1b50360750baa7b86bf0e7cc86af1e4ae81753d819b16d9610a9719f72523e2e
+waypoints:
+- name: pass_1
+  kind: pass_through
+  x: 1.1
+  y: -0.3
+  yaw: 0.927295
+  switch_radius: 0.35
+  exit_radius: 0.45
+  heading_tolerance: 0.698132
+  minimum_pass_speed: 0.08
+  clearance: 0.241
+- name: pass_2
+  kind: pass_through
+  x: 2.55
+  y: -0.25
+  yaw: 1.325818
+  switch_radius: 0.35
+  exit_radius: 0.45
+  heading_tolerance: 0.698132
+  minimum_pass_speed: 0.08
+  clearance: 0.2
+- name: pass_3
+  kind: pass_through
+  x: 0.05
+  y: -0.7
+  yaw: 3.017238
+  switch_radius: 0.35
+  exit_radius: 0.45
+  heading_tolerance: 0.698132
+  minimum_pass_speed: 0.08
+  clearance: 0.35
+- name: pickup_observation
+  kind: terminal
+  x: -1.40219
+  y: -0.627908
+  yaw: -3.0878
+  position_tolerance: 0.15
+  yaw_tolerance: 0.15
+  settle_time: 0.5
