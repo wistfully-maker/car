@@ -1,0 +1,6 @@
+start_xy_tolerance: 0.20
+start_yaw_tolerance: 0.25
+route_timeout: 300.0
+pass_speed_grace: 0.50
+terminal_speed_tolerance: 0.03
+move_base_wait_timeout: 30.0
