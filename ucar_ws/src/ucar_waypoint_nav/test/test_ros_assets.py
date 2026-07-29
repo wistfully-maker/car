@@ -54,6 +54,41 @@ class RosAssetTests(unittest.TestCase):
         )
         self.assertEqual(config["controller_frequency"], 10.0)
 
+    def test_diagnostic_script_captures_navigation_evidence(self):
+        source = (
+            ROOT / "scripts/capture_navigation_run.sh"
+        ).read_text(encoding="utf-8")
+        for required in (
+            "rosparam dump",
+            "/scan",
+            "/tf",
+            "/amcl_pose",
+            "/odom",
+            "/cmd_vel",
+            "/move_base/local_costmap/costmap",
+            "/ucar_waypoint_nav/diagnostic",
+            "rev-parse HEAD",
+            "sha256sum",
+        ):
+            self.assertIn(required, source)
+
+    def test_readme_documents_full_operation_cycle(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        for required in (
+            "一键启动",
+            "分步启动",
+            "global_planner:=global_planner",
+            "global_planner:=navfn",
+            "/ucar_waypoint_nav/start",
+            "/ucar_waypoint_nav/cancel",
+            "AMCL",
+            "pickup_waypoints.yaml",
+            "teb.yaml",
+            "trajectory is not feasible",
+            "关闭",
+        ):
+            self.assertIn(required, readme)
+
 
 if __name__ == "__main__":
     unittest.main()
