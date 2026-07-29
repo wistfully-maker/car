@@ -1,0 +1,21 @@
+# 冻结的第一版参数，来源提交 19e0ce7。建立基线前不要修改。
+controller_rate: 20.0
+raw_command_timeout: 0.5
+ownership_check_interval: 0.5
+path_timeout: 0.0
+
+path_search_distance: 1.2
+min_corner_angle_deg: 45.0
+path_resample_spacing: 0.05
+direction_window: 0.20
+
+corner_trigger_distance: 0.25
+corner_release_distance: 0.45
+following_max_lateral: 0.02
+
+turn_max_angular: 0.35
+turn_min_angular: 0.18
+turn_kp: 0.9
+heading_tolerance_deg: 8.0
+heading_hold_time: 0.30
+turn_timeout: 8.0

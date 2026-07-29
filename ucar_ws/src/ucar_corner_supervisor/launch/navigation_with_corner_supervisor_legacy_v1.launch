@@ -1,0 +1,19 @@
+<launch>
+  <arg name="map_file" default="$(find ucar_nav)/maps/map.yaml"/>
+  <arg name="navigation_profile" default="navfn_teb_corner"/>
+  <arg name="supervisor_config"
+       default="$(find ucar_corner_supervisor)/config/corner_supervisor_legacy_v1.yaml"/>
+
+  <group>
+    <remap from="/cmd_vel" to="/move_base/cmd_vel_raw"/>
+    <include file="$(find ucar_nav)/launch/navigation_stack.launch">
+      <arg name="map_file" value="$(arg map_file)"/>
+      <arg name="navigation_profile" value="$(arg navigation_profile)"/>
+      <arg name="enable_lateral_mode_controller" value="false"/>
+    </include>
+  </group>
+
+  <include file="$(find ucar_corner_supervisor)/launch/corner_supervisor_legacy_v1.launch">
+    <arg name="config_file" value="$(arg supervisor_config)"/>
+  </include>
+</launch>

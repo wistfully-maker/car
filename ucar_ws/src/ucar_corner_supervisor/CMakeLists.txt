@@ -17,6 +17,7 @@ catkin_package()
 
 catkin_install_python(PROGRAMS
   scripts/corner_supervisor_node.py
+  scripts/corner_supervisor_legacy_v1_node.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

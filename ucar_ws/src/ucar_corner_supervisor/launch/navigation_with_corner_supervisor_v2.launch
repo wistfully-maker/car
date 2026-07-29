@@ -1,0 +1,12 @@
+<launch>
+  <arg name="map_file" default="$(find ucar_nav)/maps/map.yaml"/>
+  <arg name="navigation_profile" default="navfn_teb_corner"/>
+  <arg name="supervisor_config"
+       default="$(find ucar_corner_supervisor)/config/corner_supervisor.yaml"/>
+
+  <include file="$(find ucar_corner_supervisor)/launch/navigation_with_corner_supervisor.launch">
+    <arg name="map_file" value="$(arg map_file)"/>
+    <arg name="navigation_profile" value="$(arg navigation_profile)"/>
+    <arg name="supervisor_config" value="$(arg supervisor_config)"/>
+  </include>
+</launch>

@@ -1,0 +1,12 @@
+<launch>
+  <arg name="config_file"
+       default="$(find ucar_corner_supervisor)/config/corner_supervisor_legacy_v1.yaml"/>
+
+  <node pkg="ucar_corner_supervisor"
+        type="corner_supervisor_legacy_v1_node.py"
+        name="ucar_corner_supervisor_legacy_v1"
+        output="screen"
+        required="true">
+    <rosparam command="load" file="$(arg config_file)"/>
+  </node>
+</launch>

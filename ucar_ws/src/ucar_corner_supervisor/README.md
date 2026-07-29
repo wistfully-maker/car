@@ -1,5 +1,8 @@
 # ucar_corner_supervisor
 
+第一版基线与新版的完整启动、停止、AMCL 初始化、航点发布、调参与排错说明见
+[`README_V1_V2.md`](README_V1_V2.md)。
+
 这是一个独立于 `ucar_nav` 的 ROS 1 功能包。它不启动底盘、雷达、地图、AMCL、
 `move_base`、Navfn 或 TEB，只接管导航速度输出：
 
