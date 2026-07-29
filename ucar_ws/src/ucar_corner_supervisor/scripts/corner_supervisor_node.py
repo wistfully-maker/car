@@ -27,7 +27,9 @@ from ucar_corner_supervisor.path_corners import (
 from ucar_corner_supervisor.swept_collision import (
     GridMap,
     apply_grid_update,
+    can_reuse_sweep_cache,
     check_rotation_sweep,
+    needs_rotation_sweep,
 )
 
 
@@ -64,8 +66,13 @@ class CornerSupervisorNode:
         self._costmap = None
         self._costmap_stamp = None
         self._costmap_frame = None
+        self._costmap_revision = 0
         self._last_state = None
         self._last_ownership_check = None
+        self._last_sweep_check = None
+        self._last_sweep_target = None
+        self._cached_sweep_result = None
+        self._cached_sweep_revision = None
 
         self._rate = float(rospy.get_param("~controller_rate", 20.0))
         self._raw_timeout = float(
@@ -137,10 +144,16 @@ class CornerSupervisorNode:
         self._costmap_update_topic = rospy.get_param(
             "~costmap_update_topic", COSTMAP_UPDATE_TOPIC
         )
+        self._corner_trigger_distance = float(
+            rospy.get_param("~corner_trigger_distance", 0.25)
+        )
+        self._sweep_check_rate = float(
+            rospy.get_param("~sweep_check_rate", 5.0)
+        )
+        if self._sweep_check_rate <= 0.0:
+            raise ValueError("sweep_check_rate must be positive")
         config = SupervisorConfig(
-            trigger_distance=float(
-                rospy.get_param("~corner_trigger_distance", 0.25)
-            ),
+            trigger_distance=self._corner_trigger_distance,
             release_distance=float(
                 rospy.get_param("~corner_release_distance", 0.45)
             ),
@@ -271,6 +284,7 @@ class CornerSupervisorNode:
             self._costmap = grid
             self._costmap_stamp = rospy.Time.now()
             self._costmap_frame = message.header.frame_id
+            self._costmap_revision += 1
 
     def _costmap_update_callback(self, message):
         with self._lock:
@@ -305,6 +319,7 @@ class CornerSupervisorNode:
                 return
             self._costmap = updated
             self._costmap_stamp = rospy.Time.now()
+            self._costmap_revision += 1
 
     @staticmethod
     def _remaining_path(path, x, y):
@@ -390,6 +405,7 @@ class CornerSupervisorNode:
             costmap = self._costmap
             costmap_stamp = self._costmap_stamp
             costmap_frame = self._costmap_frame
+            costmap_revision = self._costmap_revision
 
         raw_fresh = (
             raw_stamp is not None
@@ -456,9 +472,48 @@ class CornerSupervisorNode:
         sweep_target = self._supervisor.target_heading
         if sweep_target is None and observation is not None:
             sweep_target = observation.exit_heading
-        if sweep_target is not None:
+        sweep_needed = needs_rotation_sweep(
+            goal_active,
+            self._supervisor.state,
+            observation.distance if observation else None,
+            self._corner_trigger_distance,
+        )
+        if not sweep_needed:
+            self._last_sweep_check = None
+            self._last_sweep_target = None
+            self._cached_sweep_result = None
+            self._cached_sweep_revision = None
+        if sweep_needed and sweep_target is not None:
             sweep_safe = False
-            if costmap_fresh and costmap_frame:
+            target_changed = (
+                self._last_sweep_target is None
+                or abs(
+                    (sweep_target - self._last_sweep_target + math.pi)
+                    % (2.0 * math.pi)
+                    - math.pi
+                )
+                >= self._sweep_angle_step
+            )
+            elapsed_since_check = (
+                float("inf")
+                if self._last_sweep_check is None
+                else (now - self._last_sweep_check).to_sec()
+            )
+            reuse_cache = (
+                self._cached_sweep_result is not None
+                and can_reuse_sweep_cache(
+                    costmap_fresh,
+                    self._cached_sweep_revision,
+                    costmap_revision,
+                    target_changed,
+                    elapsed_since_check,
+                    1.0 / self._sweep_check_rate,
+                )
+            )
+            if reuse_cache:
+                sweep_result = self._cached_sweep_result
+                sweep_safe = sweep_result.safe
+            elif costmap_fresh and costmap_frame:
                 try:
                     costmap_transform = self._tf_buffer.lookup_transform(
                         costmap_frame,
@@ -490,6 +545,10 @@ class CornerSupervisorNode:
                         lethal_threshold=self._lethal_cost_threshold,
                     )
                     sweep_safe = sweep_result.safe
+                    self._cached_sweep_result = sweep_result
+                    self._cached_sweep_revision = costmap_revision
+                    self._last_sweep_check = now
+                    self._last_sweep_target = sweep_target
                 except (
                     tf2_ros.LookupException,
                     tf2_ros.ConnectivityException,
@@ -578,6 +637,10 @@ class CornerSupervisorNode:
                         ),
                         "costmap_fresh": costmap_fresh,
                         "sweep_safe": sweep_safe,
+                        "sweep_needed": sweep_needed,
+                        "sweep_reason": (
+                            sweep_result.reason if sweep_result else ""
+                        ),
                         "blocking_cell": (
                             sweep_result.blocking_cell
                             if sweep_result

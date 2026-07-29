@@ -12,7 +12,9 @@ sys.path.insert(0, str(PACKAGE_SOURCE))
 from ucar_corner_supervisor.swept_collision import (
     GridMap,
     apply_grid_update,
+    can_reuse_sweep_cache,
     check_rotation_sweep,
+    needs_rotation_sweep,
 )
 
 
@@ -42,6 +44,40 @@ def set_cost(grid, x, y, cost):
 
 
 class SweptCollisionTests(unittest.TestCase):
+    def test_sweep_is_only_needed_near_a_corner_during_an_active_goal(self):
+        self.assertFalse(
+            needs_rotation_sweep(False, "IDLE", 0.1, 0.25)
+        )
+        self.assertFalse(
+            needs_rotation_sweep(True, "FOLLOWING", 0.4, 0.25)
+        )
+        self.assertTrue(
+            needs_rotation_sweep(True, "FOLLOWING", 0.25, 0.25)
+        )
+        self.assertTrue(
+            needs_rotation_sweep(True, "TURNING", None, 0.25)
+        )
+        self.assertTrue(
+            needs_rotation_sweep(True, "BLOCKED", None, 0.25)
+        )
+
+    def test_sweep_cache_requires_fresh_unchanged_costmap(self):
+        self.assertTrue(
+            can_reuse_sweep_cache(True, 12, 12, False, 0.05, 0.20)
+        )
+        self.assertFalse(
+            can_reuse_sweep_cache(True, 12, 13, False, 0.05, 0.20)
+        )
+        self.assertFalse(
+            can_reuse_sweep_cache(False, 12, 12, False, 0.05, 0.20)
+        )
+        self.assertFalse(
+            can_reuse_sweep_cache(True, 12, 12, True, 0.05, 0.20)
+        )
+        self.assertFalse(
+            can_reuse_sweep_cache(True, 12, 12, False, 0.20, 0.20)
+        )
+
     def test_empty_grid_allows_quarter_turn(self):
         result = check_rotation_sweep(
             empty_grid(),

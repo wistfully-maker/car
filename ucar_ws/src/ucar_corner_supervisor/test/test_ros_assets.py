@@ -29,6 +29,8 @@ class RosAssetTests(unittest.TestCase):
             "apply_grid_update",
             "corner_confidence",
             "sweep_safe",
+            "sweep_needed",
+            "sweep_reason",
         ):
             self.assertIn(interface, source)
 
@@ -61,9 +63,14 @@ class RosAssetTests(unittest.TestCase):
             "costmap_update_topic",
             "lethal_cost_threshold",
             "sweep_angle_step_deg",
+            "sweep_check_rate",
             "footprint",
         ):
             self.assertIn(parameter + ":", config)
+        self.assertIn("min_corner_angle_deg: 70.0", config)
+        self.assertIn("corner_trigger_distance: 0.20", config)
+        self.assertIn("following_max_lateral: 0.05", config)
+        self.assertIn("sweep_check_rate: 5.0", config)
 
     def test_launch_starts_only_the_supervisor_node(self):
         root = ET.parse(

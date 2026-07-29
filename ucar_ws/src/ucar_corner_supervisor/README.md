@@ -158,7 +158,7 @@ rostopic info /cmd_vel
 | `raw_command_timeout` | 0.5 s | TEB 指令超时即停车 |
 | `ownership_check_interval` | 0.5 s | 运行中复查 `/cmd_vel` 是否出现冲突发布者 |
 | `path_timeout` | 0 | 0 表示活动目标期间保留最后一条路径，避免低频重规划漏弯 |
-| `min_corner_angle_deg` | 45° | 超过此角度才按大弯处理；误触发时提高 |
+| `min_corner_angle_deg` | 70° | 仅接管紧弯；普通弯继续交给 TEB 连续跟踪 |
 | `path_simplify_tolerance` | 0.08 m | RDP 路径简化容差；太大可能吞掉短弯，太小会保留锯齿 |
 | `min_stable_segment_length` | 0.08 m | 入口和出口稳定线段的最低长度，允许紧邻连续弯 |
 | `max_fit_residual` | 0.08 m | 直线拟合允许的最大横向残差 |
@@ -170,12 +170,13 @@ rostopic info /cmd_vel
 | `costmap_timeout` | 1.5 s | 局部代价地图最大允许数据年龄 |
 | `costmap_topic` | `/move_base/local_costmap/costmap` | 完整局部代价地图；用于初始化尺寸、原点和数据 |
 | `costmap_update_topic` | `/move_base/local_costmap/costmap_updates` | 增量代价地图；持续合并并刷新地图时效性 |
+| `sweep_check_rate` | 5 Hz | 仅在进入拐点触发距离后，以此频率执行旋转扫掠碰撞检查 |
 | `lethal_cost_threshold` | 100 | OccupancyGrid 中判为墙或致命障碍的值 |
 | `sweep_angle_step_deg` | 3° | 旋转扫掠检查的角度采样步长 |
 | `footprint` | 0.342×0.256 m | 小车矩形外轮廓，必须覆盖车壳突出部分 |
-| `corner_trigger_distance` | 0.25 m | 距拐点多近才停车转向；提前转弯时减小 |
+| `corner_trigger_distance` | 0.20 m | 距拐点多近才停车转向；提前转弯时减小 |
 | `corner_release_distance` | 0.45 m | 防止同一拐点反复触发 |
-| `following_max_lateral` | 0.02 m/s | 直线跟踪允许的极小横移；左右摆动时减小 |
+| `following_max_lateral` | 0.05 m/s | 保留 TEB 必要的小幅横移修正；左右摆动时再减小 |
 | `turn_max_angular` | 0.35 rad/s | 原地转向最高角速度 |
 | `turn_min_angular` | 0.18 rad/s | 克服底盘死区的最低角速度 |
 | `turn_kp` | 0.9 | 航向误差到角速度的比例 |
@@ -185,7 +186,7 @@ rostopic info /cmd_vel
 
 第一轮实测只建议调三个参数：
 
-1. 横移仍提前：将 `following_max_lateral` 从 `0.02` 降到 `0.01` 或 `0`；
+1. 横移仍提前：将 `following_max_lateral` 从 `0.05` 逐步降到 `0.03` 或 `0.02`；
 2. 停车位置太早/太晚：每次以 `0.03 m` 调 `corner_trigger_distance`；
 3. 转向过冲/转不动：分别微调 `turn_max_angular`、`turn_min_angular` 和 `turn_kp`。
 
@@ -201,7 +202,7 @@ rostopic info /cmd_vel
 首次只发已经使用过的二维码航点，现场人员握住急停：
 
 1. 直线段状态为 `FOLLOWING`，不出现大幅横移；
-2. 拐点约 0.25 m 前进入 `TURNING`，此时 `/cmd_vel` 的 x、y 必须为 0；
+2. 紧弯拐点约 0.20 m 前进入 `TURNING`，此时 `/cmd_vel` 的 x、y 必须为 0；
 3. 原地转到出口方向后进入 `EXIT_ALIGN`；
 4. 约 0.3 s 后恢复 `FOLLOWING` 并向前走；
 5. 同一个弯不会连续触发；

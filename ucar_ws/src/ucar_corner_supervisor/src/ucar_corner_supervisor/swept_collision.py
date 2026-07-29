@@ -24,6 +24,38 @@ class SweepResult:
     reason: str = ""
 
 
+def needs_rotation_sweep(
+    goal_active, supervisor_state, corner_distance, trigger_distance
+):
+    """Return whether an imminent or ongoing supervised turn needs checking."""
+    if not goal_active:
+        return False
+    if supervisor_state in ("TURNING", "BLOCKED"):
+        return True
+    return (
+        supervisor_state == "FOLLOWING"
+        and corner_distance is not None
+        and corner_distance <= trigger_distance
+    )
+
+
+def can_reuse_sweep_cache(
+    costmap_fresh,
+    cached_revision,
+    current_revision,
+    target_changed,
+    elapsed,
+    check_period,
+):
+    """Only reuse a result made from the current, still-fresh costmap."""
+    return (
+        costmap_fresh
+        and cached_revision == current_revision
+        and not target_changed
+        and elapsed < check_period
+    )
+
+
 def apply_grid_update(grid, x, y, width, height, data):
     """Apply one row-major OccupancyGridUpdate to an existing grid."""
     if x < 0 or y < 0 or width < 0 or height < 0:
