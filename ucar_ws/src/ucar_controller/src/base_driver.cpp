@@ -30,8 +30,10 @@ baseBringup::baseBringup() :x_(0), y_(0), th_(0)
   pravite_nh.param("base_shape_b", base_shape_b_, 0.0);  //   m
   pravite_nh.param("odom_angular_scale_ccw", odom_angular_scale_ccw_, 1.0);
   pravite_nh.param("odom_angular_scale_cw", odom_angular_scale_cw_, 1.0);
+  pravite_nh.param("odom_lateral_scale", odom_lateral_scale_, 0.975);
   ROS_INFO("odom angular scales: ccw=%.6f cw=%.6f",
            odom_angular_scale_ccw_, odom_angular_scale_cw_);
+  ROS_INFO("odom lateral scale: %.6f", odom_lateral_scale_);
 
   pravite_nh.param("linear_speed_max",   linear_speed_max_, 3.0);  //   m/s
   pravite_nh.param("angular_speed_max", angular_speed_max_, 3.14);// rad/s
@@ -1037,7 +1039,9 @@ void baseBringup::processOdometry(){
   double Vx,Vy,Vth;
   Vx  = ( vw1+vw2+vw3+vw4)/4;
   //cout << "VX="<< Vx <<endl;
-  Vy  = 0.975*(-vw1+vw2-vw3+vw4)/4;
+  const double Vy_raw = (-vw1+vw2-vw3+vw4)/4;
+  Vy = ucar_controller::scaleOdomLateralVelocity(
+      Vy_raw, odom_lateral_scale_);
   const double Vth_raw =
       (-vw1+vw2+vw3-vw4)/(4*(base_shape_a_+base_shape_b_));
   Vth = ucar_controller::scaleOdomAngularVelocity(

@@ -31,6 +31,17 @@ TEST(OdomAngularScale, IdentityScalesPreserveLegacyBehavior) {
       ucar_controller::scaleOdomAngularVelocity(-0.7, 1.0, 1.0));
 }
 
+TEST(OdomLateralScale, AppliesOneScaleInBothDirections) {
+  EXPECT_NEAR(
+      1.015,
+      ucar_controller::scaleOdomLateralVelocity(1.0, 1.015),
+      1e-9);
+  EXPECT_NEAR(
+      -1.015,
+      ucar_controller::scaleOdomLateralVelocity(-1.0, 1.015),
+      1e-9);
+}
+
 int main(int argc, char **argv) {
   testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

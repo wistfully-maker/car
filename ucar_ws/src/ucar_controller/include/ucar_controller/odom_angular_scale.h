@@ -15,6 +15,11 @@ inline double scaleOdomAngularVelocity(double raw_vth,
   return 0.0;
 }
 
+inline double scaleOdomLateralVelocity(double raw_vy,
+                                       double lateral_scale) {
+  return raw_vy * lateral_scale;
+}
+
 }  // namespace ucar_controller
 
 #endif  // UCAR_CONTROLLER_ODOM_ANGULAR_SCALE_H_
