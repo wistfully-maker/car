@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>ucar_fast_nav</name>
+  <version>0.1.0</version>
+  <description>Isolated reproduction of the proven lidar_loc, GlobalPlanner and TEB navigation chain.</description>
+
+  <maintainer email="ucar@localhost">U-CAR Team</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <exec_depend>global_planner</exec_depend>
+  <exec_depend>jie_ware</exec_depend>
+  <exec_depend>map_server</exec_depend>
+  <exec_depend>move_base</exec_depend>
+  <exec_depend>roslaunch</exec_depend>
+  <exec_depend>teb_local_planner</exec_depend>
+  <exec_depend>ucar_controller</exec_depend>
+  <exec_depend>ydlidar</exec_depend>
+
+  <export/>
+</package>
