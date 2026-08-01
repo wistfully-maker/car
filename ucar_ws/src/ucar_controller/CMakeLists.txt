@@ -75,3 +75,10 @@ target_link_libraries(base_driver crc_table_fd ${catkin_LIBRARIES} ${Boost_LIBRA
 
 ## crc_table_fd
 add_library(crc_table_fd src/crc_table.cpp)
+
+if(CATKIN_ENABLE_TESTING)
+  catkin_add_gtest(test_odom_angular_scale test/test_odom_angular_scale.cpp)
+  if(TARGET test_odom_angular_scale)
+    target_include_directories(test_odom_angular_scale PRIVATE include)
+  endif()
+endif()

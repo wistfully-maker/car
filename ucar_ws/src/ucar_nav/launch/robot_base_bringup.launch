@@ -8,7 +8,6 @@
 
   <include if="$(arg start_base)"
            file="$(find ucar_controller)/launch/base_driver.launch"/>
-  <param name="/base_driver/cmd_timeout" value="0.2"/>
 
   <include if="$(arg start_lidar)"
            file="$(find ucar_nav)/launch/lidar_bringup.launch">

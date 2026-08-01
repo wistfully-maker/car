@@ -131,6 +131,7 @@ private:
   double wheel_radius_;
   double period_;
   double base_shape_a_,base_shape_b_;
+  double odom_angular_scale_ccw_, odom_angular_scale_cw_;
 
   //position
   

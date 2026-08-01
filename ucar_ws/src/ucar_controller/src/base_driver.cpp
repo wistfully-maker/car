@@ -1,4 +1,5 @@
 #include <ucar_controller/base_driver.h>
+#include <ucar_controller/odom_angular_scale.h>
 #include <Eigen/Eigen>
 namespace ucarController
 {
@@ -27,6 +28,10 @@ baseBringup::baseBringup() :x_(0), y_(0), th_(0)
   pravite_nh.param("period", period_, 50.0); //ms
   pravite_nh.param("base_shape_a", base_shape_a_, 0.2169);  //   m
   pravite_nh.param("base_shape_b", base_shape_b_, 0.0);  //   m
+  pravite_nh.param("odom_angular_scale_ccw", odom_angular_scale_ccw_, 1.0);
+  pravite_nh.param("odom_angular_scale_cw", odom_angular_scale_cw_, 1.0);
+  ROS_INFO("odom angular scales: ccw=%.6f cw=%.6f",
+           odom_angular_scale_ccw_, odom_angular_scale_cw_);
 
   pravite_nh.param("linear_speed_max",   linear_speed_max_, 3.0);  //   m/s
   pravite_nh.param("angular_speed_max", angular_speed_max_, 3.14);// rad/s
@@ -1033,7 +1038,10 @@ void baseBringup::processOdometry(){
   Vx  = ( vw1+vw2+vw3+vw4)/4;
   //cout << "VX="<< Vx <<endl;
   Vy  = 0.975*(-vw1+vw2-vw3+vw4)/4;
-  Vth = (-vw1+vw2+vw3-vw4)/(4*(base_shape_a_+base_shape_b_));
+  const double Vth_raw =
+      (-vw1+vw2+vw3-vw4)/(4*(base_shape_a_+base_shape_b_));
+  Vth = ucar_controller::scaleOdomAngularVelocity(
+      Vth_raw, odom_angular_scale_ccw_, odom_angular_scale_cw_);
 
   double delta_x = (Vx * cos(th_) - Vy * sin(th_)) * dt;
   double delta_y = (Vx * sin(th_) + Vy * cos(th_)) * dt;
