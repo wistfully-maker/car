@@ -137,7 +137,8 @@ start_camera
 `start_competition.sh` 是比赛推荐入口，执行顺序固定为：
 
 1. 加载 ROS 和工作空间环境；
-2. 检查 ROS Master 可达；
+2. 检查 ROS Master；已运行时继续检查现有节点，干净开机尚未运行时由后续
+   `roslaunch` 自动启动；
 3. 检查要启动的同名节点是否已存在；
 4. 对每个已存节点执行 `rosnode ping`，区分真正运行和 ROS Master 僵尸登记；
 5. 检查底盘、雷达、相机、语音串口等已知设备的占用情况；
