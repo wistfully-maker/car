@@ -1,0 +1,52 @@
+<launch>
+  <!-- ====== 架空全功能测试: 迷宫巡航 + 动态避障 (不驱动电机) ======
+     车不动, 但所有规划/追踪/安全逻辑真实运行。
+     用法: roslaunch dynamic_obstacle dryrun_test.launch
+           rostopic pub /patrol/cmd std_msgs/String "data: 'start'"
+  -->
+
+  <!-- 0. 虚拟里程计 (静止原点, 替代 base_driver) -->
+  <node pkg="dynamic_obstacle" type="fake_odom.py"
+        name="fake_odom" output="screen" />
+
+  <!-- 1. 激光雷达 -->
+  <include file="$(find ydlidar)/launch/ydlidar.launch" />
+
+  <!-- 2. 静态地图 -->
+  <node name="map_server" pkg="map_server" type="map_server"
+        args="$(find ucar_nav)/maps/002.yaml" output="screen">
+    <param name="frame_id" value="map" />
+  </node>
+
+  <!-- 3. AMCL 定位 (用真实 scan + 虚拟 odom) -->
+  <include file="$(find ucar_nav)/launch/config/amcl/amcl_omni.launch" />
+
+  <!-- 4. move_base (规划路径, 发 /cmd_vel 但无人执行) -->
+  <node pkg="move_base" type="move_base" respawn="false" name="move_base" output="screen">
+    <param name="base_global_planner" value="global_planner/GlobalPlanner"/>
+    <param name="base_local_planner" value="teb_local_planner/TebLocalPlannerROS"/>
+
+    <rosparam file="$(find ucar_nav)/launch/config/move_base/move_base_params.yaml" command="load" />
+    <rosparam file="$(find ucar_nav)/launch/config/move_base/costmap_common_params.yaml" command="load" ns="global_costmap" />
+    <rosparam file="$(find ucar_nav)/launch/config/move_base/costmap_common_params.yaml" command="load" ns="local_costmap" />
+    <rosparam file="$(find ucar_nav)/launch/config/move_base/global_planner_params.yaml" command="load" />
+    <rosparam file="$(find ucar_nav)/launch/config/move_base/teb_local_planner_params.yaml" command="load" />
+    <rosparam file="$(find ucar_nav)/launch/config/move_base/local_costmap_params.yaml" command="load" />
+    <rosparam file="$(find ucar_nav)/launch/config/move_base/global_costmap_params.yaml" command="load" />
+  </node>
+
+  <!-- 5. 动态障碍物追踪 (重映射 /scan 到 /scan_filtered) -->
+  <node pkg="dynamic_obstacle" type="dynamic_obstacle_tracker.py"
+        name="dynamic_obstacle_tracker" output="screen">
+    <remap from="/scan_filtered" to="/scan" />
+  </node>
+
+  <!-- 6. 安全监控 -->
+  <node pkg="dynamic_obstacle" type="safety_monitor.py"
+        name="safety_monitor" output="screen" />
+
+  <!-- 7. 迷宫巡航 (监听 /patrol/cmd) -->
+  <node pkg="ucar_nav" type="waypoint_patrol.py"
+        name="waypoint_patrol" output="screen" />
+
+</launch>
