@@ -2,7 +2,8 @@
 
 ## 1. 目标
 
-为子任务 1 提供可复现的一键启动入口，连接语音、领取区导航、QR、LLM、TTS 和
+为 U-CAR 比赛全部任务提供可复现的一键启动入口，连接语音、领取区导航、QR、
+LLM、TTS、避障、巡线和后续任务模块与
 `task_orchestrator`，同时避免底盘串口、雷达串口、摄像头、声卡、ROS 同名节点及
 `/cmd_vel` 被多个模块重复占用。
 
@@ -15,10 +16,13 @@
 - `ucar_waypoint_nav` 已能消费 `/task/pickup_navigation_goal` 并返回
   `/task/pickup_arrived`。
 - 导航仍存在偶发 AMCL 偏移，只能标记为“可联调，需人工确认定位对正”。
-- 导航尚未消费 `/task/delivery_navigation_goal`，也尚未发布
-  `/task/delivery_arrived`；三个车间坐标尚未标定。
+- `ucar_waypoint_nav` 的职责在到达二维码区后结束，不负责 QR 后续路段。
+- QR 阶段结束后的航点和去目标区域由避障模块负责；避障模块的实际启动
+  topic/service/action 尚未确定。
+- 编排器已有 `/task/delivery_navigation_goal` 和 `/task/delivery_arrived` 协议，后续由
+  独立的避障适配器转换为避障模块的真实接口，不在编排器中硬编码未知 topic。
 - QR 只订阅共享相机图像，不应自行启动第二个相机节点。
-- 编排器的配送阶段接口已存在，但在配送导航完成前，真实流程会在
+- 编排器的配送阶段接口已存在，但在避障适配器完成前，真实流程会在
   `NAVIGATING_TO_WORKSHOP` 等待或超时，不得宣称全任务已闭环。
 
 ## 3. 方案选择
@@ -36,12 +40,13 @@ start_competition.sh                 安全一键入口：先检查，后启动
   -> competition_full.launch         只负责组合和统一参数
       -> robot_base_bringup.launch   底盘、雷达、相机、公共 TF
       -> navigation_stack.launch     地图、AMCL、move_base
-      -> waypoint manager            编排器导航 topic 适配
+      -> waypoint manager            只负责到二维码区
       -> speech_command              唤醒与 ASR
       -> qr_item_search              QR 识别与旋转搜索
       -> llm_spark                   双目标分类
       -> task_orchestrator           状态编排、语音适配、TTS 桥
-      -> future modules              避障、巡线等可选常驻逻辑
+      -> obstacle adapter            配送目标到避障模块的隔离层
+      -> future modules              避障、巡线及其他任务模块
 ```
 
 ### 4.1 公共硬件层
@@ -62,8 +67,18 @@ start_competition.sh                 安全一键入口：先检查，后启动
 
 ### 4.2 常驻业务层
 
-语音、QR、LLM、TTS、导航适配器和编排器都只启动一次并保持运行。任务阶段通过
-topic/action 激活，不在状态切换时启动或关闭节点。
+语音、QR、LLM、TTS、导航适配器、避障适配器和编排器都只启动一次并保持
+运行。任务阶段通过 topic/action 激活，不在状态切换时启动或关闭节点。
+
+“阶段结束”的含义是停止当前动作并释放控制权，不是退出进程：
+
+- 导航到达二维码区后清理当前 `move_base` 目标、进入 `IDLE` 并释放底盘控制权；
+- QR 完成或取消时先发布零速度，关闭识别窗口并释放底盘控制权；
+- 避障、巡线完成阶段时同样停止动作、回报结果、发布零速度并释放控制权；
+- 语音发布完整 `/question` 后只停止本轮录音，节点保持存活；
+- LLM 和 TTS 完成请求后回到等待状态。
+
+只有整车退出、人工 `Ctrl+C`、必须重载参数或节点异常时才停止进程。
 
 每个子 launch 都应支持显式开关，例如：
 
@@ -83,17 +98,29 @@ start_camera
 
 ### 4.3 任务模式层
 
-导航、避障、巡线可以常驻，但不能同时控制底盘。正式接入避障和巡线前，必须引入
+导航、QR、避障、巡线可以常驻，但不能同时控制底盘。导航与 QR 联调时就已经存在
+两个潜在 `/cmd_vel` 发布者，因此底盘速度仲裁属于当前流程必需的基础层，不再只是
+避障和巡线的未来事项。必须引入
 速度仲裁层（例如 `twist_mux` 或等价的自有仲裁节点）：
 
 ```text
 /cmd_vel/navigation --\
+/cmd_vel/qr          ----\
 /cmd_vel/avoidance  ----> velocity arbiter ---> /cmd_vel ---> base_driver
 /cmd_vel/line       --/
 ```
 
-编排器只发布“当前任务模式”或阶段命令，不直接实现速度混合。仲裁层必须在节点
+编排器只发布“当前任务模式”或阶段命令，不直接实现速度混合。模式顺序至少支持
+`NAVIGATION -> QR_SEARCH -> AVOIDANCE`，后续再扩展巡线和其他任务模式。仲裁层必须在节点
 异常、模式超时或无所有者时输出零速度。
+
+避障模块真实接口确定前，总 launch 不启动伪造的避障节点。适配器对编排器一侧的
+协议固定为：
+
+```text
+/task/delivery_navigation_goal -> obstacle_adapter -> 待确定的避障接口
+待确定的避障完成事件 -> obstacle_adapter -> /task/delivery_arrived
+```
 
 ## 5. 启动入口
 
@@ -131,6 +158,8 @@ start_camera
 | `start_camera` | `true` | 启动唯一 USB 相机 |
 | `start_navigation_stack` | `true` | 启动地图、AMCL、`move_base` |
 | `start_waypoint_manager` | `true` | 启动领取区导航适配 |
+| `start_velocity_arbiter` | `true` | 启动底盘速度唯一出口 |
+| `start_obstacle_adapter` | `false` | 避障真实接口确定后才启用 |
 | `start_speech` | `true` | 启动唤醒与 ASR |
 | `start_qr` | `true` | 启动 QR 扫描和旋转控制 |
 | `start_llm` | `true` | 启动 Spark 分类节点 |
@@ -153,8 +182,10 @@ start_camera
  -> QR 返回三个物品
  -> LLM 分类实物和仿真目标
  -> TTS 按比赛格式播报
- -> 编排器发布配送目标
- -> 当前版本等待配送导航接入
+ -> 编排器发布后续目标
+ -> 避障适配器转为避障模块的真实接口
+ -> 避障模块负责二维码区后的航点
+ -> 当前版本在避障接口确定前等待接入
 ```
 
 AMCL 定位确认在当前阶段是必须的人工安全门，不因“一键启动”而取消。
@@ -182,7 +213,7 @@ AMCL 定位确认在当前阶段是必须的人工安全门，不因“一键启
 7. 正常 `Ctrl+C` 停止与异常残留排查；
 8. 参数文件位置、临时覆盖方式、修改后的重启边界；
 9. 同名节点、串口、相机、`/cmd_vel`、密钥和 ROS 僵尸登记的排障方法；
-10. 后续避障、巡线和配送导航的标准接入步骤。
+10. 后续避障、巡线和其他比赛任务的标准接入步骤。
 
 ## 10. 测试与验收
 
@@ -203,7 +234,7 @@ AMCL 定位确认在当前阶段是必须的人工安全门，不因“一键启
 4. 单独发布领取区导航目标，验证 identity 原样返回且只返回一次；
 5. 人工模拟导航到达，完成语音到 TTS 和配送目标发布的全链路；
 6. 实车执行到领取区、QR、LLM、TTS，保持可立即急停；
-7. 完成配送导航后，再验证到车间的最终 `COMPLETE`。
+7. 避障接口和二维码区后航点完成后，再验证后续阶段和最终 `COMPLETE`。
 
 ## 11. 本次实施范围
 
@@ -213,12 +244,12 @@ AMCL 定位确认在当前阶段是必须的人工安全门，不因“一键启
 - 启动前安全检查脚本；
 - 对已有导航、语音、QR、LLM和编排器的参数传递；
 - 极其详细的 README；
-- 对避障、巡线和配送导航的扩展接口与文档。
+- 对避障、巡线和其他比赛任务的扩展接口与文档。
 
 本次不实现：
 
 - AMCL 偏移根因修复；
-- 三个车间坐标标定与配送导航逻辑；
-- 避障和巡线算法；
-- 未有符合现有模块接口时强行接入速度仲裁；
+- 避障模块及其尚未确定的真实 topic/service/action；
+- 二维码区后航点和目标区域的现场标定；
+- 巡线和其他后续任务算法；
 - 自动结束其他团队的节点或进程。
