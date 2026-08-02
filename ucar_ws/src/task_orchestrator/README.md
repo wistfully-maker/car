@@ -1,479 +1,354 @@
-# task_orchestrator
+# task_orchestrator 操作、部署与联调手册
 
-U-CAR 子任务 1 的 ROS 1 Noetic 全流程编排包。它不替代各业务模块，而是使用
-`std_msgs/String` 和 protocol v1 JSON 连接：
+> **当前状态：本地完成，待任务 8 部署验证。** 本文不表示代码已经部署到
+> `ucar@172.20.10.4`，也不表示完整实车流程已经通过。首次上车必须有人看护、保留急停，
+> 按本文从静态检查、零速度检查再逐步放开运动。
+
+## 1. 先明确边界和真实终点
+
+编排器负责把语音任务、就绪检查、取货点导航、QR 三物品、双目标 LLM 和 TTS 回执按
+protocol v1 串起来；它负责校验 `task_id` 与各阶段 identity、超时、取消、状态和底盘模式。
+它不实现底盘驱动、定位、规划、二维码识别、语音识别、LLM 或 TTS 算法，也不应重复启动
+现场已有的硬件 owner。
+
+当前自动流程的真实业务终点是 **TTS 完成**。TTS 成功后，状态机会保留兼容接口并发布
+`/task/delivery_navigation_goal`，业务状态可显示 `NAVIGATING_TO_WORKSHOP`；但是
+`/task/motion_mode` 此时严格为 `IDLE`，总 launch 没有配送适配器。因此这个 delivery goal
+只是消息，不授予任何运动权限，**不启动二维码后的动态避障、巡线或车间导航**，更不能把
+“发布了目标”误判为“车已经配送”。不要人工伪造 `/task/delivery_arrived` 来证明实车完成。
+
+自动链路是：
 
 ```text
-语音识别
-  -> 取货观察点导航
-  -> QR 扫描三个候选物品
-  -> LLM 同时选择实物和仿真物品
-  -> 按赛事固定格式播报
-  -> 导航到实物目标车间
+/question
+ -> voice_task_adapter -> /voice/task_request
+ -> task_orchestrator: CHECKING_DEPENDENCIES
+ -> readiness_gate -> /task/dependencies_ready
+ -> /task/pickup_navigation_goal
+ -> fast_nav_adapter -> /move_base -> /task/pickup_arrived
+ -> /qr_item_search/start -> 三个物品 /qr_item_search/result
+ -> /llm/classify/request -> 实物/仿真双目标 /llm/classify/result
+ -> /voice/speak -> tts_bridge -> /voice/speak_done
+ -> /task/delivery_navigation_goal（兼容消息）
+ -> /task/motion_mode = IDLE（真实安全终点）
 ```
 
-## 1. 当前完成情况
+## 2. 三种入口不能混用
 
-已经实现并在 `ucar@172.20.10.4` 上验证：
+| 入口 | 启动内容与外部包 | 前置条件 | 成功标志 | 风险与用途 |
+|---|---|---|---|---|
+| `scripts/start_competition.sh` | 先做安全 preflight，再启动 `competition_full.launch`；默认包括 `ucar_fast_nav`、`speech_command`、`usb_cam`、`qr_item_search`、`llm_spark` 和本包六个节点 | ROS/workspace 可读，设备空闲，Spark secret 合规，不存在同名 live/stale 节点、`/amcl` 或错误 `/cmd_vel` owner | preflight 无 `ERROR`，根 `roslaunch` 常驻；节点、TF、action、状态 topic 均可观察 | **推荐且唯一正式入口**；检查失败必须排因，不能绕过 |
+| `roslaunch task_orchestrator competition_full.launch` | 与总 launch 相同，但完全跳过 preflight | 操作者已独立核对所有 owner、设备、secret、`/amcl` 和 `/cmd_vel` | 所有 include 成功启动 | 仅诊断 launch 展开/缺包问题；不能作为安全启动方式 |
+| `roslaunch task_orchestrator task_orchestrator.launch` | 默认只启动 `/task_orchestrator`、`/voice_task_adapter`、`/tts_bridge`；可按 arg 单启三个适配/门控节点 | 所需上游 topic 已由人工或外部节点提供 | 目标节点存在并能收发业务 topic | 只用于业务编排调试；没有导航、相机、QR、LLM、语音和安全 preflight，**不能靠“小飞小飞”唤醒跑全流程** |
 
-- 从 `/question` 提取两个母类：`食品`、`日用品`、`电子产品`；
-- 单活动任务状态机和分阶段超时；
-- QR 三候选、顺序、唯一性和 identity 校验；
-- 实物与仿真物品的双目标 LLM 协议；
-- 赛事规定格式的确定性播报文本；
-- 对 `speech_command/scripts/tts_http.py` 的真实 TTS 桥接；
-- 播报完成后只向导航发送实物名称和实物目标车间；
-- 过期消息忽略、重复消息幂等、取消和错误终止。
+总 launch 是本轮节点和硬件 owner 的唯一根。节点设计为常驻，是为了避免每阶段重开串口、
+相机、定位和 `move_base` 造成抢占及状态丢失；阶段结束只归零并释放模式，不 kill 节点。
 
-2026-07-23 小车验证结果：
+## 3. 部署后第一次启动
 
-- Python 3 单元测试：47/47 通过；
-- `catkin_make`：通过；
-- 手动端到端成功路径：通过；
-- QR、LLM、TTS 失败路径：通过；
-- 过期 identity 和取消路径：通过；
-- 真实 TTS 自动完成回报：通过；
-- `Ctrl+C` 等效停止：三个节点均无残留。
+### 3.1 登录、构建、权限
 
-本包不实现导航算法、二维码识别算法、语音识别硬件驱动或 LLM 服务。正式比赛
-时这些节点应由统一 bringup 常驻启动，本编排器只通过 topic 协调，不能重复启动
-摄像头、串口、底盘或同名业务节点。
+从开发机复制前先备份车端现场改动；本文不给出覆盖式删除命令。
 
-## 2. 环境与部署
+```bash
+ssh ucar@172.20.10.4
+source /opt/ros/noetic/setup.bash
+cd /home/ucar/ucar_ws
+catkin_make
+source /home/ucar/ucar_ws/devel/setup.bash
+rospack find task_orchestrator
+chmod +x /home/ucar/ucar_ws/src/task_orchestrator/scripts/start_competition.sh
+```
 
-### 2.1 小车环境
+`rospack find` 应指向 `/home/ucar/ucar_ws/src/task_orchestrator`。每个新 SSH 终端都重新执行两条
+`source`；不要依赖交互 shell 的历史环境。
 
-- ROS 1 Noetic；
-- Python 3；
-- 工作空间：`/home/ucar/ucar_ws`；
-- 包路径：`/home/ucar/ucar_ws/src/task_orchestrator`；
-- TTS 脚本：
-  `/home/ucar/ucar_ws/src/speech_command/scripts/tts_http.py`。
+### 3.2 安全创建 Spark secret
 
-通过非交互 SSH 执行 ROS 命令时，必须显式加载环境：
+不要把真实 secret 写进 README、Git、shell history 或聊天。用不回显的输入创建单行 LF 文件：
+
+```bash
+install -d -m 700 ~/.config/ucar
+umask 077
+read -r -s -p 'Spark API password: ' SPARK_INPUT; printf '\n'
+printf '%s\n' "$SPARK_INPUT" > ~/.config/ucar/spark_api_password
+unset SPARK_INPUT
+chmod 600 ~/.config/ucar/spark_api_password
+stat -c '%U %a %n' ~/.config/ucar/spark_api_password
+```
+
+文件必须由当前用户拥有、恰好一条非空文本、不得是符号链接、不得含 NUL/CRLF；脚本读取它
+为纯数据而不是 shell 代码。也可在受控终端预先 `export SPARK_API_PASSWORD=...`，但更易泄漏。
+
+### 3.3 启动前人工清单
+
+- 车放在与 `ucar_fast_nav/config/pickup_goal.yaml` 所用地图一致的已知起点，四周留出制动空间；
+- 操作者手持底盘急停，确认机械急停有效；首轮架空驱动轮或把速度上限降到安全值；
+- `/dev/ucar_controller`、`/dev/ttyS4`、`/dev/video0`、`/dev/ttyS3` 均存在且权限可读写；
+- 小车网络能访问 Spark/TTS 服务，SSH 不丢包；
+- RViz/地图人工确认地图方向、激光与障碍位置大致一致，`map->odom->base_link->laser_frame` 连通；
+- 当前定位是 `lidar_loc`，不是 AMCL；不得让 `/amcl` 和 `/lidar_loc` 并存；
+- `rostopic info /cmd_vel` 不应已有未知 publisher；确认唯一 owner 策略后再启动。
+
+### 3.4 默认安全一键命令
 
 ```bash
 source /opt/ros/noetic/setup.bash
 source /home/ucar/ucar_ws/devel/setup.bash
+cd /home/ucar/ucar_ws
+./src/task_orchestrator/scripts/start_competition.sh
 ```
 
-不要直接使用系统默认的 `python`。该命令在部分小车环境中仍指向 Python 2，
-测试和节点统一使用 `python3`。
+启动参数均为布尔值，格式 `name:=true|false`：
 
-### 2.2 从 Windows 部署
+| arg | 默认 | `true` 时归属 |
+|---|---:|---|
+| `start_fast_nav` | true | include `ucar_fast_nav/pickup_navigation.launch` |
+| `start_base` | true | 由 fast-nav include 启底盘 |
+| `start_lidar` | true | 由 fast-nav include 启雷达 |
+| `start_camera` | true | 唯一 `/usb_cam` |
+| `start_fast_nav_adapter` | true | `/fast_nav_adapter` |
+| `start_readiness_gate` | true | `/readiness_gate` |
+| `start_speech` | true | `speech_command.launch` |
+| `start_qr` | true | QR 两节点，速度 remap 到 `/cmd_vel/qr` |
+| `start_llm` | true | `llm_spark.launch` |
+| `start_orchestrator` | true | 编排器、voice adapter、TTS bridge |
+| `start_velocity_arbiter` | true | 唯一 `/velocity_arbiter`，唯一发布 `/cmd_vel` |
 
-在 Windows PowerShell 中：
-
-```powershell
-cd D:\program_sec\智能车\.worktrees\task_orchestrator
-
-scp -r .\ucar_ws\src\task_orchestrator `
-  ucar@172.20.10.4:/home/ucar/ucar_ws/src/
-
-ssh ucar@172.20.10.4
-```
-
-首次部署前若小车已经有同名目录，应先确认该目录是否包含现场修改，不能直接覆盖。
-部署后在小车执行：
+**外部 fastnav 已启动**（只允许确实由外部 root 管理且节点健康时）：
 
 ```bash
-source /opt/ros/noetic/setup.bash
-cd ~/ucar_ws
-catkin_make
-source devel/setup.bash
-rospack find task_orchestrator
+./src/task_orchestrator/scripts/start_competition.sh \
+  start_fast_nav:=false start_base:=false start_lidar:=false
 ```
 
-最后一条命令应输出：
+这仍会启动本包 fast-nav adapter/readiness；外部必须提供 `/map`、TF、`/scan`、`/odom`、
+`/lidar_loc`、`/move_base` action 和正确 planner 参数。
 
-```text
-/home/ucar/ucar_ws/src/task_orchestrator
-```
-
-## 3. 一键启动
-
-### 3.1 正式运行
-
-```bash
-source /opt/ros/noetic/setup.bash
-cd ~/ucar_ws
-source devel/setup.bash
-roslaunch task_orchestrator task_orchestrator.launch
-```
-
-默认同时启动：
-
-- `/task_orchestrator`
-- `/voice_task_adapter`
-- `/tts_bridge`
-
-这只是一键启动编排包，不会自动启动导航、QR、LLM 和语音识别的全部依赖。正式
-全车一键启动应由后续统一 bringup 文件负责，并确保每个硬件所有者节点只启动一次。
-
-### 3.2 人工模拟联调
-
-保留 `/question` 适配器，但关闭真实 TTS：
-
-```bash
-roslaunch task_orchestrator task_orchestrator.launch \
-  enable_tts_bridge:=false
-```
-
-此时必须人工发布 `/voice/speak_done`。
-
-完全绕开真实语音和 TTS：
-
-```bash
-roslaunch task_orchestrator task_orchestrator.launch \
-  enable_voice_adapter:=false \
-  enable_tts_bridge:=false
-```
-
-此时直接向 `/voice/task_request` 发布 protocol v1 JSON。
-
-## 4. 分步启动
-
-分步启动用于定位具体节点问题。每个终端都应先执行：
-
-```bash
-source /opt/ros/noetic/setup.bash
-source ~/ucar_ws/devel/setup.bash
-```
-
-终端 1，启动核心状态机：
-
-```bash
-rosrun task_orchestrator task_orchestrator_node.py \
-  _timeouts/dependency_ready:=30.0 \
-  _timeouts/pickup_navigation:=300.0 \
-  _timeouts/qr_search:=120.0 \
-  _timeouts/llm_classification:=120.0 \
-  _timeouts/speech:=60.0 \
-  _timeouts/delivery_navigation:=300.0 \
-  _timeouts/cancel_ack:=15.0
-```
-
-终端 2，需要从 `/question` 生成任务时启动：
-
-```bash
-rosrun task_orchestrator voice_task_adapter_node.py \
-  _voice_adapter/debounce_seconds:=2.0
-```
-
-终端 3，需要真实播报时启动：
-
-```bash
-rosrun task_orchestrator tts_bridge_node.py \
-  _tts_bridge/command:="['python3', '/home/ucar/ucar_ws/src/speech_command/scripts/tts_http.py']" \
-  _tts_bridge/timeout:=30.0
-```
-
-分步启动前运行：
+**外部仲裁器模式**要求 ROS Master 已经运行且 `/cmd_vel` 恰好有一个已确认的外部仲裁器 owner：
 
 ```bash
 rosnode list
+rostopic info /cmd_vel
+./src/task_orchestrator/scripts/start_competition.sh start_velocity_arbiter:=false
 ```
 
-若同名节点已经存在，不要再次启动。先找到原节点所属的 launch 终端，再决定复用
-或停止整个 launch。不要为了切换参数同时运行两个同名节点。
+没有 master、零 owner 或多个 owner 都必须失败。外部仲裁器还必须等价消费
+`/task/motion_mode`、`/cmd_vel/navigation`、`/cmd_vel/qr`，切换/超时/退出立即发零速度。
 
-## 5. 状态机
+## 4. 唤醒后如何观察完整自动链路
 
-```text
-IDLE
- -> CHECKING_DEPENDENCIES
- -> NAVIGATING_TO_PICKUP
- -> WAITING_QR
- -> WAITING_LLM
- -> WAITING_SPEECH
- -> NAVIGATING_TO_WORKSHOP
- -> COMPLETE
-```
+所有下列业务 topic 的 ROS 类型都是 `std_msgs/String`，结构化内容放在消息的 `data` 字段内，
+编码为 UTF-8 protocol v1 JSON：
 
-任一活动状态都可以进入 `ERROR` 或 `CANCELLED`。`COMPLETE`、`ERROR` 和
-`CANCELLED` 可以接收新的 `task_id`。
+| 方向 | topic | ROS 类型 | `data` 内 JSON 用途 |
+|---|---|---|---|
+| 输入 | `/question` | `std_msgs/String` | 语音识别原文；唯一不是 protocol v1 JSON 的业务输入 |
+| 输入 | `/voice/task_request` | `std_msgs/String` | 两个目标母类、原文和 `task_id` |
+| 输入 | `/task/dependencies_ready` | `std_msgs/String` | 只接受匹配任务的 `status: ready` |
+| 输入 | `/task/pickup_arrived` | `std_msgs/String` | 取货导航 `goal_id` 的 arrived/failed |
+| 输入 | `/qr_item_search/result` | `std_msgs/String` | QR `search_id`、`items` 和状态 |
+| 输入 | `/llm/classify/result` | `std_msgs/String` | LLM `request_id` 与双目标选择 |
+| 输入 | `/voice/speak_done` | `std_msgs/String` | TTS `speech_id` 的 success/error |
+| 输入 | `/task/delivery_arrived` | `std_msgs/String` | 保留的配送回执接口，当前无自动发布者 |
+| 输入 | `/task/cancel` | `std_msgs/String` | 当前任务取消原因 |
+| 输出 | `/task/status` | `std_msgs/String` | 状态机状态、业务状态和消息 |
+| 输出 | `/task/motion_mode` | `std_msgs/String` | `data` 是纯文本 `IDLE/NAVIGATION/QR_SEARCH`，不是 JSON |
+| 输出 | `/task/pickup_navigation_goal` | `std_msgs/String` | 取货点导航 identity |
+| 输出 | `/qr_item_search/start`、`/stop` | `std_msgs/String` | QR 搜索 identity 与控制 |
+| 输出 | `/llm/classify/request` | `std_msgs/String` | 两个母类和三候选 |
+| 输出 | `/voice/speak` | `std_msgs/String` | 待播文本和 speech identity |
+| 输出 | `/task/delivery_navigation_goal` | `std_msgs/String` | 保留的实物配送消息，不授运动权 |
 
-状态含义：
-
-| 状态 | 正在等待的输入 |
-|---|---|
-| `CHECKING_DEPENDENCIES` | `/task/dependencies_ready` |
-| `NAVIGATING_TO_PICKUP` | `/task/pickup_arrived` |
-| `WAITING_QR` | `/qr_item_search/result` |
-| `WAITING_LLM` | `/llm/classify/result` |
-| `WAITING_SPEECH` | `/voice/speak_done` |
-| `NAVIGATING_TO_WORKSHOP` | `/task/delivery_arrived` |
-
-## 6. Topic 接口
-
-所有业务 topic 均使用 `std_msgs/String`，`data` 是 protocol v1 JSON。
-
-| 方向 | Topic | 用途 |
-|---|---|---|
-| 输入 | `/question` | 现有语音模块识别文本 |
-| 输入 | `/task/dependencies_ready` | 临时依赖就绪门控 |
-| 输入 | `/task/pickup_arrived` | 到达取货观察点 |
-| 输入 | `/qr_item_search/result` | QR 搜索中间态或终态 |
-| 输入 | `/llm/classify/result` | 实物和仿真双目标结果 |
-| 输入 | `/voice/speak_done` | 播报完成或失败 |
-| 输入 | `/task/delivery_arrived` | 到达实物目标车间 |
-| 输入 | `/task/cancel` | 取消当前任务 |
-| 输出 | `/voice/task_request` | 两个目标母类 |
-| 输出 | `/task/pickup_navigation_goal` | 取货观察点导航目标 |
-| 输出 | `/qr_item_search/start` | 启动 QR 搜索 |
-| 输出 | `/qr_item_search/stop` | 停止 QR 搜索 |
-| 输出 | `/llm/classify/request` | 三候选和两个目标母类 |
-| 输出 | `/voice/speak` | 固定格式播报请求 |
-| 输出 | `/task/delivery_navigation_goal` | 实物车间与实物名称 |
-| 输出 | `/task/status` | 当前状态和终态 |
-
-完整 JSON 示例和逐步模拟命令见
-[`test/manual_simulation.md`](test/manual_simulation.md)。
-
-重要约束：
-
-- 后续模块必须原样返回当前阶段输出中的 `task_id` 和阶段 ID；
-- 阶段 ID 包括 `goal_id`、`search_id`、`request_id`、`speech_id`；
-- 旧任务或错误阶段 ID 会被忽略；
-- LLM 请求中的候选字段名是 `candidates`；
-- 配送导航只接收实物结果，不接收仿真目标车间；
-- `/task/dependencies_ready` 是临时接口，后续由模块健康聚合器替代。
-
-## 7. 参数位置和修改方法
-
-统一配置文件：
-
-```text
-~/ucar_ws/src/task_orchestrator/config/orchestrator.yaml
-```
-
-默认值：
-
-```yaml
-timeouts:
-  dependency_ready: 30.0
-  pickup_navigation: 300.0
-  qr_search: 120.0
-  llm_classification: 120.0
-  speech: 60.0
-  delivery_navigation: 300.0
-  cancel_ack: 15.0
-
-voice_adapter:
-  debounce_seconds: 2.0
-
-tts_bridge:
-  command:
-    - python3
-    - /home/ucar/ucar_ws/src/speech_command/scripts/tts_http.py
-  timeout: 30.0
-```
-
-参数说明：
-
-| 参数 | 作用 | 调整建议 |
-|---|---|---|
-| `dependency_ready` | 等待依赖就绪 | 调试时可增大；正式运行应由健康检查尽快返回 |
-| `pickup_navigation` | 导航到取货点 | 当前 300 秒，场地路线稳定后再缩短 |
-| `qr_search` | 等待三个 QR 候选 | 当前 120 秒，大于 QR 节点 100 秒搜索上限 |
-| `llm_classification` | 等待双目标推理 | 网络不稳定时增大，不建议低于实际最慢响应 |
-| `speech` | 等待播报完成 | 必须大于 TTS 下载和播放总时长 |
-| `delivery_navigation` | 导航到实物车间 | 当前 300 秒，场地路线稳定后再缩短 |
-| `cancel_ack` | 取消阶段预留 | 用于取消和下游停止确认 |
-| `debounce_seconds` | 相同语音文本去重 | 误重复触发时增大，连续测试时可减小 |
-| `tts_bridge.timeout` | TTS 子进程超时 | 应小于或等于状态机的 `speech` 超时 |
-
-修改 YAML 后需要停止并重新启动本包才能加载新值：
-
-```bash
-# 在 roslaunch 终端按 Ctrl+C
-roslaunch task_orchestrator task_orchestrator.launch
-```
-
-当前版本没有实现运行时动态重配置。不要通过启动第二套同名节点来应用新参数。
-
-查看实际加载值：
-
-```bash
-rosparam get /task_orchestrator/timeouts
-rosparam get /voice_task_adapter/voice_adapter
-rosparam get /tts_bridge/tts_bridge
-```
-
-临时测试单个参数可通过分步 `rosrun` 的私有参数覆盖；正式比赛应把最终值写回
-`orchestrator.yaml`，保证所有启动方式使用同一组参数。
-
-## 8. 停止和重启
-
-### 8.1 正常停止
-
-在启动它的 `roslaunch` 终端按：
-
-```text
-Ctrl+C
-```
-
-然后检查：
-
-```bash
-rosnode list
-```
-
-不应再出现：
-
-```text
-/task_orchestrator
-/voice_task_adapter
-/tts_bridge
-```
-
-正常情况下不需要逐个执行 `rosnode kill`。
-
-### 8.2 异常残留
-
-先确认节点：
-
-```bash
-rosnode list
-rosnode info /task_orchestrator
-```
-
-优先回到原 launch 终端按 `Ctrl+C`。只有原终端已丢失时，才执行：
-
-```bash
-rosnode kill /task_orchestrator
-rosnode kill /voice_task_adapter
-rosnode kill /tts_bridge
-```
-
-随后确认没有残留 `roslaunch task_orchestrator` 进程。不要杀死 `/rosout`、
-底盘、雷达、相机或其他不属于本包的节点。
-
-## 9. 调试方法
-
-### 9.1 检查节点和 topic
-
-```bash
-rosnode list
-rostopic list | sort
-rosnode info /task_orchestrator
-```
-
-### 9.2 观察状态和关键输出
-
-每个命令放在单独终端：
-
-```bash
-rostopic echo /task/status
-rostopic echo /voice/task_request
-rostopic echo /task/pickup_navigation_goal
-rostopic echo /qr_item_search/start
-rostopic echo /llm/classify/request
-rostopic echo /voice/speak
-rostopic echo /task/delivery_navigation_goal
-```
-
-只查看一条消息：
-
-```bash
-rostopic echo -n 1 /task/status
-```
-
-查看发布者和订阅者是否存在：
-
-```bash
-rostopic info /qr_item_search/result
-rostopic info /llm/classify/result
-rostopic info /voice/speak_done
-```
-
-### 9.3 常见故障
-
-**语音后没有任务**
+先在多个终端观察：
 
 ```bash
 rostopic echo /question
 rostopic echo /voice/task_request
+rostopic echo /task/status
+rostopic echo /task/motion_mode
+rostopic echo /task/pickup_navigation_goal
+rostopic echo /qr_item_search/start
+rostopic echo /qr_item_search/result
+rostopic echo /llm/classify/request
+rostopic echo /llm/classify/result
+rostopic echo /voice/speak
+rostopic echo /voice/speak_done
+rostopic echo /task/delivery_navigation_goal
 ```
 
-确认语句中恰好有两个目标母类。只有一个母类或出现三个母类时会拒绝生成任务。
+说“小飞小飞”并完整说出包含两个不同母类的赛事指令后，`/question` 是
+`std_msgs/String` 原文；voice adapter 输出的 `/voice/task_request` 也是 `std_msgs/String`，
+其 `data` 为 JSON，例如：
 
-**停在 `CHECKING_DEPENDENCIES`**
+```json
+{"protocol_version":1,"task_id":"task-...","physical_target_category":"食品","simulation_target_category":"日用品","raw_text":"..."}
+```
 
-当前仍需 `/task/dependencies_ready`。人工调试可按手册发送；正式比赛必须由健康
-检查模块产生。
+状态依次应为 `CHECKING_DEPENDENCIES`、`NAVIGATING_TO_PICKUP`、`WAITING_QR`、
+`WAITING_LLM`、`WAITING_SPEECH`、`NAVIGATING_TO_WORKSHOP`。readiness 回执示例：
 
-**停在 `WAITING_QR`**
+```json
+{"protocol_version":1,"task_id":"task-...","status":"ready"}
+```
 
-检查 `/qr_item_search/start` 的 `search_id` 与结果一致，且完成结果包含三个顺序
-连续、名称不重复的候选。
+刚进入依赖检查时，`/task/status` 的 `data` 完整内容形如：
 
-**停在 `WAITING_LLM`**
+```json
+{"protocol_version":1,"task_id":"task-...","state":"CHECKING_DEPENDENCIES","status":"accepted","message":""}
+```
 
-检查 LLM 是否订阅 `/llm/classify/request`，返回的 `request_id` 是否一致，以及
-实物和仿真选择是否都来自三个 `candidates`。
+当前实际构造器**没有 `stamp` 字段**，ROS adapter 也不补时间戳；排障时不要等待一个不存在的
+`stamp`。如果以后协议新增它，必须先改协议测试和消费者，再更新本文。
 
-**停在 `WAITING_SPEECH`**
+取货目标含 `task_id/goal_id`；fast-nav adapter 将参数中的固定取货点转换为 `/move_base`
+`move_base_msgs/MoveBaseAction`，action 成功且 `/odom` 速度稳定后回：
 
-检查：
+```json
+{"protocol_version":1,"task_id":"task-...","goal_id":"pickup-...","status":"arrived","message":""}
+```
+
+QR start 含 `task_id/search_id`；结果必须携带相同 identity，并恰好三个连续 order、唯一物品：
+
+```json
+{"protocol_version":1,"task_id":"task-...","search_id":"search-...","stamp":1.0,"status":"complete","items":[{"order":1,"item_name":"手机","url":"https://...","detected_yaw":0.0},{"order":2,"item_name":"毛巾","url":"https://...","detected_yaw":1.2},{"order":3,"item_name":"苹果","url":"https://...","detected_yaw":3.4}],"message":""}
+```
+
+QR result 的完整示例见上文，其中候选原始字段名是 `items`。编排器随后只抽取 order/name，
+构造完整 LLM request：
+
+```json
+{"protocol_version":1,"task_id":"task-...","request_id":"llm-...","physical_target_category":"食品","simulation_target_category":"日用品","candidates":[{"order":1,"item_name":"手机"},{"order":2,"item_name":"毛巾"},{"order":3,"item_name":"苹果"}]}
+```
+
+该 request 实际字段是 `candidates`，**没有 `items`**。LLM 成功结果必须原样返回 identity，
+完整形态为：
+
+```json
+{"protocol_version":1,"task_id":"task-...","request_id":"llm-...","status":"success","physical":{"selected_order":3,"selected_item":"苹果","category":"食品","workshop":"食品加工车间"},"simulation":{"selected_order":2,"selected_item":"毛巾","category":"日用品","workshop":"日用品加工车间"},"message":""}
+```
+
+`/voice/speak` 的完整 JSON 含 `task_id/speech_id/text`：
+
+```json
+{"protocol_version":1,"task_id":"task-...","speech_id":"speech-...","text":"取得苹果属于食品大类应放置在食品加工车间，仿真环境中取得毛巾属于日用品大类应放置在日用品加工车间"}
+```
+
+done 示例：
+
+```json
+{"protocol_version":1,"task_id":"task-...","speech_id":"speech-...","status":"success","message":""}
+```
+
+最后会看到 delivery message（含 `task_id/goal_id/target_workshop/selected_item`），同时必须确认：
 
 ```bash
-rosnode list | grep tts_bridge
-rostopic echo /voice/speak_done
-python3 /home/ucar/ucar_ws/src/speech_command/scripts/tts_http.py "测试播报"
+rostopic echo -n 1 /task/motion_mode    # data: "IDLE"
+rostopic echo -n 1 /cmd_vel             # 六个分量均为 0
 ```
 
-人工测试最后一条命令会真实播放声音。
+identity 必须从上一阶段实际输出复制，不能猜。旧 `task_id`、错 `goal_id/search_id/request_id/speech_id`
+会被忽略；这属于防串任务机制，不是节点“没反应”。
 
-**出现同名节点或资源占用**
+## 5. 参数来源与冲突策略
 
-先运行 `rosnode list` 和 `rosnode info`。摄像头、底盘、串口和 TTS 等资源只能
-由一个常驻节点持有。参数不一致时，第一版采用统一 YAML 并重启原 launch；后期
-再考虑动态参数或由单一 bringup 注入参数。
+| 文件/命名空间 | 当前关键值 | 修改方式 |
+|---|---|---|
+| `task_orchestrator/config/orchestrator.yaml` `timeouts` | dependency 120、pickup 300、QR 120、LLM 120、speech 60、delivery 300、cancel 15 秒 | 节点启动时读取；改 YAML 后重启整个 root |
+| 同文件 `fast_nav_adapter` | action 300、settle 0.5、线速度停止阈值 0.03、角速度停止阈值 0.05 | 启动读取，重启 |
+| 同文件 `readiness_gate` | 消息最大龄 3、检查周期 1、TF/action 探测 0.05、日志 10 秒；frame 与节点/planner 路径见文件 | 启动读取，重启 |
+| 同文件 `velocity_arbiter` | source timeout 0.3、周期 0.05、线速度绝对上限 1.0、角速度绝对上限 2.0 | 启动读取，重启 |
+| `ucar_fast_nav/config/pickup_goal.yaml` | `/ucar_fast_nav/pickup_goal` 航点、frame/yaw、地图路径/校验契约 | fast-nav launch 统一加载，禁止本包重复加载 |
+| `ucar_fast_nav/config` planner/map | `move_base` planner 参数、地图文件及定位配置 | 属于外部任务 5 契约；改后重启 fast-nav root |
+| `qr_item_search/launch/qr_item_search.launch` | image `/usb_cam/image_raw`；HTTP 1/2 秒、1 重试/3 workers；角速 0.40/0.20、最小 0.11、总搜索 40 秒等 | launch `<param>`，需重启 QR 所属 root |
+| `llm_spark/launch/llm_spark.launch` | URL arg；`request_timeout:=90.0` | 仅单包调试可用该 launch arg，节点启动后固定 |
+| `speech_command/launch/speech_command.launch` | 无本总 launch 可传 arg；输出 `/question` | 改外部包配置后重启 root |
+| `tts_bridge` | `python3 .../tts_http.py`，timeout 30 秒 | YAML，重启 |
 
-**消息发出但状态不变化**
+`rosparam set` 能改变参数服务器上的值，但大多数节点只在构造时读取，不能据此宣称已经动态生效。
+需要不同运行参数时，优先使用明确支持的控制 topic 或 launch arg；必须重载时在根终端 `Ctrl+C`，
+确认退出后整套重启。参数统一在启动时加载，不允许为套用另一组参数而重复启动同名节点。
 
-最常见原因是 `task_id` 或阶段 ID 过期。不要手写猜测 ID，应从上一阶段实际输出
-复制。
+`request_timeout:=90.0` 只在直接运行
+`roslaunch llm_spark llm_spark.launch request_timeout:=90.0` 时有效；当前
+`competition_full.launch` 未转发这个 arg，所以不可把它直接追加到 `start_competition.sh` 尾部。
+正式总流程若要改该值，必须先给 competition launch 增加显式 arg/转发并配套测试，然后
+`Ctrl+C` 根 launch 后重启；不能假设未知尾部参数会穿透 include。
 
-## 10. 测试
+## 6. 停止、急停与常驻原则
 
-Windows 本地纯 Python 测试：
+机械急停或切断底盘驱动电源是危险情况下唯一首选；软件 topic、终端和网络都可能失效，
+人员不得靠发布 ROS 消息接近仍可能运动的车辆。
+
+正常软件停止可向活动任务发布取消，再在根 `start_competition.sh`/`roslaunch` 终端按
+`Ctrl+C`；根进程会回收自己启动的节点：
+
+```bash
+rostopic pub -1 /task/cancel std_msgs/String \
+  "data: '{\"protocol_version\":1,\"task_id\":\"<当前实际 TASK_ID>\",\"reason\":\"operator_stop\"}'"
+# 随后回到根 launch 终端按 Ctrl+C，并机械确认底盘已经断能/不会运动
+```
+
+`/task/cancel` 只能请求业务状态机取消，**不能替代机械急停**，也不能证明底盘已停止。
+业务阶段结束不 kill 节点，只切换 `IDLE`、发布零速度并释放模式。安全脚本不会自动 kill 任何
+现场节点，也不会擅自清除 stale registration。
+
+下面的零 Twist 仅允许在底盘已经机械断能或驱动轮可靠架空后，用于诊断/确认 topic 路径：
+
+```bash
+rostopic pub -r 10 /cmd_vel geometry_msgs/Twist \
+  '{linear: {x: 0.0, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}'
+```
+
+它会成为第二个 `/cmd_vel` publisher；ROS 多 publisher 的到达顺序不可作为安全机制，
+**不能保证安全**，不得作为任何停止或安全手段，不得靠它接近车辆。诊断完立即停止该 publisher，
+再检查唯一 owner。机械断能前不要执行这条命令。
+
+异常残留先检查，不自动 kill：
+
+```bash
+rosnode list
+rosnode ping /velocity_arbiter
+rosnode info /velocity_arbiter
+rostopic info /cmd_vel
+```
+
+只有确认原 root 已丢失、节点确属本次启动且硬件 owner 关系清楚时，才人工执行例如：
+
+```bash
+rosnode kill /velocity_arbiter
+rosnode kill /task_orchestrator
+```
+
+不要照抄 kill 整组硬件节点；先找回 owner，优先停止整个原 root。
+
+## 7. 常见故障：命令、判断和动作
+
+| 现象 | 检查命令 | 判断与处理 |
+|---|---|---|
+| `live node conflict` / `stale registration` | `rosnode list; rosnode ping /节点; rosnode info /节点` | ping 通是 live owner；不通是 stale。找原 root，勿直接重复启动 |
+| device absent/busy/probe permission | `ls -l /dev/ucar_controller /dev/ttyS4 /dev/video0 /dev/ttyS3; fuser /dev/video0` | absent 查接线/udev；busy 查 PID owner；probe permission 查用户组和 `fuser/lsof`，不要跳过检查 |
+| `/amcl` 冲突 | `rosnode ping /amcl; rosnode ping /lidar_loc` | 本流程只允许 `lidar_loc`；停止 AMCL 所属 root 后重启 |
+| `/cmd_vel` 始终 0 | `rostopic echo /task/motion_mode; rostopic echo /cmd_vel/navigation; rostopic echo /cmd_vel/qr` | `IDLE`、错误源或 0.3 秒源超时都会归零；不要为“让车动”绕过仲裁 |
+| 多个 `/cmd_vel` owner | `rostopic info /cmd_vel` | 必须恰好一个已知仲裁器；定位并停止多余 root |
+| readiness 报 `map missing` | `rostopic echo -n 1 /map; rostopic info /map` | map 只检查是否至少收到过（通常为 latched），不做新鲜度判断；无消息才是 missing，检查 map_server 与 latch |
+| scan/odom missing 或 stale | `rostopic hz /scan; rostopic hz /odom; rostopic echo -n 1 /scan; rostopic echo -n 1 /odom` | `message_max_age: 3.0` 只用于 scan/odom；无消息是 missing，时间戳超过窗口或在未来是 stale/异常 |
+| TF/action/planner | `rosrun tf tf_echo map base_link; rosrun tf tf_echo map odom; rosrun tf tf_echo odom base_link; rosparam get /move_base/base_global_planner; rosparam get /move_base/base_local_planner; rostopic info /move_base/status` | 任一缺失都不能放行导航；核对 fast-nav 外部契约 |
+| secret 权限/CRLF | `stat -c '%u %a' ~/.config/ucar/spark_api_password; file ~/.config/ucar/spark_api_password` | owner 不对、组/其他可读、CRLF、多行均重建；不要打印内容 |
+| QR 看不到/阳光干扰 | `rostopic hz /usb_cam/image_raw; rostopic echo /qr_item_search/result` | 检查相机唯一 owner、曝光、焦距、码大小/反光/直射阳光；不要用加大非零转速掩盖视觉问题 |
+| LLM 无结果 | `rostopic info /llm/classify/request; rostopic echo /llm/classify/result` | 检查网络、secret、90 秒 HTTP timeout 与 120 秒编排 timeout、identity 和候选一致性 |
+| TTS 无完成 | `rostopic info /voice/speak; rostopic echo /voice/speak_done; rosnode ping /tts_bridge` | 30 秒子进程 timeout 必须先于 60 秒阶段 timeout；先看 bridge 日志，不手工补成功回执 |
+| 状态 timeout | `rostopic echo /task/status` | 看 `state/message` 定位 dependency/nav/QR/LLM/speech；修依赖后用新任务重跑 |
+| launch 报外部包缺失 | `rospack find ucar_fast_nav; rospack find speech_command; rospack find qr_item_search; rospack find llm_spark; rospack find usb_cam` | 这是故意 fail-fast；补齐同一 catkin workspace 并重新 source，不删 include |
+
+## 8. 测试与联调入口
+
+不动车的分层 topic 模拟、identity JSON、motion/arbiter 安全限制见
+[`test/manual_simulation.md`](test/manual_simulation.md)。本地测试：
 
 ```powershell
-cd D:\program_sec\智能车\.worktrees\task_orchestrator
-python -m unittest discover `
-  -s ucar_ws/src/task_orchestrator/test `
-  -p "test_*.py" -v
+python -m unittest discover -s ucar_ws/src/task_orchestrator/test -p "test_*.py" -v
 ```
 
-小车端测试：
-
-```bash
-cd ~/ucar_ws
-python3 -m unittest discover \
-  -s src/task_orchestrator/test \
-  -p "test_*.py" -v
-```
-
-这些单元测试不会访问网络、扬声器或真实 TTS。完整 ROS topic 手动模拟见：
-
-```text
-~/ucar_ws/src/task_orchestrator/test/manual_simulation.md
-```
-
-人工模拟时使用 `rostopic pub -1`，确保每条事件只发送一次。启用真实
-`tts_bridge` 后，不得再人工发布同一阶段的 `/voice/speak_done`。
-
-## 11. 后续模块接入
-
-仍需完成：
-
-1. 导航节点消费 `/task/pickup_navigation_goal` 并发布
-   `/task/pickup_arrived`；
-2. 已部署 QR 节点消费 `/qr_item_search/start`，返回三个候选；
-3. `llm_spark` 消费双目标请求并返回实物和仿真两个选择；
-4. 导航节点消费 `/task/delivery_navigation_goal`，仅将实物送往目标车间；
-5. 用 `/system/module_status` 健康聚合器替换人工
-   `/task/dependencies_ready`；
-6. 最终由全车 bringup 一键启动常驻节点，并统一管理所有参数和退出顺序。
+车端运行单测不代表实车验收。任务 8 仍需完成部署、构建、静态 owner 检查、架空轮/低速、
+取货导航、QR、LLM、TTS 和 TTS 后 `IDLE` 的现场证据；不验收二维码后的动态避障、巡线或配送。

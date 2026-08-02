@@ -3,6 +3,8 @@ import ast
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+import yaml
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -346,6 +348,60 @@ class PackageConfigTests(unittest.TestCase):
             '"item":',
         ):
             self.assertNotIn(obsolete, normalized)
+
+    def test_operator_documentation_covers_safe_bringup_contract(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        manual = (ROOT / "test/manual_simulation.md").read_text(encoding="utf-8")
+        handoff = (ROOT.parents[2] / "HANDOFF.md").read_text(encoding="utf-8")
+
+        for heading in (
+            "## 1. 先明确边界和真实终点", "## 2. 三种入口不能混用",
+            "## 3. 部署后第一次启动", "## 4. 唤醒后如何观察完整自动链路",
+            "## 5. 参数来源与冲突策略", "## 6. 停止、急停与常驻原则",
+            "## 7. 常见故障：命令、判断和动作",
+        ):
+            self.assertIn(heading, readme)
+        for command in (
+            "./src/task_orchestrator/scripts/start_competition.sh",
+            "roslaunch task_orchestrator competition_full.launch",
+            "roslaunch task_orchestrator task_orchestrator.launch",
+            "rostopic info /cmd_vel", "rosnode ping", "chmod 600",
+            "rostopic echo -n 1 /map", "rostopic hz /scan", "rostopic hz /odom",
+        ):
+            self.assertIn(command, readme)
+        self.assertNotIn("map stale", readme.lower())
+        self.assertNotIn("地图陈旧", readme)
+
+        stop_section = readme.split("## 6. 停止、急停与常驻原则", 1)[1].split("## 7.", 1)[0]
+        for warning in ("机械急停", "机械断能", "第二个", "不能保证安全", "不能替代机械急停"):
+            self.assertIn(warning, stop_section)
+
+        start_section = manual.split("## 1. 安全边界与启动", 1)[1].split("## 2.", 1)[0]
+        for required in (
+            "机械断能", "架空", "ROS_MASTER_URI", "rosnode list",
+            "rostopic info /cmd_vel", "competition", "外部仲裁器",
+        ):
+            self.assertIn(required, start_section)
+        for forbidden in (
+            "roslaunch ucar_waypoint_nav", "rosrun amcl", "roslaunch amcl",
+            "roslaunch dynamic_obstacle",
+        ):
+            self.assertNotIn(forbidden, readme)
+            self.assertNotIn(forbidden, manual)
+
+        config = yaml.safe_load((ROOT / "config/orchestrator.yaml").read_text(encoding="utf-8"))
+        self.assertEqual(120.0, config["timeouts"]["dependency_ready"])
+        self.assertEqual(300.0, config["timeouts"]["pickup_navigation"])
+        self.assertEqual(3.0, config["readiness_gate"]["message_max_age"])
+        self.assertEqual(0.3, config["velocity_arbiter"]["source_timeout"])
+
+        launch = ET.parse(ROOT / "launch/competition_full.launch").getroot()
+        launch_args = {node.attrib["name"] for node in launch.findall("arg")}
+        self.assertNotIn("request_timeout", launch_args)
+        self.assertIn("未转发这个 arg", readme)
+
+        for stable in ("5b628bb", "任务 8", "任务 17", "Bash", "任务 5", "待部署"):
+            self.assertIn(stable, handoff)
 
 
 if __name__ == "__main__":
