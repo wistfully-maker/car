@@ -4,16 +4,16 @@ TebLocalPlannerROS:
 
   acc_lim_x: 0.24
   acc_lim_theta: 2.3
-  acc_lim_y: 0.15
+  acc_lim_y: 0.25
   max_vel_x: 2.4
   max_vel_x_backwards: 0.7
-  max_vel_y: 0.10
+  max_vel_y: 0.20
   max_vel_theta: 1.2
   min_turning_radius: 0.0
   is_footprint_dynamic: false
   footprint_model:
     type: "point"
-    vertices: [[0.156, -0.118], [0.156, 0.118],[-0.156, 0.118], [-0.156, -0.118]]
+    vertices: [[0.164, -0.122], [0.164, 0.122],[-0.164, 0.122], [-0.164, -0.122]]
 
   yaw_goal_tolerance: 0.2
   xy_goal_tolerance: 0.1
