@@ -283,5 +283,8 @@ def parse_speech_done(
 def parse_cancel(raw_json, expected_task_id):
     message = load_object(raw_json)
     _require_identity(message, "task_id", expected_task_id)
-    message["reason"] = require_text(message.get("reason"), "reason")
+    raw_reason = message.get("reason")
+    message["reason"] = require_text(raw_reason, "reason")
+    if raw_reason != message["reason"]:
+        raise ProtocolError("reason must not contain surrounding whitespace")
     return message

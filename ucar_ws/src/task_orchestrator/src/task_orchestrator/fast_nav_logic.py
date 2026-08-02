@@ -5,6 +5,54 @@ import threading
 from task_orchestrator.protocol import ProtocolError, load_object, require_text
 
 
+class ActionOperationCoordinator:
+    """Serialize action-client calls while suppressing stale generations."""
+
+    def __init__(self):
+        self._generation_lock = threading.Lock()
+        self._operation_lock = threading.Lock()
+        self._generation = 0
+
+    def issue(self):
+        """Invalidate older work and return the newly current generation."""
+        with self._generation_lock:
+            self._generation += 1
+            return self._generation
+
+    def is_current(self, generation):
+        with self._generation_lock:
+            return generation == self._generation
+
+    def run_if_current(self, generation, operation):
+        """Run one external operation only if its generation is current."""
+        with self._operation_lock:
+            if not self.is_current(generation):
+                return False
+            operation(lambda: self.is_current(generation))
+            return self.is_current(generation)
+
+
+def normalize_goal(message):
+    """Validate a navigation goal without changing session state."""
+    if isinstance(message, dict):
+        try:
+            raw_json = json.dumps(message)
+        except (TypeError, ValueError) as exc:
+            raise ProtocolError("message must be JSON-compatible: %s" % exc)
+    else:
+        raw_json = message
+    goal = load_object(raw_json)
+    for field in ("task_id", "goal_id"):
+        raw_value = goal.get(field)
+        clean_value = require_text(raw_value, field)
+        if raw_value != clean_value:
+            raise ProtocolError(
+                "%s must not contain surrounding whitespace" % field
+            )
+        goal[field] = clean_value
+    return goal
+
+
 def _finite_number(value, field):
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ProtocolError("%s must be finite" % field)
@@ -77,7 +125,7 @@ class FastNavSession:
             return dict(self._active_identity)
 
     def accept_goal(self, message):
-        goal = self._parse_goal(message)
+        goal = normalize_goal(message)
         identity = {"task_id": goal["task_id"], "goal_id": goal["goal_id"]}
         with self._lock:
             if identity == self._active_identity:
@@ -111,27 +159,6 @@ class FastNavSession:
             "task_id": task_id,
             "goal_id": goal_id,
         }
-
-    @staticmethod
-    def _parse_goal(message):
-        if isinstance(message, dict):
-            try:
-                raw_json = json.dumps(message)
-            except (TypeError, ValueError) as exc:
-                raise ProtocolError("message must be JSON-compatible: %s" % exc)
-        else:
-            raw_json = message
-        goal = load_object(raw_json)
-        for field in ("task_id", "goal_id"):
-            raw_value = goal.get(field)
-            clean_value = require_text(raw_value, field)
-            if raw_value != clean_value:
-                raise ProtocolError(
-                    "%s must not contain surrounding whitespace" % field
-                )
-            goal[field] = clean_value
-        return goal
-
 
 class StopDetector:
     """Detect continuous low linear and angular speed using explicit time."""

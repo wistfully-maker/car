@@ -10,7 +10,12 @@ from unittest.mock import patch
 SOURCE_ROOT = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SOURCE_ROOT))
 
-from task_orchestrator.fast_nav_logic import FastNavSession, StopDetector
+from task_orchestrator.fast_nav_logic import (
+    ActionOperationCoordinator,
+    FastNavSession,
+    StopDetector,
+    normalize_goal,
+)
 from task_orchestrator.protocol import ProtocolError, parse_arrival
 
 
@@ -70,6 +75,27 @@ class FastNavSessionTests(unittest.TestCase):
             {"task_id": "task-1", "goal_id": "goal-1"},
             self.session.active_identity,
         )
+
+    def test_invalid_goal_preflight_has_no_active_or_generation_side_effects(self):
+        self.session.accept_goal(goal())
+        coordinator = ActionOperationCoordinator()
+        active_generation = coordinator.issue()
+        operations = []
+        invalid_messages = (
+            goal("task-2", "goal-2", protocol_version=2),
+            goal(" task-1 ", "goal-1"),
+            {"protocol_version": 1, "task_id": "task-2"},
+        )
+        for message in invalid_messages:
+            with self.subTest(message=message):
+                with self.assertRaises(ProtocolError):
+                    normalize_goal(message)
+                self.assertTrue(coordinator.is_current(active_generation))
+                self.assertEqual(
+                    {"task_id": "task-1", "goal_id": "goal-1"},
+                    self.session.active_identity,
+                )
+                self.assertEqual([], operations)
 
     def test_new_identity_replaces_old_and_old_result_is_stale(self):
         self.session.accept_goal(goal())
@@ -304,6 +330,72 @@ class StopDetectorTests(unittest.TestCase):
         self.assertFalse(detector.update(0.0, 0.0, 20.49))
         self.assertTrue(detector.update(0.0, 0.0, 20.5))
 
+
+class ActionOperationCoordinatorTests(unittest.TestCase):
+    def test_older_goal_cannot_send_after_newer_goal_sent_first(self):
+        coordinator = ActionOperationCoordinator()
+        old = coordinator.issue()
+        new = coordinator.issue()
+        operations = []
+
+        self.assertTrue(
+            coordinator.run_if_current(
+                new, lambda still_current: operations.append("send-new")
+            )
+        )
+        self.assertFalse(
+            coordinator.run_if_current(
+                old, lambda still_current: operations.append("send-old")
+            )
+        )
+        self.assertEqual(["send-new"], operations)
+
+    def test_stale_cancel_cannot_cancel_new_goal(self):
+        coordinator = ActionOperationCoordinator()
+        stale_cancel = coordinator.issue()
+        current_goal = coordinator.issue()
+        operations = []
+
+        coordinator.run_if_current(
+            current_goal, lambda still_current: operations.append("send-new")
+        )
+        self.assertFalse(
+            coordinator.run_if_current(
+                stale_cancel, lambda still_current: operations.append("cancel")
+            )
+        )
+        self.assertEqual(["send-new"], operations)
+
+    def test_new_generation_during_replace_cancel_prevents_old_send(self):
+        coordinator = ActionOperationCoordinator()
+        replacing = coordinator.issue()
+        cancel_started = threading.Event()
+        allow_cancel_to_return = threading.Event()
+        operations = []
+
+        def replace(still_current):
+            operations.append("cancel-old")
+            cancel_started.set()
+            self.assertTrue(allow_cancel_to_return.wait(timeout=2.0))
+            if still_current():
+                operations.append("send-replacing")
+
+        thread = threading.Thread(
+            target=lambda: coordinator.run_if_current(replacing, replace)
+        )
+        thread.start()
+        self.assertTrue(cancel_started.wait(timeout=2.0))
+        newest = coordinator.issue()
+        allow_cancel_to_return.set()
+        thread.join(timeout=3.0)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(["cancel-old"], operations)
+        self.assertTrue(
+            coordinator.run_if_current(
+                newest, lambda still_current: operations.append("send-newest")
+            )
+        )
+        self.assertEqual(["cancel-old", "send-newest"], operations)
 
 if __name__ == "__main__":
     unittest.main()

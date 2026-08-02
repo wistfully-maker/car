@@ -28,6 +28,7 @@ class PackageConfigTests(unittest.TestCase):
             "scripts/task_orchestrator_node.py",
             "scripts/voice_task_adapter_node.py",
             "scripts/tts_bridge_node.py",
+            "scripts/fast_nav_adapter_node.py",
             "test/manual_simulation.md",
         ):
             self.assertTrue((ROOT / relative).is_file(), relative)
@@ -179,9 +180,75 @@ class PackageConfigTests(unittest.TestCase):
             "task_orchestrator_node.py",
             "voice_task_adapter_node.py",
             "tts_bridge_node.py",
+            "fast_nav_adapter_node.py",
         ):
             if ("scripts/%s" % script) in cmake:
                 self.assertTrue((ROOT / "scripts" / script).is_file(), script)
+
+    def test_fast_nav_adapter_declares_ros_contract(self):
+        source = (ROOT / "scripts/fast_nav_adapter_node.py").read_text(
+            encoding="utf-8"
+        )
+        tree = ast.parse(source)
+        publishers = set()
+        subscribers = set()
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not node.args:
+                continue
+            function = node.func
+            if not isinstance(function, ast.Attribute):
+                continue
+            topic = string_literal(node.args[0])
+            if function.attr == "Publisher" and topic:
+                publishers.add(topic)
+            elif function.attr == "Subscriber" and topic:
+                subscribers.add(topic)
+        self.assertEqual({"/task/pickup_arrived"}, publishers)
+        self.assertEqual(
+            {"/task/pickup_navigation_goal", "/task/cancel", "/odom"},
+            subscribers,
+        )
+        for required in (
+            "actionlib.SimpleActionClient",
+            '"/move_base"',
+            "MoveBaseAction",
+            "MoveBaseGoal",
+            "FastNavSession",
+            "StopDetector",
+            "validate_waypoint",
+            "math.hypot",
+            "quaternion_from_euler",
+            "threading.RLock",
+            "rospy.on_shutdown",
+        ):
+            self.assertIn(required, source)
+
+    def test_fast_nav_dependencies_and_installation_are_declared(self):
+        cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
+        self.assertIn("scripts/fast_nav_adapter_node.py", cmake)
+        root = ET.parse(ROOT / "package.xml").getroot()
+        for dependency in (
+            "actionlib",
+            "actionlib_msgs",
+            "move_base_msgs",
+            "nav_msgs",
+            "geometry_msgs",
+        ):
+            self.assertIsNotNone(root.find("build_depend[.='%s']" % dependency))
+            self.assertIsNotNone(root.find("exec_depend[.='%s']" % dependency))
+
+    def test_fast_nav_configuration_has_explicit_defaults(self):
+        config = (ROOT / "config/orchestrator.yaml").read_text(encoding="utf-8")
+        for required in (
+            "fast_nav_adapter:",
+            "action_timeout: 300.0",
+            "settle_time: 0.5",
+            "linear_stop_threshold: 0.03",
+            "angular_stop_threshold: 0.05",
+        ):
+            self.assertIn(required, config)
+        self.assertNotIn("pickup_goal:", config)
+        self.assertNotIn("replace_with_deployed_map_sha256", config)
 
     def test_manual_simulation_uses_current_protocol(self):
         manual = (ROOT / "test/manual_simulation.md").read_text(

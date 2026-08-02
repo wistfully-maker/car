@@ -270,6 +270,9 @@ class ProtocolTests(unittest.TestCase):
         message["reason"] = " "
         with self.assertRaises(ProtocolError):
             parse_cancel(encode(message), "task-001")
+        message["reason"] = " operator_cancel "
+        with self.assertRaises(ProtocolError):
+            parse_cancel(encode(message), "task-001")
 
     @staticmethod
     def _qr_message():

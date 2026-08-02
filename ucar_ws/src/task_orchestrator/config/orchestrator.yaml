@@ -15,3 +15,9 @@ tts_bridge:
     - python3
     - /home/ucar/ucar_ws/src/speech_command/scripts/tts_http.py
   timeout: 30.0
+
+fast_nav_adapter:
+  action_timeout: 300.0
+  settle_time: 0.5
+  linear_stop_threshold: 0.03
+  angular_stop_threshold: 0.05
