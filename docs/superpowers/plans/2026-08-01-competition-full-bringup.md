@@ -1,5 +1,8 @@
 # U-CAR 全任务分层启动实施计划
 
+> **已废止（2026-08-02）：** 本计划依赖旧 `ucar_waypoint_nav + AMCL`，不得执行。
+> 请执行 `docs/superpowers/plans/2026-08-02-ucar-fast-nav-integration.md`。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 实现一个不重复占用硬件、能在导航与 QR 之间安全交接底盘控制权、并为避障、巡线和其他比赛任务预留接口的全车启动入口。

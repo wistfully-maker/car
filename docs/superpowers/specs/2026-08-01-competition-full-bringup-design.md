@@ -1,5 +1,9 @@
 # U-CAR 全流程分层启动与资源所有权设计
 
+> **已废止（2026-08-02）：** 本文基于旧 `ucar_waypoint_nav + AMCL` 导航链。
+> 正式实施以
+> `docs/superpowers/specs/2026-08-02-ucar-fast-nav-integration-design.md` 为准，不得继续执行本文的导航和动态避障设计。
+
 ## 1. 目标
 
 为 U-CAR 比赛全部任务提供可复现的一键启动入口，连接语音、领取区导航、QR、
