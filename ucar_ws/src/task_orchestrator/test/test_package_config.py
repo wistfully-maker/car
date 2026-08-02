@@ -30,6 +30,7 @@ class PackageConfigTests(unittest.TestCase):
             "scripts/tts_bridge_node.py",
             "scripts/fast_nav_adapter_node.py",
             "scripts/system_readiness_gate_node.py",
+            "scripts/velocity_arbiter_node.py",
             "test/manual_simulation.md",
         ):
             self.assertTrue((ROOT / relative).is_file(), relative)
@@ -66,6 +67,7 @@ class PackageConfigTests(unittest.TestCase):
                 "/llm/classify/request",
                 "/voice/speak",
                 "/task/delivery_navigation_goal",
+                "/task/motion_mode",
             },
             publisher_topics,
         )
@@ -183,9 +185,30 @@ class PackageConfigTests(unittest.TestCase):
             "tts_bridge_node.py",
             "fast_nav_adapter_node.py",
             "system_readiness_gate_node.py",
+            "velocity_arbiter_node.py",
         ):
             if ("scripts/%s" % script) in cmake:
                 self.assertTrue((ROOT / "scripts" / script).is_file(), script)
+
+    def test_velocity_arbiter_configuration_and_installation(self):
+        cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
+        self.assertIn("scripts/velocity_arbiter_node.py", cmake)
+        config = (ROOT / "config/orchestrator.yaml").read_text(encoding="utf-8")
+        self.assertIn("velocity_arbiter:", config)
+        self.assertIn("source_timeout: 0.3", config)
+        self.assertIn("check_period: 0.05", config)
+        lines = config.splitlines()
+        start = lines.index("velocity_arbiter:") + 1
+        subtree = []
+        for line in lines[start:]:
+            if line and not line.startswith(" "):
+                break
+            if line.strip():
+                subtree.append(line.strip())
+        self.assertEqual([
+            "source_timeout: 0.3", "check_period: 0.05",
+            "max_linear_abs: 1.0", "max_angular_abs: 2.0",
+        ], subtree)
 
     def test_fast_nav_adapter_declares_ros_contract(self):
         source = (ROOT / "scripts/fast_nav_adapter_node.py").read_text(

@@ -23,6 +23,7 @@ catkin_install_python(PROGRAMS
   scripts/tts_bridge_node.py
   scripts/fast_nav_adapter_node.py
   scripts/system_readiness_gate_node.py
+  scripts/velocity_arbiter_node.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

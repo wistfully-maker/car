@@ -2,12 +2,14 @@
 """ROS String/JSON adapter for the pure task orchestration core."""
 
 import json
+import threading
 import uuid
 
 import rospy
 from std_msgs.msg import String
 
 from task_orchestrator.orchestrator import TaskOrchestrator
+from task_orchestrator.motion_mode import IDLE, NAVIGATION, QR_SEARCH
 from task_orchestrator.protocol import (
     ProtocolError,
     parse_arrival,
@@ -33,6 +35,9 @@ DEFAULT_TIMEOUTS = {
 
 def _make_publishers():
     return {
+        "publish_motion_mode": rospy.Publisher(
+            "/task/motion_mode", String, queue_size=1, latch=True
+        ),
         "publish_status": rospy.Publisher(
             "/task/status", String, queue_size=10
         ),
@@ -64,9 +69,37 @@ def _dispatch(outputs, publishers):
         if publisher is None:
             rospy.logerr("unknown orchestrator action: %s", action)
             continue
-        publisher.publish(
-            String(data=json.dumps(payload, ensure_ascii=False))
-        )
+        try:
+            if action == "publish_motion_mode":
+                publisher.publish(_motion_mode_message(payload))
+            else:
+                publisher.publish(
+                    String(data=json.dumps(payload, ensure_ascii=False))
+                )
+        except Exception as exc:
+            rospy.logerr("failed to publish orchestrator action %s: %s", action, exc)
+
+
+def _motion_mode_message(payload):
+    if not isinstance(payload, str) or payload not in (
+        IDLE,
+        NAVIGATION,
+        QR_SEARCH,
+    ):
+        rospy.logerr("invalid motion mode payload; publishing safe IDLE")
+        payload = IDLE
+    return String(data=payload)
+
+
+def _run_callback(lock, outputs, publishers, operation):
+    """Serialize one core mutation and its complete publication batch."""
+    with lock:
+        start = len(outputs)
+        operation()
+        batch = outputs[start:]
+        del outputs[start:]
+        _dispatch(batch, publishers)
+        return batch
 
 
 def _task_context(orchestrator):
@@ -91,61 +124,49 @@ def _callback(
     publishers,
     parser,
     handler,
+    callback_lock,
     expected_state=None,
 ):
     def receive(message):
-        expected_states = (
-            expected_state
-            if isinstance(expected_state, tuple)
-            else (expected_state,)
-        )
-        if (
-            expected_state is not None
-            and orchestrator.state not in expected_states
-        ):
-            rospy.logwarn(
-                "ignored message for inactive state %s (current: %s)",
-                expected_state,
-                orchestrator.state,
-            )
-            return
-        try:
-            parsed = parser(message.data)
-            handler(parsed)
-        except ProtocolError as exc:
-            rospy.logwarn("ignored invalid or stale message: %s", exc)
-            return
-        except Exception as exc:
-            rospy.logerr("orchestrator callback failed: %s", exc)
-            orchestrator.on_internal_error(str(exc))
-        _dispatch(outputs, publishers)
+        def mutate():
+            expected_states = expected_state if isinstance(expected_state, tuple) else (expected_state,)
+            if expected_state is not None and orchestrator.state not in expected_states:
+                rospy.logwarn("ignored message for inactive state %s (current: %s)",
+                              expected_state, orchestrator.state)
+                return
+            try:
+                parsed = parser(message.data)
+                handler(parsed)
+            except ProtocolError as exc:
+                rospy.logwarn("ignored invalid or stale message: %s", exc)
+            except Exception as exc:
+                rospy.logerr("orchestrator callback failed: %s", exc)
+                orchestrator.on_internal_error(str(exc))
+        _run_callback(callback_lock, outputs, publishers, mutate)
 
     return receive
 
 
-def _ready_callback(orchestrator, outputs, publishers):
+def _ready_callback(orchestrator, outputs, publishers, callback_lock):
     def receive(message):
-        if orchestrator.state != TaskOrchestrator.CHECKING_DEPENDENCIES:
-            rospy.logwarn("ignored dependencies-ready outside dependency check")
-            return
-        try:
-            parse_dependencies_ready(
-                message.data,
-                orchestrator.task["task_id"],
-            )
-            orchestrator.on_dependencies_ready()
-        except (ProtocolError, KeyError, TypeError) as exc:
-            rospy.logwarn("ignored invalid dependencies-ready message: %s", exc)
-            return
-        except Exception as exc:
-            rospy.logerr("dependencies-ready callback failed: %s", exc)
-            orchestrator.on_internal_error(str(exc))
-        _dispatch(outputs, publishers)
+        def mutate():
+            if orchestrator.state != TaskOrchestrator.CHECKING_DEPENDENCIES:
+                rospy.logwarn("ignored dependencies-ready outside dependency check")
+                return
+            try:
+                parse_dependencies_ready(message.data, orchestrator.task["task_id"])
+                orchestrator.on_dependencies_ready()
+            except (ProtocolError, KeyError, TypeError) as exc:
+                rospy.logwarn("ignored invalid dependencies-ready message: %s", exc)
+            except Exception as exc:
+                rospy.logerr("dependencies-ready callback failed: %s", exc)
+                orchestrator.on_internal_error(str(exc))
+        _run_callback(callback_lock, outputs, publishers, mutate)
 
     return receive
 
 
-def _subscribe(orchestrator, outputs, publishers):
+def _subscribe(orchestrator, outputs, publishers, callback_lock):
     rospy.Subscriber(
         "/voice/task_request",
         String,
@@ -155,12 +176,13 @@ def _subscribe(orchestrator, outputs, publishers):
             publishers,
             parse_task_request,
             orchestrator.on_task_request,
+            callback_lock,
         ),
     )
     rospy.Subscriber(
         "/task/dependencies_ready",
         String,
-        _ready_callback(orchestrator, outputs, publishers),
+        _ready_callback(orchestrator, outputs, publishers, callback_lock),
     )
     rospy.Subscriber(
         "/task/pickup_arrived",
@@ -175,6 +197,7 @@ def _subscribe(orchestrator, outputs, publishers):
                 orchestrator.task["pickup_goal_id"],
             ),
             orchestrator.on_pickup_arrived,
+            callback_lock,
             TaskOrchestrator.NAVIGATING_TO_PICKUP,
         ),
     )
@@ -191,6 +214,7 @@ def _subscribe(orchestrator, outputs, publishers):
                 orchestrator.task["search_id"],
             ),
             orchestrator.on_qr_result,
+            callback_lock,
             TaskOrchestrator.WAITING_QR,
         ),
     )
@@ -206,6 +230,7 @@ def _subscribe(orchestrator, outputs, publishers):
                 _task_context(orchestrator),
             ),
             orchestrator.on_llm_result,
+            callback_lock,
             TaskOrchestrator.WAITING_LLM,
         ),
     )
@@ -222,6 +247,7 @@ def _subscribe(orchestrator, outputs, publishers):
                 orchestrator.task["speech_id"],
             ),
             orchestrator.on_speech_done,
+            callback_lock,
             TaskOrchestrator.WAITING_SPEECH,
         ),
     )
@@ -238,6 +264,7 @@ def _subscribe(orchestrator, outputs, publishers):
                 orchestrator.task["delivery_goal_id"],
             ),
             orchestrator.on_delivery_arrived,
+            callback_lock,
             TaskOrchestrator.NAVIGATING_TO_WORKSHOP,
         ),
     )
@@ -253,6 +280,7 @@ def _subscribe(orchestrator, outputs, publishers):
                 orchestrator.task["task_id"],
             ),
             orchestrator.on_cancel,
+            callback_lock,
             (
                 TaskOrchestrator.CHECKING_DEPENDENCIES,
                 TaskOrchestrator.NAVIGATING_TO_PICKUP,
@@ -268,6 +296,7 @@ def _subscribe(orchestrator, outputs, publishers):
 def main():
     rospy.init_node("task_orchestrator")
     outputs = []
+    callback_lock = threading.RLock()
     timeouts = rospy.get_param("~timeouts", DEFAULT_TIMEOUTS)
     orchestrator = TaskOrchestrator(
         outputs,
@@ -276,11 +305,14 @@ def main():
         timeouts,
     )
     publishers = _make_publishers()
-    _subscribe(orchestrator, outputs, publishers)
+    with callback_lock:
+        initial = list(outputs)
+        del outputs[:]
+        _dispatch(initial, publishers)
+    _subscribe(orchestrator, outputs, publishers, callback_lock)
 
     def tick(_event):
-        orchestrator.tick()
-        _dispatch(outputs, publishers)
+        _run_callback(callback_lock, outputs, publishers, orchestrator.tick)
 
     rospy.Timer(rospy.Duration(0.5), tick)
     rospy.loginfo("task_orchestrator node started")

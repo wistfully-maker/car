@@ -164,6 +164,23 @@ class Harness:
 
 
 class OrchestratorHappyPathTests(unittest.TestCase):
+    def test_every_transition_emits_motion_mode_and_delivery_is_idle(self):
+        h = Harness()
+        self.assertEqual(["IDLE"], h.actions("publish_motion_mode"))
+        h.reach("COMPLETE")
+        self.assertEqual(
+            ["IDLE", "IDLE", "NAVIGATION", "QR_SEARCH", "IDLE", "IDLE", "IDLE", "IDLE"],
+            h.actions("publish_motion_mode"),
+        )
+
+    def test_motion_mode_action_precedes_status_for_every_transition(self):
+        h = Harness()
+        h.reach("COMPLETE")
+        transition_actions = [action for action, _payload in h.outputs]
+        status_indexes = [i for i, action in enumerate(transition_actions) if action == "publish_status"]
+        for status_index in status_indexes:
+            self.assertEqual("publish_motion_mode", transition_actions[status_index - 1])
+
     def test_full_success_path_and_output_contracts(self):
         h = Harness()
         expected = (
@@ -224,6 +241,7 @@ class OrchestratorFailureTests(unittest.TestCase):
                 h.reach(state)
                 failure(h)
                 self.assertEqual("ERROR", h.orch.state)
+                self.assertEqual("IDLE", h.actions("publish_motion_mode")[-1])
                 self.assertTrue(h.actions("publish_status")[-1]["message"])
 
     def test_every_active_stage_has_its_own_timeout(self):
@@ -241,6 +259,7 @@ class OrchestratorFailureTests(unittest.TestCase):
                 h.now[0] = h.orch.deadline + 0.01
                 h.orch.tick()
                 self.assertEqual("ERROR", h.orch.state)
+                self.assertEqual("IDLE", h.actions("publish_motion_mode")[-1])
                 status = h.actions("publish_status")[-1]
                 self.assertIn(state, status["message"])
 
@@ -326,6 +345,7 @@ class OrchestratorSafetyTests(unittest.TestCase):
                     {"task_id": "task-1", "reason": "operator_cancel"}
                 )
                 self.assertEqual("CANCELLED", h.orch.state)
+                self.assertEqual("IDLE", h.actions("publish_motion_mode")[-1])
                 self.assertEqual(
                     "cancelled",
                     h.actions("publish_status")[-1]["status"],

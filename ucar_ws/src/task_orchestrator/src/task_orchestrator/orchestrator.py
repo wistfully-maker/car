@@ -1,6 +1,7 @@
 """ROS-independent state machine for one complete U-CAR task."""
 
 from task_orchestrator.categories import format_result_speech
+from task_orchestrator.motion_mode import motion_mode_for_state
 
 
 class TaskOrchestrator:
@@ -44,12 +45,14 @@ class TaskOrchestrator:
         self.task = None
         self.deadline = None
         self.last_status = None
+        self._emit("publish_motion_mode", motion_mode_for_state(self.state))
 
     def _emit(self, action, payload):
         self._outputs.append((action, payload))
 
     def _transition(self, state):
         self.state = state
+        self._emit("publish_motion_mode", motion_mode_for_state(state))
         timeout_key = self._TIMEOUT_KEYS.get(state)
         if timeout_key is None:
             self.deadline = None

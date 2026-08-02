@@ -32,7 +32,14 @@ readiness_gate:
   odom_frame: odom
   base_frame: base_link
   laser_frame: laser_frame
+
   lidar_loc_node: /lidar_loc
   amcl_node: /amcl
   global_planner_param: /move_base/base_global_planner
   local_planner_param: /move_base/base_local_planner
+
+velocity_arbiter:
+  source_timeout: 0.3
+  check_period: 0.05
+  max_linear_abs: 1.0
+  max_angular_abs: 2.0
