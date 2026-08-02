@@ -22,6 +22,10 @@ $packagePath = Join-Path $bundleRoot 'source_snapshot\ucar_fast_nav\package.xml'
 if ($packageXml.package.name -ne 'ucar_fast_nav') {
     $failures += "package name is '$($packageXml.package.name)', expected 'ucar_fast_nav'"
 }
+$maintainerEmail = [string]$packageXml.package.maintainer.email
+if ($maintainerEmail -notmatch '^[^@\s]+@[^@\s]+\.[^@\s]+$') {
+    $failures += "maintainer email is not a fully qualified address: $maintainerEmail"
+}
 
 $mapYaml = Join-Path $bundleRoot 'source_snapshot\ucar_fast_nav\maps\002.yaml'
 $imageLine = Get-Content -LiteralPath $mapYaml -Encoding UTF8 | Where-Object { $_ -match '^image\s*:' }
