@@ -89,7 +89,8 @@ class PackageConfigTests(unittest.TestCase):
         root = ET.parse(ROOT / "launch/task_orchestrator.launch").getroot()
         nodes = {node.attrib["name"]: node for node in root.findall("node")}
         self.assertEqual(
-            {"task_orchestrator", "voice_task_adapter", "tts_bridge"},
+            {"task_orchestrator", "voice_task_adapter", "tts_bridge",
+             "fast_nav_adapter", "readiness_gate", "velocity_arbiter"},
             set(nodes),
         )
         for node in nodes.values():
@@ -189,6 +190,25 @@ class PackageConfigTests(unittest.TestCase):
         ):
             if ("scripts/%s" % script) in cmake:
                 self.assertTrue((ROOT / "scripts" / script).is_file(), script)
+
+    def test_runtime_bringup_dependencies_are_declared(self):
+        package = ET.parse(ROOT / "package.xml").getroot()
+        exec_dependencies = {node.text for node in package.findall("exec_depend")}
+        self.assertTrue({
+            "ucar_fast_nav", "speech_command", "qr_item_search", "llm_spark",
+            "usb_cam",
+        } <= exec_dependencies)
+
+    def test_cmake_installs_share_files_and_registers_python_tests(self):
+        cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
+        self.assertIn("install(DIRECTORY launch config", cmake)
+        self.assertIn("DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}", cmake)
+        self.assertIn("if(CATKIN_ENABLE_TESTING)", cmake)
+        self.assertIn("catkin_add_nosetests(test)", cmake)
+        self.assertIn("test/test_competition_bringup.py", "\n".join(
+            str(path.relative_to(ROOT)).replace("\\", "/")
+            for path in (ROOT / "test").glob("test_*.py")
+        ))
 
     def test_velocity_arbiter_configuration_and_installation(self):
         cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")

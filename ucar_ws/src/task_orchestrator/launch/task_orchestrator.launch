@@ -1,11 +1,16 @@
 <launch>
+  <arg name="enable_task_orchestrator" default="true"/>
   <arg name="enable_voice_adapter" default="true"/>
   <arg name="enable_tts_bridge" default="true"/>
+  <arg name="enable_fast_nav_adapter" default="false"/>
+  <arg name="enable_readiness_gate" default="false"/>
+  <arg name="enable_velocity_arbiter" default="false"/>
 
   <node pkg="task_orchestrator"
         type="task_orchestrator_node.py"
         name="task_orchestrator"
-        output="screen">
+        output="screen"
+        if="$(arg enable_task_orchestrator)">
     <rosparam command="load"
               file="$(find task_orchestrator)/config/orchestrator.yaml"/>
   </node>
@@ -22,6 +27,30 @@
         name="tts_bridge"
         output="screen"
         if="$(arg enable_tts_bridge)">
+    <rosparam command="load"
+              file="$(find task_orchestrator)/config/orchestrator.yaml"/>
+  </node>
+  <node pkg="task_orchestrator"
+        type="fast_nav_adapter_node.py"
+        name="fast_nav_adapter"
+        output="screen"
+        if="$(arg enable_fast_nav_adapter)">
+    <rosparam command="load"
+              file="$(find task_orchestrator)/config/orchestrator.yaml"/>
+  </node>
+  <node pkg="task_orchestrator"
+        type="system_readiness_gate_node.py"
+        name="readiness_gate"
+        output="screen"
+        if="$(arg enable_readiness_gate)">
+    <rosparam command="load"
+              file="$(find task_orchestrator)/config/orchestrator.yaml"/>
+  </node>
+  <node pkg="task_orchestrator"
+        type="velocity_arbiter_node.py"
+        name="velocity_arbiter"
+        output="screen"
+        if="$(arg enable_velocity_arbiter)">
     <rosparam command="load"
               file="$(find task_orchestrator)/config/orchestrator.yaml"/>
   </node>

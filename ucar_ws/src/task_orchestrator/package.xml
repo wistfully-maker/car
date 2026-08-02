@@ -27,6 +27,11 @@
   <exec_depend>rosnode</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>ucar_fast_nav</exec_depend>
+  <exec_depend>speech_command</exec_depend>
+  <exec_depend>qr_item_search</exec_depend>
+  <exec_depend>llm_spark</exec_depend>
+  <exec_depend>usb_cam</exec_depend>
 
   <export/>
 </package>

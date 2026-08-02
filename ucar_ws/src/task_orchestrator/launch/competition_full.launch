@@ -1,0 +1,115 @@
+<launch>
+  <!--
+    EXTERNAL_CONTRACT: deployment provides these packages in the same catkin
+    workspace. Missing packages intentionally make roslaunch fail fast.
+    Verified interfaces:
+      ucar_fast_nav/pickup_navigation.launch accepts start_base, start_lidar,
+      and cmd_vel_topic and owns pickup_goal.yaml loading.
+      speech_command/speech_command.launch has no arguments and publishes
+      recognized text on /question.
+      qr_item_search/qr_item_search.launch accepts image_topic, publishes
+      /cmd_vel, and does not start a camera or base.
+      llm_spark/llm_spark.launch is the classification service launch.
+      usb_cam/usb_cam_node is the sole shared camera node.
+
+    start_base and start_lidar are downstream controls owned by the fast-nav
+    include; they do not start hardware when start_fast_nav is false.
+    start_velocity_arbiter=false is only for a deployment already providing an
+    external equivalent sole arbiter. Navigation and QR remain isolated on
+    /cmd_vel/navigation and /cmd_vel/qr; preflight ownership is task 6.
+  -->
+  <arg name="start_fast_nav" default="true"/>
+  <arg name="start_base" default="true"/>
+  <arg name="start_lidar" default="true"/>
+  <arg name="start_camera" default="true"/>
+  <arg name="start_fast_nav_adapter" default="true"/>
+  <arg name="start_readiness_gate" default="true"/>
+  <arg name="start_speech" default="true"/>
+  <arg name="start_qr" default="true"/>
+  <arg name="start_llm" default="true"/>
+  <arg name="start_orchestrator" default="true"/>
+  <arg name="start_velocity_arbiter" default="true"/>
+
+  <arg name="fast_nav_launch"
+       default="$(find ucar_fast_nav)/launch/pickup_navigation.launch"/>
+  <arg name="speech_launch"
+       default="$(find speech_command)/launch/speech_command.launch"/>
+  <arg name="qr_launch"
+       default="$(find qr_item_search)/launch/qr_item_search.launch"/>
+  <arg name="llm_launch"
+       default="$(find llm_spark)/launch/llm_spark.launch"/>
+  <arg name="orchestrator_launch"
+       default="$(find task_orchestrator)/launch/task_orchestrator.launch"/>
+
+  <group if="$(arg start_fast_nav)">
+    <!-- pickup_navigation.launch owns the single vendor pickup_goal.yaml load. -->
+    <include file="$(arg fast_nav_launch)">
+      <arg name="start_base" value="$(arg start_base)"/>
+      <arg name="start_lidar" value="$(arg start_lidar)"/>
+      <arg name="cmd_vel_topic" value="/cmd_vel/navigation"/>
+    </include>
+  </group>
+
+  <group if="$(arg start_camera)">
+    <node pkg="usb_cam" type="usb_cam_node" name="usb_cam" output="screen"/>
+  </group>
+
+  <group if="$(arg start_speech)">
+    <include file="$(arg speech_launch)"/>
+  </group>
+
+  <group if="$(arg start_qr)">
+    <remap from="/cmd_vel" to="/cmd_vel/qr"/>
+    <include file="$(arg qr_launch)">
+      <arg name="image_topic" value="/usb_cam/image_raw"/>
+    </include>
+  </group>
+
+  <group if="$(arg start_llm)">
+    <include file="$(arg llm_launch)"/>
+  </group>
+
+  <group if="$(arg start_orchestrator)">
+    <include file="$(arg orchestrator_launch)">
+      <arg name="enable_task_orchestrator" value="true"/>
+      <arg name="enable_voice_adapter" value="true"/>
+      <arg name="enable_tts_bridge" value="true"/>
+      <arg name="enable_fast_nav_adapter" value="false"/>
+      <arg name="enable_readiness_gate" value="false"/>
+      <arg name="enable_velocity_arbiter" value="false"/>
+    </include>
+  </group>
+
+  <group if="$(arg start_fast_nav_adapter)">
+    <include file="$(arg orchestrator_launch)">
+      <arg name="enable_task_orchestrator" value="false"/>
+      <arg name="enable_voice_adapter" value="false"/>
+      <arg name="enable_tts_bridge" value="false"/>
+      <arg name="enable_fast_nav_adapter" value="true"/>
+      <arg name="enable_readiness_gate" value="false"/>
+      <arg name="enable_velocity_arbiter" value="false"/>
+    </include>
+  </group>
+
+  <group if="$(arg start_readiness_gate)">
+    <include file="$(arg orchestrator_launch)">
+      <arg name="enable_task_orchestrator" value="false"/>
+      <arg name="enable_voice_adapter" value="false"/>
+      <arg name="enable_tts_bridge" value="false"/>
+      <arg name="enable_fast_nav_adapter" value="false"/>
+      <arg name="enable_readiness_gate" value="true"/>
+      <arg name="enable_velocity_arbiter" value="false"/>
+    </include>
+  </group>
+
+  <group if="$(arg start_velocity_arbiter)">
+    <include file="$(arg orchestrator_launch)">
+      <arg name="enable_task_orchestrator" value="false"/>
+      <arg name="enable_voice_adapter" value="false"/>
+      <arg name="enable_tts_bridge" value="false"/>
+      <arg name="enable_fast_nav_adapter" value="false"/>
+      <arg name="enable_readiness_gate" value="false"/>
+      <arg name="enable_velocity_arbiter" value="true"/>
+    </include>
+  </group>
+</launch>
