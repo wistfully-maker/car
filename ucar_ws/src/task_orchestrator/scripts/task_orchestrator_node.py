@@ -21,7 +21,7 @@ from task_orchestrator.protocol import (
 
 
 DEFAULT_TIMEOUTS = {
-    "dependency_ready": 30.0,
+    "dependency_ready": 120.0,
     "pickup_navigation": 300.0,
     "qr_search": 120.0,
     "llm_classification": 120.0,

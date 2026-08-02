@@ -29,6 +29,7 @@ class PackageConfigTests(unittest.TestCase):
             "scripts/voice_task_adapter_node.py",
             "scripts/tts_bridge_node.py",
             "scripts/fast_nav_adapter_node.py",
+            "scripts/system_readiness_gate_node.py",
             "test/manual_simulation.md",
         ):
             self.assertTrue((ROOT / relative).is_file(), relative)
@@ -181,6 +182,7 @@ class PackageConfigTests(unittest.TestCase):
             "voice_task_adapter_node.py",
             "tts_bridge_node.py",
             "fast_nav_adapter_node.py",
+            "system_readiness_gate_node.py",
         ):
             if ("scripts/%s" % script) in cmake:
                 self.assertTrue((ROOT / "scripts" / script).is_file(), script)
@@ -249,6 +251,29 @@ class PackageConfigTests(unittest.TestCase):
             self.assertIn(required, config)
         self.assertNotIn("pickup_goal:", config)
         self.assertNotIn("replace_with_deployed_map_sha256", config)
+
+    def test_readiness_gate_dependencies_installation_and_configuration(self):
+        cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
+        self.assertIn("scripts/system_readiness_gate_node.py", cmake)
+        package = ET.parse(ROOT / "package.xml").getroot()
+        for dependency in (
+            "actionlib", "move_base_msgs", "nav_msgs", "sensor_msgs",
+            "std_msgs", "tf2_ros", "rosnode",
+        ):
+            self.assertIsNotNone(package.find("build_depend[.='%s']" % dependency))
+            self.assertIsNotNone(package.find("exec_depend[.='%s']" % dependency))
+        config = (ROOT / "config/orchestrator.yaml").read_text(encoding="utf-8")
+        self.assertIn("dependency_ready: 120.0", config)
+        adapter = (ROOT / "scripts/task_orchestrator_node.py").read_text(encoding="utf-8")
+        self.assertIn('"dependency_ready": 120.0', adapter)
+        for required in (
+            "readiness_gate:", "message_max_age:", "check_period:",
+            "tf_timeout:", "action_wait_timeout:", "log_interval:",
+            "map_frame:", "odom_frame:", "base_frame:", "laser_frame:",
+            "lidar_loc_node:", "amcl_node:", "global_planner_param:",
+            "local_planner_param:",
+        ):
+            self.assertIn(required, config)
 
     def test_manual_simulation_uses_current_protocol(self):
         manual = (ROOT / "test/manual_simulation.md").read_text(

@@ -1,5 +1,5 @@
 timeouts:
-  dependency_ready: 30.0
+  dependency_ready: 120.0
   pickup_navigation: 300.0
   qr_search: 120.0
   llm_classification: 120.0
@@ -21,3 +21,18 @@ fast_nav_adapter:
   settle_time: 0.5
   linear_stop_threshold: 0.03
   angular_stop_threshold: 0.05
+
+readiness_gate:
+  message_max_age: 3.0
+  check_period: 1.0
+  tf_timeout: 0.05
+  action_wait_timeout: 0.05
+  log_interval: 10.0
+  map_frame: map
+  odom_frame: odom
+  base_frame: base_link
+  laser_frame: laser_frame
+  lidar_loc_node: /lidar_loc
+  amcl_node: /amcl
+  global_planner_param: /move_base/base_global_planner
+  local_planner_param: /move_base/base_local_planner
