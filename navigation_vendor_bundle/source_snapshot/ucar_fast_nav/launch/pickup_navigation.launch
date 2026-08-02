@@ -1,0 +1,17 @@
+<launch>
+  <arg name="start_base" default="true"/>
+  <arg name="start_lidar" default="true"/>
+  <arg name="cmd_vel_topic" default="/cmd_vel"/>
+  <arg name="map_file" default="$(find ucar_fast_nav)/maps/002.yaml"/>
+
+  <rosparam command="load"
+            file="$(find ucar_fast_nav)/config/pickup_goal.yaml"
+            ns="/ucar_fast_nav"/>
+
+  <include file="$(find ucar_fast_nav)/launch/navigation_full.launch">
+    <arg name="start_base" value="$(arg start_base)"/>
+    <arg name="start_lidar" value="$(arg start_lidar)"/>
+    <arg name="cmd_vel_topic" value="$(arg cmd_vel_topic)"/>
+    <arg name="map_file" value="$(arg map_file)"/>
+  </include>
+</launch>

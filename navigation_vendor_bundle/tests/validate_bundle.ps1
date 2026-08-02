@@ -33,6 +33,32 @@ if ($imageLine -notmatch '^image\s*:\s*002\.pgm\s*$') {
     $failures += "002.yaml must reference relative image 002.pgm"
 }
 
+$pickupGoalPath = Join-Path $bundleRoot 'source_snapshot\ucar_fast_nav\config\pickup_goal.yaml'
+if (Test-Path -LiteralPath $pickupGoalPath) {
+    $pickupText = Get-Content -LiteralPath $pickupGoalPath -Raw -Encoding UTF8
+    foreach ($expectedLine in @(
+        'frame_id: map',
+        'x: -1.40219',
+        'y: -0.627908',
+        'yaw: 0.053792653589793'
+    )) {
+        if ($pickupText -notmatch "(?m)^\s*$([regex]::Escape($expectedLine))\s*$") {
+            $failures += "pickup goal missing expected value: $expectedLine"
+        }
+    }
+}
+
+$pickupLaunchPath = Join-Path $bundleRoot 'source_snapshot\ucar_fast_nav\launch\pickup_navigation.launch'
+if (Test-Path -LiteralPath $pickupLaunchPath) {
+    $pickupLaunchText = Get-Content -LiteralPath $pickupLaunchPath -Raw -Encoding UTF8
+    if ($pickupLaunchText -match 'ucar_waypoint_nav|waypoint_route_manager') {
+        $failures += 'pickup launch must not start or depend on the waypoint manager'
+    }
+    if ($pickupLaunchText -notmatch 'navigation_full\.launch') {
+        $failures += 'pickup launch must include navigation_full.launch'
+    }
+}
+
 $runtimeRoot = Join-Path $bundleRoot 'source_snapshot\ucar_fast_nav'
 $forbidden = Get-ChildItem -LiteralPath $runtimeRoot -File -Recurse |
     Where-Object { $_.Extension -in '.launch', '.xml', '.yaml' } |

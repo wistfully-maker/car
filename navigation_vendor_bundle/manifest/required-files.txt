@@ -2,6 +2,8 @@ source_snapshot/ucar_fast_nav/package.xml
 source_snapshot/ucar_fast_nav/CMakeLists.txt
 source_snapshot/ucar_fast_nav/launch/navigation_stack.launch
 source_snapshot/ucar_fast_nav/launch/navigation_full.launch
+source_snapshot/ucar_fast_nav/launch/pickup_navigation.launch
+source_snapshot/ucar_fast_nav/config/pickup_goal.yaml
 source_snapshot/ucar_fast_nav/config/move_base/move_base_params.yaml
 source_snapshot/ucar_fast_nav/config/move_base/costmap_common_params.yaml
 source_snapshot/ucar_fast_nav/config/move_base/global_costmap_params.yaml

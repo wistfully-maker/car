@@ -22,6 +22,8 @@ ucar_controller + ydlidar + jie_ware/lidar_loc
 5. 原 launch 明确指定 GlobalPlanner 和 TEB，覆盖 `move_base_params.yaml` 内遗留的 Astar/DWA 默认值。
 6. 对方曾通过 `roslaunch ucar_nav ucar_navigation.launch` 实际启动此链，ROS 日志确认加载 TEB 和 GlobalPlanner。
 7. dynamic_obstacle 链接口没有完全闭合，首轮复现不启用。
+8. `config/pickup_goal.yaml` 只保存二维码观察点终点；航向已由 `-3.0878 rad` 反转为 `0.053792653589793 rad`。
+9. `pickup_navigation.launch` 只加载终点参数，不依赖、不启动 `ucar_waypoint_nav`，也不会自动发送目标。
 
 ## 明天优先比较的硬件差异
 

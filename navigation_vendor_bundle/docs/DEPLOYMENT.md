@@ -81,6 +81,18 @@ roslaunch --files ucar_fast_nav navigation_full.launch
 roslaunch ucar_fast_nav navigation_full.launch
 ```
 
+需要加载二维码观察点参数时，使用：
+
+```bash
+roslaunch ucar_fast_nav pickup_navigation.launch
+```
+
+该 launch 只加载一个最终目标，不启动 `ucar_waypoint_nav`，也不会自动发车。目标参数位于：
+
+```bash
+rosparam get /ucar_fast_nav/pickup_goal
+```
+
 如果队友已经启动底盘和雷达：
 
 ```bash
@@ -98,6 +110,15 @@ roslaunch ucar_fast_nav navigation_full.launch start_lidar:=false
 ```bash
 rosrun ucar_fast_nav runtime_check.sh
 ```
+
+确认定位与运行检查正常后，人工发送唯一终点：
+
+```bash
+rostopic pub -1 /move_base_simple/goal geometry_msgs/PoseStamped \
+"{header: {frame_id: 'map'}, pose: {position: {x: -1.40219, y: -0.627908, z: 0.0}, orientation: {x: 0.0, y: 0.0, z: 0.026893084056159769, w: 0.9996383156071742}}}"
+```
+
+目标航向为 `yaw=0.053792653589793 rad`，即原航向 `-3.0878 rad` 反转 180°。
 
 ## 6. 定位与实车测试
 

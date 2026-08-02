@@ -1,0 +1,8 @@
+pickup_goal:
+  frame_id: map
+  map_sha256: 1b50360750baa7b86bf0e7cc86af1e4ae81753d819b16d9610a9719f72523e2e
+  x: -1.40219
+  y: -0.627908
+  yaw: 0.053792653589793
+  position_tolerance: 0.15
+  yaw_tolerance: 0.15
