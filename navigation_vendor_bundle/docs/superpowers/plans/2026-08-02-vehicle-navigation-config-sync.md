@@ -14,6 +14,7 @@
 
 **Files:**
 - Modify: `tests/validate_bundle.ps1`
+- Modify: `manifest/files.sha256`
 - Test: `tests/validate_bundle.ps1`
 
 - [ ] **Step 1: Add exact failing assertions for the captured vehicle values**
@@ -53,8 +54,12 @@ Expected: exit code `1`, including failures for the costmap footprint, `acc_lim_
 
 - [ ] **Step 3: Commit the failing regression checks**
 
+Before committing, compute the new SHA-256 for `tests/validate_bundle.ps1` and
+replace its matching entry in `manifest/files.sha256`. Re-run the validator and
+confirm that only the four intended vehicle-configuration assertions fail.
+
 ```powershell
-git add tests/validate_bundle.ps1
+git add tests/validate_bundle.ps1 manifest/files.sha256
 git commit -m "test: require captured vehicle navigation geometry"
 ```
 

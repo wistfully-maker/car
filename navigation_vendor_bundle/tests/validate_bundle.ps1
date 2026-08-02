@@ -33,6 +33,25 @@ if ($imageLine -notmatch '^image\s*:\s*002\.pgm\s*$') {
     $failures += "002.yaml must reference relative image 002.pgm"
 }
 
+$costmapCommonPath = Join-Path $bundleRoot 'source_snapshot\ucar_fast_nav\config\move_base\costmap_common_params.yaml'
+$costmapCommonText = Get-Content -LiteralPath $costmapCommonPath -Raw -Encoding UTF8
+$expectedFootprint = 'footprint: [[0.164, -0.122], [0.164, 0.122],[-0.164, 0.122], [-0.164, -0.122]]'
+if ($costmapCommonText -notmatch "(?m)^$([regex]::Escape($expectedFootprint))\s*$") {
+    $failures += 'costmap footprint does not match the captured vehicle footprint'
+}
+
+$tebPath = Join-Path $bundleRoot 'source_snapshot\ucar_fast_nav\config\move_base\teb_local_planner_params.yaml'
+$tebText = Get-Content -LiteralPath $tebPath -Raw -Encoding UTF8
+foreach ($expectedTebLine in @(
+    '  acc_lim_y: 0.25',
+    '  max_vel_y: 0.20',
+    '    vertices: [[0.164, -0.122], [0.164, 0.122],[-0.164, 0.122], [-0.164, -0.122]]'
+)) {
+    if ($tebText -notmatch "(?m)^$([regex]::Escape($expectedTebLine))\s*$") {
+        $failures += "TEB configuration missing captured vehicle value: $expectedTebLine"
+    }
+}
+
 $pickupGoalPath = Join-Path $bundleRoot 'source_snapshot\ucar_fast_nav\config\pickup_goal.yaml'
 if (Test-Path -LiteralPath $pickupGoalPath) {
     $pickupText = Get-Content -LiteralPath $pickupGoalPath -Raw -Encoding UTF8
