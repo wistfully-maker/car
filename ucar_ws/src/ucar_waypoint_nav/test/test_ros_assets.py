@@ -37,6 +37,27 @@ class RosAssetTests(unittest.TestCase):
         self.assertNotIn("corner_supervisor", text)
         self.assertNotIn("DWAPlannerROS", text)
 
+    def test_lidar_loc_launch_replaces_only_amcl_localization(self):
+        original_path = ROOT / "launch/waypoint_teb_navigation.launch"
+        lidar_path = ROOT / "launch/waypoint_teb_lidar_loc.launch"
+
+        original_text = original_path.read_text(encoding="utf-8")
+        self.assertIn('name="amcl" pkg="amcl" type="amcl"', original_text)
+
+        ET.parse(str(lidar_path))
+        lidar_text = lidar_path.read_text(encoding="utf-8")
+        self.assertIn('name="lidar_loc" pkg="jie_ware" type="lidar_loc"', lidar_text)
+        self.assertNotIn('pkg="amcl"', lidar_text)
+        self.assertIn('name="move_base" pkg="move_base" type="move_base"', lidar_text)
+        self.assertIn('type="waypoint_route_manager.py"', lidar_text)
+        for required_param in (
+            'name="base_frame" value="base_link"',
+            'name="odom_frame" value="odom"',
+            'name="laser_frame" value="laser_frame"',
+            'name="laser_topic" value="scan"',
+        ):
+            self.assertIn(required_param, lidar_text)
+
     def test_teb_baseline_has_online_pass_through_settings(self):
         config = yaml.safe_load(
             (ROOT / "config/teb.yaml").read_text(encoding="utf-8")
