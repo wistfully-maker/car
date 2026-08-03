@@ -41,8 +41,8 @@ for arg in "${launch_args[@]}"; do
     key="${BASH_REMATCH[1]}"
     value="${BASH_REMATCH[2]}"
     case "$key" in
-      start_fast_nav|start_base|start_lidar|start_camera|
-      start_fast_nav_adapter|start_readiness_gate|start_speech|start_qr|
+      start_fast_nav|start_base|start_lidar|start_camera|\
+      start_fast_nav_adapter|start_readiness_gate|start_speech|start_qr|\
       start_llm|start_orchestrator|start_velocity_arbiter)
         normalise_bool "$key" "$value"
         ;;
@@ -151,28 +151,28 @@ get_cmd_vel_publishers() {
   local topic_info=""
   if topic_info="$(rostopic info /cmd_vel 2>&1)"; then
     if publisher_count="$(awk '
-      /^Publishers:[[:space:]]+None[[:space:]]*$/ {
+      /^Publishers:[ \t][ \t]*None[ \t]*$/ {
         publishers++; if (publishers > 1 || subscribers) bad=1
         section="publishers"; publisher_none=1; next
       }
-      /^Publishers:[[:space:]]*$/ {
+      /^Publishers:[ \t]*$/ {
         publishers++; if (publishers > 1 || subscribers) bad=1
         section="publishers"; next
       }
-      /^Subscribers:[[:space:]]+None[[:space:]]*$/ {
+      /^Subscribers:[ \t][ \t]*None[ \t]*$/ {
         subscribers++; if (publishers != 1 || subscribers > 1) bad=1
         section="subscribers"; subscriber_none=1; next
       }
-      /^Subscribers:[[:space:]]*$/ {
+      /^Subscribers:[ \t]*$/ {
         subscribers++; if (publishers != 1 || subscribers > 1) bad=1
         section="subscribers"; next
       }
-      /^[[:space:]]*$/ { next }
+      /^[ \t]*$/ { next }
       section == "publishers" && /^None$/ {
         if (publisher_none || count) bad=1
         publisher_none=1; next
       }
-      section == "publishers" && /^[[:space:]]+\*[[:space:]]+\/[^[:space:]]+([[:space:]]|$)/ {
+      section == "publishers" && /^[ \t][ \t]*\*[ \t][ \t]*\/[-A-Za-z0-9_.\/][-A-Za-z0-9_.\/]*([ \t]|$)/ {
         if (publisher_none) bad=1
         count++; next
       }
@@ -180,7 +180,7 @@ get_cmd_vel_publishers() {
         if (subscriber_none || subscriber_count) bad=1
         subscriber_none=1; next
       }
-      section == "subscribers" && /^[[:space:]]+\*[[:space:]]+\/[^[:space:]]+([[:space:]]|$)/ {
+      section == "subscribers" && /^[ \t][ \t]*\*[ \t][ \t]*\/[-A-Za-z0-9_.\/][-A-Za-z0-9_.\/]*([ \t]|$)/ {
         if (subscriber_none) bad=1
         subscriber_count++; next
       }

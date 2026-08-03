@@ -45,7 +45,7 @@ class FakeRosEnvironment:
         self.root = Path(self.temp.name)
         self.bin = self.root / "bin"
         self.bin.mkdir()
-        for tool in ("bash", "awk", "grep", "sed", "od", "stat", "id"):
+        for tool in ("bash", "awk", "cat", "grep", "sed", "od", "stat", "id"):
             target = shutil.which(tool)
             if target:
                 os.symlink(target, self.bin / tool)
@@ -366,8 +366,8 @@ class CompetitionBringupTests(unittest.TestCase):
 
     def test_topic_parser_accepts_ros_inline_none_contract(self):
         source = START_SCRIPT.read_text(encoding="utf-8")
-        self.assertIn("Publishers:[[:space:]]+None", source)
-        self.assertIn("Subscribers:[[:space:]]+None", source)
+        self.assertIn("Publishers:[ \\t][ \\t]*None", source)
+        self.assertIn("Subscribers:[ \\t][ \\t]*None", source)
         self.assertIn("publisher_none", source)
 
     def test_start_script_uses_vendor_runtime_node_contract(self):
@@ -390,6 +390,13 @@ class CompetitionBringupTests(unittest.TestCase):
         self.assertIn('SPARK_API_PASSWORD=', source)
         self.assertIn('case "$key" in', source)
         self.assertNotIn('[[ -v "flags[', source)
+
+    def test_start_script_case_patterns_use_explicit_continuations(self):
+        source = START_SCRIPT.read_text(encoding="utf-8")
+        argument_case = source.split('case "$key" in', 1)[1].split("esac", 1)[0]
+        for line in argument_case.splitlines():
+            if line.rstrip().endswith("|"):
+                self.fail("Bash case pattern must not end a physical line: %s" % line)
 
 
 @unittest.skipUnless(working_bash(), "no working Bash available")
@@ -497,7 +504,7 @@ class CompetitionStartScriptTests(unittest.TestCase):
     def test_missing_cmd_vel_is_zero_owners_but_transport_error_is_fatal(self):
         fake, result = self.run_fake(cmd_vel_status="missing")
         self.assertEqual(0, result.returncode, result.stderr)
-        self.assertIn("roslaunch:", fake.calls())
+        self.assertIn("roslaunch-arg:competition_full.launch", fake.calls())
         _, result = self.run_fake(
             "start_velocity_arbiter:=false", cmd_vel_status="missing",
         )
@@ -583,7 +590,8 @@ class CompetitionStartScriptTests(unittest.TestCase):
         result = fake.run(*arguments)
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertFalse(marker.exists())
-        recorded = [line.removeprefix("roslaunch-arg:") for line in fake.calls().splitlines()
+        prefix = "roslaunch-arg:"
+        recorded = [line[len(prefix):] for line in fake.calls().splitlines()
                     if line.startswith("roslaunch-arg:")]
         self.assertEqual(["task_orchestrator", "competition_full.launch", *arguments], recorded)
 
