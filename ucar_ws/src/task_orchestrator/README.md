@@ -91,7 +91,7 @@ stat -c '%U %a %n' ~/.config/ucar/spark_api_password
 
 - 车放在与 `ucar_fast_nav/config/pickup_goal.yaml` 所用地图一致的已知起点，四周留出制动空间；
 - 操作者手持底盘急停，确认机械急停有效；首轮架空驱动轮或把速度上限降到安全值；
-- `/dev/ucar_controller`、`/dev/ttyS4`、`/dev/video0`、`/dev/ttyS3` 均存在且权限可读写；
+- `/dev/ttyS0`、`/dev/ttyS4`、`/dev/video0`、`/dev/ttyS3` 均存在且权限可读写；
 - 小车网络能访问 Spark/TTS 服务，SSH 不丢包；
 - RViz/地图人工确认地图方向、激光与障碍位置大致一致，`map->odom->base_link->laser_frame` 连通；
 - 当前定位是 `lidar_loc`，不是 AMCL；不得让 `/amcl` 和 `/lidar_loc` 并存；
@@ -334,7 +334,7 @@ rosnode kill /task_orchestrator
 | 现象 | 检查命令 | 判断与处理 |
 |---|---|---|
 | `live node conflict` / `stale registration` | `rosnode list; rosnode ping /节点; rosnode info /节点` | ping 通是 live owner；不通是 stale。找原 root，勿直接重复启动 |
-| device absent/busy/probe permission | `ls -l /dev/ucar_controller /dev/ttyS4 /dev/video0 /dev/ttyS3; fuser /dev/video0` | absent 查接线/udev；busy 查 PID owner；probe permission 查用户组和 `fuser/lsof`，不要跳过检查 |
+| device absent/busy/probe permission | `ls -l /dev/ttyS0 /dev/ttyS4 /dev/video0 /dev/ttyS3; fuser /dev/video0` | absent 查接线/udev；busy 查 PID owner；probe permission 查用户组和 `fuser/lsof`，不要跳过检查 |
 | `/amcl` 冲突 | `rosnode ping /amcl; rosnode ping /lidar_loc` | 本流程只允许 `lidar_loc`；停止 AMCL 所属 root 后重启 |
 | `/cmd_vel` 始终 0 | `rostopic echo /task/motion_mode; rostopic echo /cmd_vel/navigation; rostopic echo /cmd_vel/qr` | `IDLE`、错误源或 0.3 秒源超时都会归零；不要为“让车动”绕过仲裁 |
 | 多个 `/cmd_vel` owner | `rostopic info /cmd_vel` | 必须恰好一个已知仲裁器；定位并停止多余 root |

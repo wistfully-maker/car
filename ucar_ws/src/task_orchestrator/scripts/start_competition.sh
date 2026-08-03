@@ -4,7 +4,7 @@ set -euo pipefail
 ROS_SETUP="${ROS_SETUP:-/opt/ros/noetic/setup.bash}"
 WORKSPACE_SETUP="${WORKSPACE_SETUP:-/home/ucar/ucar_ws/devel/setup.bash}"
 SPARK_SECRET_FILE="${SPARK_SECRET_FILE:-${HOME}/.config/ucar/spark_api_password}"
-BASE_DEVICE="/dev/ucar_controller"
+BASE_DEVICE="/dev/ttyS0"
 LIDAR_DEVICE="/dev/ttyS4"
 CAMERA_DEVICE="/dev/video0"
 SPEECH_DEVICE="/dev/ttyS3"

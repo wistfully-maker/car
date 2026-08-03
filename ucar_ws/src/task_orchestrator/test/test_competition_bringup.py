@@ -61,7 +61,7 @@ class FakeRosEnvironment:
             device.touch()
         script_text = START_SCRIPT.read_text(encoding="utf-8")
         defaults = {
-            "BASE_DEVICE": "/dev/ucar_controller",
+            "BASE_DEVICE": "/dev/ttyS0",
             "LIDAR_DEVICE": "/dev/ttyS4",
             "CAMERA_DEVICE": "/dev/video0",
             "SPEECH_DEVICE": "/dev/ttyS3",
@@ -328,7 +328,7 @@ class CompetitionBringupTests(unittest.TestCase):
             "ROS_SETUP", "WORKSPACE_SETUP", "SPARK_API_PASSWORD",
             "rosnode list", "rosnode ping", "rostopic info /cmd_vel",
             "exec roslaunch task_orchestrator competition_full.launch",
-            "/dev/ucar_controller", "/dev/ttyS4", "/dev/ttyS3",
+            "/dev/ttyS0", "/dev/ttyS4", "/dev/ttyS3",
         ):
             self.assertIn(required, source)
         for forbidden in (
@@ -341,7 +341,7 @@ class CompetitionBringupTests(unittest.TestCase):
     def test_production_device_paths_are_fixed_and_probe_is_fail_closed(self):
         source = START_SCRIPT.read_text(encoding="utf-8")
         for assignment in (
-            'BASE_DEVICE="/dev/ucar_controller"',
+            'BASE_DEVICE="/dev/ttyS0"',
             'LIDAR_DEVICE="/dev/ttyS4"',
             'CAMERA_DEVICE="/dev/video0"',
             'SPEECH_DEVICE="/dev/ttyS3"',
