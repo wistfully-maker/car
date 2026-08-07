@@ -341,7 +341,7 @@ class CompetitionBringupTests(unittest.TestCase):
         self.assertIn("start_velocity_arbiter|start_delivery", source)
         self.assertIn(
             '[[ "${flags[start_delivery]}" == true ]] && '
-            'conflicts+=(/racecar_control)',
+            'conflicts+=(/vision_node /racecar_control)',
             source,
         )
 

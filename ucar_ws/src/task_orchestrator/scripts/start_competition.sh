@@ -216,7 +216,7 @@ if [[ "$master_available" == true ]]; then
   [[ "${flags[start_fast_nav_adapter]}" == true ]] && conflicts+=(/fast_nav_adapter)
   [[ "${flags[start_readiness_gate]}" == true ]] && conflicts+=(/readiness_gate)
   [[ "${flags[start_velocity_arbiter]}" == true ]] && conflicts+=(/velocity_arbiter)
-  [[ "${flags[start_delivery]}" == true ]] && conflicts+=(/racecar_control)
+  [[ "${flags[start_delivery]}" == true ]] && conflicts+=(/vision_node /racecar_control)
   if [[ "${flags[start_fast_nav]}" == true ]]; then
     # Vendor runtime_check.sh contract; navigation_full.launch owns the includes.
     conflicts+=(/map_server /lidar_loc /move_base)

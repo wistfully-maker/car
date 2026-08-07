@@ -1,7 +1,10 @@
 <launch>
-  <!-- 配送阶段避障节点：由 task_orchestrator 的 /task/delivery_navigation_goal 驱动。
+  <!-- 配送阶段避障：由 task_orchestrator 的 /task/delivery_navigation_goal 驱动。
        依赖已运行的导航栈（map_server + move_base）；定位由 lidar_loc 切换为 AMCL
-       （切换逻辑内置于 racecar_control，详见 avoid.cpp switchToAmcl()）。 -->
+       （切换逻辑内置于 racecar_control，详见 avoid.cpp switchToAmcl()）。
+       vision_node 为标牌 OCR 视觉节点（/vision/*），配送扫描停车期间常驻。 -->
+
+  <node pkg="ucar_avoid" type="vision_node.py" name="vision_node" output="screen"/>
 
   <node pkg="ucar_avoid" type="racecar_control" name="racecar_control" output="screen">
     <!-- 速度走 velocity_arbiter 的 NAVIGATION 通道 -->
