@@ -18,7 +18,9 @@ find_package(catkin REQUIRED COMPONENTS
   image_transport
   sensor_msgs
 )
-find_package(jsoncpp REQUIRED)
+# jsoncpp 头文件位于 /usr/include/jsoncpp 子目录；pkg-config 是标准解析方式。
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(JSONCPP REQUIRED jsoncpp)
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
