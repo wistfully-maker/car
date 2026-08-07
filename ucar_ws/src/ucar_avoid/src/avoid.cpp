@@ -2,19 +2,26 @@
 #include <move_base_msgs/MoveBaseAction.h>
 #include <actionlib/client/simple_action_client.h>
 #include <tf/transform_datatypes.h>
+#include <tf/transform_listener.h>
 #include <geometry_msgs/PoseStamped.h>
 #include <geometry_msgs/Twist.h>
 #include <geometry_msgs/Point.h>
+#include <geometry_msgs/PoseWithCovarianceStamped.h>
 #include <nav_msgs/Odometry.h>
 #include <sensor_msgs/LaserScan.h>
 #include <std_msgs/Bool.h>
 #include <std_msgs/String.h>
 #include <std_msgs/Float32.h>
+#include <json/json.h>
 #include <vector>
 #include <string>
 #include <cmath>
 #include <cstdlib>
+#include <cstdio>
 #include <algorithm>
+#include <thread>
+#include <atomic>
+#include <ctime>
 
 typedef actionlib::SimpleActionClient<move_base_msgs::MoveBaseAction> MoveBaseClient;
 
@@ -46,21 +53,29 @@ private:
     ros::Subscriber odom_sub;
     ros::Subscriber emergency_sub;
     ros::Publisher cmd_pub;
-    
-    // Waypoints (3)
+
+    // ========== Orchestrator Protocol (v1) ==========
+    ros::Subscriber delivery_goal_sub;
+    ros::Subscriber cancel_sub;
+    ros::Publisher arrival_pub;
+    ros::Publisher voice_pub;
+    tf::TransformListener tf_listener;
+
+    std::string task_id = "";
+    std::string goal_id = "";
+    std::atomic<bool> goal_received{false};
+    std::atomic<bool> cancel_requested{false};
+    std::thread delivery_thread;
+
+    // ========== Mission Parameters (from ROS params) ==========
+    std::string cmd_vel_topic = "/cmd_vel/navigation";
     std::vector<Waypoint> waypoints = {
         {-0.812845, -2.44196, 0.0, "Point1"},
         {0.771455, -2.44196, 0.0, "Point2"},
         {1.7843, -2.43094, 0.0, "Point3"}
     };
-    
-    // ========== Task Configuration ==========
-    const std::string TASK2_WAREHOUSE = "食品加工车间";
-    const std::string TASK2_CARGO = "苹果";
-    const std::string TASK3_WAREHOUSE = "电子产品加工车间";
-    const std::string TASK3_CARGO = "手机";
-    
-    // Dynamic target
+
+    // Dynamic target (from /task/delivery_navigation_goal)
     std::string current_target;
     std::string current_cargo;
     
@@ -90,12 +105,7 @@ private:
     // Robot state
     double robot_x, robot_y, robot_yaw;
     int current_wp = 0;
-    
-    // ========== Task3 Simulation Warehouse Record ==========
-    bool sim_warehouse_recorded = false;
-    int sim_waypoint_index = -1;
-    double sim_robot_yaw = 0.0;
-    
+
     // ========== Helper: Clean OCR Text ==========
     std::string cleanOCRText(const std::string& text) {
         std::string result = text;
@@ -107,49 +117,85 @@ private:
     }
 
 public:
-    MissionScheduler() : nh("~") {
+    MissionScheduler() : nh("~"), tf_listener() {
+        // ===== Mission parameters =====
+        cmd_vel_topic = nh.param<std::string>("cmd_vel_topic", "/cmd_vel/navigation");
+        rotate_speed = nh.param<double>("rotate_speed", 0.2);
+        approach_distance = nh.param<double>("approach_distance", 0.4);
+        goal_tolerance = nh.param<double>("goal_tolerance", 0.08);
+        XmlRpc::XmlRpcValue wp_list;
+        if (nh.getParam("waypoints", wp_list) && wp_list.getType() == XmlRpc::XmlRpcValue::TypeArray) {
+            std::vector<Waypoint> parsed;
+            for (int i = 0; i < wp_list.size(); ++i) {
+                Waypoint wp;
+                wp.x = static_cast<double>(wp_list[i]["x"]);
+                wp.y = static_cast<double>(wp_list[i]["y"]);
+                wp.yaw = static_cast<double>(wp_list[i]["yaw"]);
+                wp.name = static_cast<std::string>(wp_list[i]["name"]);
+                parsed.push_back(wp);
+            }
+            if (!parsed.empty()) {
+                waypoints = parsed;
+            }
+        }
+
         move_base_client = new MoveBaseClient("move_base", true);
         while (ros::ok() && !move_base_client->waitForServer(ros::Duration(5.0))) {
             ROS_WARN("Waiting for move_base...");
         }
         ROS_INFO("Connected to move_base!");
-        
-        cmd_pub = nh.advertise<geometry_msgs::Twist>("/cmd_vel", 10);
+
+        cmd_pub = nh.advertise<geometry_msgs::Twist>(cmd_vel_topic, 10);
         vision_enable_pub = nh.advertise<std_msgs::Bool>("/vision/enable", 1);
-        
+        arrival_pub = nh.advertise<std_msgs::String>("/task/delivery_arrived", 10);
+        voice_pub = nh.advertise<std_msgs::String>("/voice/speak", 10);
+
         vision_status_sub = nh.subscribe("/vision/status", 1, &MissionScheduler::visionStatusCallback, this);
         vision_text_sub = nh.subscribe("/vision/detected", 1, &MissionScheduler::visionTextCallback, this);
         vision_conf_sub = nh.subscribe("/vision/confidence", 1, &MissionScheduler::visionConfCallback, this);
         vision_pos_sub = nh.subscribe("/vision/position", 1, &MissionScheduler::visionPosCallback, this);
-        
+
         laser_sub = nh.subscribe("/scan", 10, &MissionScheduler::laserCallback, this);
         vision_area_sub = nh.subscribe("/vision/area", 1, &MissionScheduler::visionAreaCallback, this);
-        
+
         odom_sub = nh.subscribe("/odom", 10, &MissionScheduler::odomCallback, this);
         emergency_sub = nh.subscribe("/emergency_stop", 1, &MissionScheduler::emergencyCallback, this);
-        
+
+        // ===== Orchestrator protocol =====
+        delivery_goal_sub = nh.subscribe("/task/delivery_navigation_goal", 10,
+                                         &MissionScheduler::deliveryGoalCallback, this);
+        cancel_sub = nh.subscribe("/task/cancel", 10,
+                                  &MissionScheduler::cancelCallback, this);
+
         ROS_INFO("========================================");
-        ROS_INFO("  Mission Scheduler");
-        ROS_INFO("  Task2 Target: %s", TASK2_WAREHOUSE.c_str());
-        ROS_INFO("  Task2 Cargo: %s", TASK2_CARGO.c_str());
-        ROS_INFO("  Task3 Target: %s", TASK3_WAREHOUSE.c_str());
-        ROS_INFO("  Task3 Cargo: %s", TASK3_CARGO.c_str());
+        ROS_INFO("  Delivery Mission Node (orchestrator-driven)");
+        ROS_INFO("  cmd_vel topic: %s", cmd_vel_topic.c_str());
         ROS_INFO("  Waypoints: %lu", waypoints.size());
         for (int i = 0; i < (int)waypoints.size(); ++i) {
             ROS_INFO("    %s: (%.3f, %.3f)", waypoints[i].name.c_str(), waypoints[i].x, waypoints[i].y);
         }
         ROS_INFO("  Rotate Speed: %.2f rad/s", rotate_speed);
+        ROS_INFO("  Waiting for /task/delivery_navigation_goal ...");
         ROS_INFO("========================================");
-        
-        while (ros::ok() && !has_odom) {
+
+        // Wait for odometry with a bounded timeout (navigation stack may start later)
+        ros::Time odom_deadline = ros::Time::now() + ros::Duration(10.0);
+        while (ros::ok() && !has_odom && ros::Time::now() < odom_deadline) {
             ros::spinOnce();
             ros::Rate(10).sleep();
         }
-        ROS_INFO("Odometry ready!");
-        executeMission();
+        if (has_odom) {
+            ROS_INFO("Odometry ready!");
+        } else {
+            ROS_WARN("Odometry not available yet; will proceed once /odom arrives");
+        }
     }
     
     ~MissionScheduler() {
+        // The delivery thread exits on its own once ros::ok() is false.
+        if (delivery_thread.joinable()) {
+            delivery_thread.detach();
+        }
         if (move_base_client) {
             move_base_client->cancelGoal();
             delete move_base_client;
@@ -228,33 +274,11 @@ public:
         ROS_INFO("========================================");
         
         ROS_INFO("[DEBUG] mission_complete = %s, current_target = '%s', current_wp = %d (%s)",
-                 mission_complete ? "true" : "false", 
-                 current_target.c_str(), 
+                 mission_complete ? "true" : "false",
+                 current_target.c_str(),
                  current_wp,
                  waypoints[current_wp].name.c_str());
-        
-        // ★★★ 识别到仿真车间（仅在子任务2进行中时记录） ★★★
-        if (!mission_complete && cleaned_text == TASK3_WAREHOUSE) {
-            ROS_INFO("========================================");
-            ROS_INFO("[SIM] Simulation warehouse detected!");
-            ROS_INFO("    OCR text: '%s'", cleaned_text.c_str());
-            ROS_INFO("    Waypoint index: %d (%s)", current_wp, waypoints[current_wp].name.c_str());
-            ROS_INFO("    Robot yaw: %.2f rad", robot_yaw);
-            ROS_INFO("========================================");
-            
-            sim_waypoint_index = current_wp;
-            sim_robot_yaw = robot_yaw;
-            sim_warehouse_recorded = true;
-            
-            ROS_INFO("[SIM] Record success! sim_waypoint_index = %d, sim_warehouse_recorded = true", sim_waypoint_index);
-            
-            // 继续旋转，不触发停车
-            stop_requested = false;
-            ocr_processed = false;
-            ROS_INFO("[SIM] Reset stop_requested, continue scanning...");
-            return;
-        }
-        
+
         // Disable vision to save resources
         std_msgs::Bool enable_msg;
         enable_msg.data = false;
@@ -296,21 +320,28 @@ public:
     
     // ==================== Speech ====================
     
+    // Publish TTS text on /voice/speak (consumed by tts_bridge) instead of
+    // shelling out to a TTS script directly.
     void speak(const std::string& text) {
         if (spoken) {
             ROS_INFO("[SPEAK] Already spoken, skipping.");
             return;
         }
         spoken = true;
-        
-        std::string cmd = "python3 /home/ucar/ucar_ws/src/speech_command/scripts/tts_http.py \"" + text + "\" &";
-        int ret = system(cmd.c_str());
-        if (ret == 0) {
-            ROS_INFO("[SPEAK] %s", text.c_str());
-        } else {
-            ROS_WARN("[SPEAK] Failed to speak");
-            spoken = false;
-        }
+
+        Json::Value message;
+        message["protocol_version"] = 1;
+        message["task_id"] = task_id;
+        message["speech_id"] = newSpeechId();
+        message["text"] = text;
+        std_msgs::String out;
+        out.data = Json::FastWriter().write(message);
+        voice_pub.publish(out);
+        ROS_INFO("[SPEAK] Published /voice/speak: %s", text.c_str());
+    }
+
+    std::string newSpeechId() {
+        return "avoid-" + std::to_string(ros::Time::now().toNSec());
     }
     
     // ==================== Laser Parking ====================
@@ -419,7 +450,7 @@ public:
                 ROS_WARN("[NAV] Navigation timeout!");
                 return false;
             }
-            if (emergency_stop || !is_running) return false;
+            if (emergency_stop || !is_running || cancel_requested.load()) return false;
             actionlib::SimpleClientGoalState state = move_base_client->getState();
             if (state == actionlib::SimpleClientGoalState::SUCCEEDED) {
                 ROS_INFO("[NAV] Reached target!");
@@ -523,173 +554,213 @@ public:
         }
     }
     
-    // ==================== Task3 Execution ====================
-    
-    void executeTask3() {
-        ROS_INFO("========================================");
-        ROS_INFO("[TASK3] Starting Task 3: Find %s", TASK3_WAREHOUSE.c_str());
-        ROS_INFO("========================================");
-        
-        ROS_INFO("[TASK3] sim_warehouse_recorded = %s, sim_waypoint_index = %d",
-                 sim_warehouse_recorded ? "true" : "false", sim_waypoint_index);
-        
-        current_target = TASK3_WAREHOUSE;
-        current_cargo = TASK3_CARGO;
-        target_found = false;
-        mission_complete = false;
-        spoken = false;
-        target_matched = false;
-        
-        // Case 1: Recorded waypoint exists
-        if (sim_warehouse_recorded && sim_waypoint_index >= 0 && sim_waypoint_index < (int)waypoints.size()) {
-            ROS_INFO("[TASK3] Using recorded waypoint %d (%s) for simulation warehouse", 
-                     sim_waypoint_index, waypoints[sim_waypoint_index].name.c_str());
-            
-            current_wp = sim_waypoint_index;
-            if (sendGoal(current_wp)) {
-                bool reached = waitForGoalReached(60.0);
-                if (reached) {
-                    ROS_INFO("[TASK3] Reached recorded waypoint, starting scan for simulation warehouse...");
-                    current_target = TASK3_WAREHOUSE;
-                    scanAtWaypoint();
-                    
-                    // Fallback manual parking if scan didn't find target
-                    if (!mission_complete) {
-                        ROS_WARN("[TASK3] Scan did not find target, trying manual parking...");
-                        if (front_distance < 0.5 && front_distance > 0.1) {
-                            ROS_INFO("[TASK3] Object detected ahead (%.2f m), attempting parking", front_distance);
-                            bool ok = laserParkingAndSpeak(current_cargo, current_target, 0.28, 0.08, 15.0);
-                            mission_complete = ok || true;
-                            if (mission_complete) {
-                                ROS_INFO("[TASK3] Manual parking success!");
-                            }
-                        } else {
-                            ROS_WARN("[TASK3] No obstacle ahead (%.2f m), manual parking failed", front_distance);
-                        }
-                    }
-                    
-                    if (mission_complete) {
-                        ROS_INFO("[TASK3] Task3 completed via recorded waypoint!");
-                        return;
-                    } else {
-                        ROS_WARN("[TASK3] Simulation warehouse not found at recorded waypoint, fallback to full scan");
-                    }
-                } else {
-                    ROS_WARN("[TASK3] Failed to reach recorded waypoint, fallback to full scan");
-                }
-            }
-        } else {
-            ROS_WARN("[TASK3] No simulation warehouse recorded, performing full waypoint scan");
-        }
-        
-        // Case 2: Full waypoint scan (fallback)
-        ROS_INFO("[TASK3] Starting full waypoint scan for simulation warehouse...");
-        for (size_t i = 0; i < waypoints.size(); ++i) {
-            if (mission_complete || emergency_stop || !is_running) break;
-            current_wp = i;
-            ROS_INFO("[TASK3] Going to %s for scan...", waypoints[i].name.c_str());
-            if (!sendGoal(i)) {
-                ROS_ERROR("Failed to send goal");
-                continue;
-            }
-            bool reached = waitForGoalReached(60.0);
-            if (!reached) {
-                ROS_WARN("Failed to reach %s, skipping", waypoints[i].name.c_str());
-                continue;
-            }
-            current_target = TASK3_WAREHOUSE;
-            scanAtWaypoint();
-            
-            if (!mission_complete) {
-                ROS_WARN("[TASK3] Scan at %s did not find target, trying manual parking", waypoints[i].name.c_str());
-                if (front_distance < 0.5 && front_distance > 0.1) {
-                    ROS_INFO("[TASK3] Object detected ahead (%.2f m), attempting parking", front_distance);
-                    bool ok = laserParkingAndSpeak(current_cargo, current_target, 0.28, 0.08, 15.0);
-                    mission_complete = ok || true;
-                    if (mission_complete) {
-                        ROS_INFO("[TASK3] Manual parking success at %s!", waypoints[i].name.c_str());
-                        break;
-                    }
-                }
-            }
-            
-            if (mission_complete) {
-                ROS_INFO("[TASK3] Simulation warehouse found at %s!", waypoints[i].name.c_str());
-                break;
-            }
-        }
-        
-        if (mission_complete) {
-            ROS_INFO("[TASK3] Task3 completed!");
-        } else {
-            ROS_WARN("[TASK3] Task3 failed: simulation warehouse not found in any waypoint");
-        }
-    }
-    
-    // ==================== Main Execution ====================
-    
-    void executeMission() {
-        ROS_INFO("========================================");
-        ROS_INFO("  Mission started.");
-        ROS_INFO("========================================");
-        
-        // -------- Task 2 --------
-        ROS_INFO("===== Task 2: Find '%s' and park =====", TASK2_WAREHOUSE.c_str());
-        current_target = TASK2_WAREHOUSE;
-        current_cargo = TASK2_CARGO;
-        target_found = false;
-        mission_complete = false;
-        spoken = false;
-        target_matched = false;
-        
-        for (size_t i = 0; i < waypoints.size(); ++i) {
-            if (!is_running || emergency_stop || mission_complete || target_found) break;
-            current_wp = i;
-            
-            ROS_INFO("[MISSION] Going to %s: (%.2f, %.2f)", waypoints[i].name.c_str(), waypoints[i].x, waypoints[i].y);
-            if (!sendGoal(i)) {
-                ROS_ERROR("[MISSION] Failed to send goal");
-                break;
-            }
-            bool reached = waitForGoalReached(60.0);
-            if (!reached) {
-                ROS_WARN("[MISSION] Failed to reach %s, skipping", waypoints[i].name.c_str());
-                continue;
-            }
-            ROS_INFO("[MISSION] Reached %s", waypoints[i].name.c_str());
-            scanAtWaypoint();
-        }
-        
-        if (mission_complete) {
-            ROS_INFO("[MISSION] Task 2 completed successfully.");
-        } else {
-            ROS_WARN("[MISSION] Task 2 failed. Skipping Task 3.");
-            std_msgs::Bool msg;
-            msg.data = false;
-            vision_enable_pub.publish(msg);
-            move_base_client->cancelGoal();
-            ROS_INFO("[MISSION] Mission ended.");
+    // ==================== Orchestrator Protocol ====================
+
+    // Called on /task/delivery_navigation_goal. Launches the delivery
+    // routine in a background thread so the callback returns immediately.
+    void deliveryGoalCallback(const std_msgs::String::ConstPtr& msg) {
+        Json::Value root;
+        Json::Reader reader;
+        if (!reader.parse(msg->data, root)) {
+            ROS_WARN("[GOAL] Ignored unparseable goal JSON: %s", msg->data.c_str());
             return;
         }
-        
-        // -------- Task 3 --------
-        ROS_INFO("===== Task 3: Find '%s' and park =====", TASK3_WAREHOUSE.c_str());
-        executeTask3();
-        
-        // -------- Final Result --------
-        ROS_INFO("========================================");
-        if (mission_complete) {
-            ROS_INFO("  ALL TASKS COMPLETE!");
-        } else {
-            ROS_INFO("  Task 2 OK, Task 3 FAILED.");
+        if (!root.isMember("protocol_version") || root["protocol_version"].asInt() != 1) {
+            ROS_WARN("[GOAL] Ignored goal with unsupported protocol version");
+            return;
         }
+        if (goal_received.load()) {
+            ROS_WARN("[GOAL] Delivery already in progress, ignoring new goal %s",
+                     root["goal_id"].asString().c_str());
+            return;
+        }
+        task_id = root["task_id"].asString();
+        goal_id = root["goal_id"].asString();
+        current_target = root["target_workshop"].asString();
+        current_cargo = root["selected_item"].asString();
+        ROS_INFO("[GOAL] Received: workshop='%s' cargo='%s' task=%s goal=%s",
+                 current_target.c_str(), current_cargo.c_str(),
+                 task_id.c_str(), goal_id.c_str());
+
+        cancel_requested = false;
+        goal_received = true;
+        if (delivery_thread.joinable()) {
+            delivery_thread.join();
+        }
+        delivery_thread = std::thread(&MissionScheduler::executeDelivery, this);
+    }
+
+    // Defensive stop on /task/cancel; the orchestrator also transitions to
+    // CANCELLED itself and ignores any later arrival message from us.
+    void cancelCallback(const std_msgs::String::ConstPtr& msg) {
+        ROS_WARN("[CANCEL] Received task cancel");
+        cancel_requested = true;
+        move_base_client->cancelGoal();
+        stop();
+        std_msgs::Bool enable_msg;
+        enable_msg.data = false;
+        vision_enable_pub.publish(enable_msg);
+    }
+
+    void publishArrival(const std::string& status, const std::string& message) {
+        Json::Value payload;
+        payload["protocol_version"] = 1;
+        payload["task_id"] = task_id;
+        payload["goal_id"] = goal_id;
+        payload["status"] = status;
+        payload["message"] = message;
+        std_msgs::String out;
+        out.data = Json::FastWriter().write(payload);
+        arrival_pub.publish(out);
+        ROS_INFO("[ARRIVAL] Published /task/delivery_arrived: status=%s (%s)",
+                 status.c_str(), message.c_str());
+    }
+
+    // ==================== Localization Switch (lidar_loc -> AMCL) ====================
+
+    // The pickup-phase navigation runs lidar_loc (publishes map->odom).
+    // For obstacle-avoidance delivery, AMCL must take over: record the last
+    // reliable pose, stop lidar_loc, start AMCL, seed it via /initialpose,
+    // and wait until AMCL's map->odom transform appears.
+    bool switchToAmcl() {
+        ROS_INFO("[AMCL] Switching localization from lidar_loc to AMCL ...");
+
+        // 1. Capture current map->base_link pose while lidar_loc is alive.
+        tf::StampedTransform transform;
+        try {
+            tf_listener.lookupTransform("map", "base_link",
+                                        ros::Time(0), transform);
+        } catch (const tf::TransformException& exc) {
+            ROS_WARN("[AMCL] No map->base_link transform available: %s", exc.what());
+            return false;
+        }
+        double px = transform.getOrigin().x();
+        double py = transform.getOrigin().y();
+        double pyaw = tf::getYaw(transform.getRotation());
+        ROS_INFO("[AMCL] Last lidar_loc pose: (%.3f, %.3f, yaw %.3f)", px, py, pyaw);
+
+        // 2. Stop lidar_loc so AMCL's map->odom is authoritative.
+        if (system("rosnode kill /lidar_loc > /dev/null 2>&1") != 0) {
+            ROS_WARN("[AMCL] rosnode kill /lidar_loc returned non-zero (already dead?)");
+        }
+        ros::Duration(0.5).sleep();
+
+        // 3. Start AMCL (node name "amcl", matches ucar_nav/launch/config/amcl/amcl_omni.launch).
+        if (system("roslaunch ucar_nav launch/config/amcl/amcl_omni.launch > /dev/null 2>&1 &") != 0) {
+            ROS_ERROR("[AMCL] Failed to launch amcl_omni.launch");
+            return false;
+        }
+
+        // 4. Seed AMCL with the recorded pose (wait for AMCL to subscribe).
+        ros::Rate rate(10);
+        geometry_msgs::PoseWithCovarianceStamped initial;
+        initial.header.stamp = ros::Time::now();
+        initial.header.frame_id = "map";
+        initial.pose.pose.position.x = px;
+        initial.pose.pose.position.y = py;
+        initial.pose.pose.orientation = tf::createQuaternionMsgFromYaw(pyaw);
+        initial.pose.covariance[0] = 0.1;
+        initial.pose.covariance[7] = 0.1;
+        initial.pose.covariance[35] = 0.0685;
+        ros::Publisher initial_pub = nh.advertise<geometry_msgs::PoseWithCovarianceStamped>(
+            "/initialpose", 1);
+        ros::Time seed_deadline = ros::Time::now() + ros::Duration(15.0);
+        while (ros::ok() && ros::Time::now() < seed_deadline &&
+               initial_pub.getNumSubscribers() == 0) {
+            ros::spinOnce();
+            rate.sleep();
+        }
+        if (initial_pub.getNumSubscribers() == 0) {
+            ROS_WARN("[AMCL] /initialpose has no subscriber (AMCL may not be up); publishing anyway");
+        }
+        initial_pub.publish(initial);
+        ROS_INFO("[AMCL] Published /initialpose (%.3f, %.3f, yaw %.3f)", px, py, pyaw);
+
+        // 5. Wait for AMCL's map->odom transform (proves AMCL is publishing).
+        ros::Time tf_deadline = ros::Time::now() + ros::Duration(15.0);
+        while (ros::ok() && ros::Time::now() < tf_deadline) {
+            ros::spinOnce();
+            try {
+                tf::StampedTransform probe;
+                tf_listener.waitForTransform("map", "odom", ros::Time(0),
+                                             ros::Duration(0.2));
+                tf_listener.lookupTransform("map", "odom", ros::Time(0), probe);
+                ROS_INFO("[AMCL] AMCL map->odom transform active");
+                return true;
+            } catch (const tf::TransformException&) {
+                rate.sleep();
+            }
+        }
+        ROS_WARN("[AMCL] Timed out waiting for AMCL map->odom transform");
+        return false;
+    }
+
+    // ==================== Delivery Execution ====================
+
+    // Commanded delivery: scan the waypoints for the OCR target workshop,
+    // laser-park in front of it, speak, then report back to the orchestrator.
+    void executeDelivery() {
         ROS_INFO("========================================");
-        
+        ROS_INFO("[DELIVERY] Find '%s' and park (cargo: %s)",
+                 current_target.c_str(), current_cargo.c_str());
+        ROS_INFO("========================================");
+
+        if (!switchToAmcl()) {
+            ROS_ERROR("[DELIVERY] AMCL switch failed, aborting delivery");
+            publishArrival("failed", "AMCL switch failed");
+            finishDelivery();
+            return;
+        }
+
+        target_found = false;
+        mission_complete = false;
+        spoken = false;
+        target_matched = false;
+
+        for (size_t i = 0; i < waypoints.size(); ++i) {
+            if (!is_running || emergency_stop || mission_complete || target_found ||
+                cancel_requested.load()) {
+                break;
+            }
+            current_wp = i;
+
+            ROS_INFO("[DELIVERY] Going to %s: (%.2f, %.2f)", waypoints[i].name.c_str(),
+                     waypoints[i].x, waypoints[i].y);
+            if (!sendGoal(i)) {
+                ROS_ERROR("[DELIVERY] Failed to send goal");
+                break;
+            }
+            bool reached = waitForGoalReached(60.0);
+            if (!reached) {
+                ROS_WARN("[DELIVERY] Failed to reach %s, skipping", waypoints[i].name.c_str());
+                continue;
+            }
+            ROS_INFO("[DELIVERY] Reached %s", waypoints[i].name.c_str());
+            scanAtWaypoint();
+        }
+
         std_msgs::Bool msg;
         msg.data = false;
         vision_enable_pub.publish(msg);
         move_base_client->cancelGoal();
-        ROS_INFO("[MISSION] Mission ended.");
+
+        if (cancel_requested.load()) {
+            ROS_WARN("[DELIVERY] Cancelled by /task/cancel, not reporting arrival");
+        } else if (mission_complete) {
+            ROS_INFO("[DELIVERY] Delivery completed successfully.");
+            publishArrival("arrived", "");
+        } else {
+            ROS_WARN("[DELIVERY] Delivery failed: target workshop not found.");
+            publishArrival("failed", "target workshop not found");
+        }
+        finishDelivery();
+    }
+
+    void finishDelivery() {
+        task_id = "";
+        goal_id = "";
+        goal_received = false;
+        cancel_requested = false;
     }
 };
 

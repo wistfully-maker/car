@@ -18,6 +18,7 @@ find_package(catkin REQUIRED COMPONENTS
   image_transport
   sensor_msgs
 )
+find_package(jsoncpp REQUIRED)
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
@@ -123,6 +124,7 @@ catkin_package(
 include_directories(
 # include
   ${catkin_INCLUDE_DIRS}
+  ${JSONCPP_INCLUDE_DIRS}
 )
 
 ## Declare a C++ library
@@ -210,7 +212,7 @@ include_directories(
 ## Add folders to be run by python nosetests
 # catkin_add_nosetests(test)
 add_executable(racecar_control src/avoid.cpp)
-target_link_libraries(racecar_control ${catkin_LIBRARIES})
+target_link_libraries(racecar_control ${catkin_LIBRARIES} ${JSONCPP_LIBRARIES})
 catkin_install_python(PROGRAMS
   scripts/vision_node.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}

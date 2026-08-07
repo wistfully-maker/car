@@ -1,0 +1,19 @@
+<launch>
+  <!-- 配送阶段避障节点：由 task_orchestrator 的 /task/delivery_navigation_goal 驱动。
+       依赖已运行的导航栈（map_server + move_base）；定位由 lidar_loc 切换为 AMCL
+       （切换逻辑内置于 racecar_control，详见 avoid.cpp switchToAmcl()）。 -->
+
+  <node pkg="ucar_avoid" type="racecar_control" name="racecar_control" output="screen">
+    <!-- 速度走 velocity_arbiter 的 NAVIGATION 通道 -->
+    <param name="cmd_vel_topic" value="/cmd_vel/navigation"/>
+    <param name="rotate_speed" value="0.2"/>
+    <param name="approach_distance" value="0.4"/>
+    <param name="goal_tolerance" value="0.08"/>
+    <!-- 扫描点（与队友原硬编码值一致，可调整） -->
+    <rosparam param="waypoints">
+      - {x: -0.812845, y: -2.44196, yaw: 0.0, name: "Point1"}
+      - {x: 0.771455, y: -2.44196, yaw: 0.0, name: "Point2"}
+      - {x: 1.7843, y: -2.43094, yaw: 0.0, name: "Point3"}
+    </rosparam>
+  </node>
+</launch>
