@@ -1,0 +1,63 @@
+<launch>
+  <!-- Four explicit comparison profiles; map and AMCL remain common. -->
+  <arg name="map_file" default="$(find ucar_nav)/maps/map.yaml"/>
+  <arg name="navigation_profile" default="navfn_teb_corner"/>
+  <arg name="enable_lateral_mode_controller" default="true"/>
+
+  <group if="$(eval arg('navigation_profile') == 'navfn_teb_corner')">
+    <param name="/move_base/base_global_planner" value="navfn/NavfnROS"/>
+    <param name="/move_base/base_local_planner" value="teb_local_planner/TebLocalPlannerROS"/>
+    <rosparam command="load" file="$(find ucar_nav)/config/global_planners/navfn.yaml" ns="/move_base"/>
+    <rosparam command="load" file="$(find ucar_nav)/config/local_planners/teb_corner_safe.yaml" ns="/move_base"/>
+    <rosparam command="load" file="$(find ucar_nav)/config/costmap/common_teb.yaml" ns="/move_base/global_costmap"/>
+    <rosparam command="load" file="$(find ucar_nav)/config/costmap/common_teb.yaml" ns="/move_base/local_costmap"/>
+    <rosparam command="load" file="$(find ucar_nav)/config/costmap/local_teb.yaml" ns="/move_base"/>
+    <rosparam command="load" file="$(find ucar_nav)/config/costmap/global_teb.yaml" ns="/move_base"/>
+    <rosparam command="load" file="$(find ucar_nav)/config/move_base_teb.yaml" ns="/move_base"/>
+    <include if="$(arg enable_lateral_mode_controller)"
+             file="$(find ucar_nav)/launch/teb_lateral_mode_controller.launch"/>
+  </group>
+
+  <group if="$(eval arg('navigation_profile') == 'navfn_dwa_corner')">
+    <param name="/move_base/base_global_planner" value="navfn/NavfnROS"/>
+    <param name="/move_base/base_local_planner" value="dwa_local_planner/DWAPlannerROS"/>
+    <rosparam command="load" file="$(find ucar_nav)/config/global_planners/navfn.yaml" ns="/move_base"/>
+    <rosparam command="load" file="$(find ucar_nav)/config/local_planners/dwa_corner_safe.yaml" ns="/move_base"/>
+    <rosparam command="load" file="$(find ucar_nav)/config/costmap/common.yaml" ns="/move_base/global_costmap"/>
+    <rosparam command="load" file="$(find ucar_nav)/config/costmap/common.yaml" ns="/move_base/local_costmap"/>
+    <rosparam command="load" file="$(find ucar_nav)/config/costmap/local.yaml" ns="/move_base"/>
+    <rosparam command="load" file="$(find ucar_nav)/config/costmap/global.yaml" ns="/move_base"/>
+    <rosparam command="load" file="$(find ucar_nav)/config/move_base.yaml" ns="/move_base"/>
+  </group>
+
+  <group if="$(eval arg('navigation_profile') == 'legacy_0717_teb')">
+    <param name="/move_base/base_global_planner" value="global_planner/GlobalPlanner"/>
+    <param name="/move_base/base_local_planner" value="teb_local_planner/TebLocalPlannerROS"/>
+    <rosparam command="load" file="$(find ucar_nav)/config/legacy/0717/global_planner.yaml" ns="/move_base"/>
+    <rosparam command="load" file="$(find ucar_nav)/config/legacy/0717/teb.yaml" ns="/move_base"/>
+    <rosparam command="load" file="$(find ucar_nav)/config/legacy/0717/common.yaml" ns="/move_base/global_costmap"/>
+    <rosparam command="load" file="$(find ucar_nav)/config/legacy/0717/common.yaml" ns="/move_base/local_costmap"/>
+    <rosparam command="load" file="$(find ucar_nav)/config/legacy/0717/local.yaml" ns="/move_base"/>
+    <rosparam command="load" file="$(find ucar_nav)/config/legacy/0717/global.yaml" ns="/move_base"/>
+    <rosparam command="load" file="$(find ucar_nav)/config/legacy/0717/move_base.yaml" ns="/move_base"/>
+  </group>
+
+  <group if="$(eval arg('navigation_profile') == 'legacy_0721_dwa')">
+    <param name="/move_base/base_global_planner" value="astar_planner/AstarPlannerRos"/>
+    <param name="/move_base/base_local_planner" value="dwa_local_planner/DWAPlannerROS"/>
+    <rosparam command="load" file="$(find ucar_nav)/config/legacy/0721/dwa.yaml" ns="/move_base"/>
+    <rosparam command="load" file="$(find ucar_nav)/config/legacy/0721/common.yaml" ns="/move_base/global_costmap"/>
+    <rosparam command="load" file="$(find ucar_nav)/config/legacy/0721/common.yaml" ns="/move_base/local_costmap"/>
+    <rosparam command="load" file="$(find ucar_nav)/config/legacy/0721/local.yaml" ns="/move_base"/>
+    <rosparam command="load" file="$(find ucar_nav)/config/legacy/0721/global.yaml" ns="/move_base"/>
+    <rosparam command="load" file="$(find ucar_nav)/config/legacy/0721/move_base.yaml" ns="/move_base"/>
+  </group>
+
+  <node name="map_server" pkg="map_server" type="map_server" args="$(arg map_file)" output="screen">
+    <param name="frame_id" value="map"/>
+  </node>
+  <node name="amcl" pkg="amcl" type="amcl" output="screen">
+    <rosparam command="load" file="$(find ucar_nav)/config/amcl/amcl_omni.yaml"/>
+  </node>
+  <node name="move_base" pkg="move_base" type="move_base" output="screen" respawn="false"/>
+</launch>

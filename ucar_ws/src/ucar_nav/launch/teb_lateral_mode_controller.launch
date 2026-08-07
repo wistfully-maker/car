@@ -1,0 +1,11 @@
+<launch>
+  <arg name="config"
+       default="$(find ucar_nav)/config/lateral_mode_controller.yaml"/>
+  <node name="teb_lateral_mode_controller"
+        pkg="ucar_nav"
+        type="teb_lateral_mode_controller.py"
+        output="screen"
+        respawn="false">
+    <rosparam command="load" file="$(arg config)"/>
+  </node>
+</launch>

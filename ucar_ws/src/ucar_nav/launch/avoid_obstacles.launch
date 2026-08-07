@@ -1,0 +1,35 @@
+<launch>
+
+  <!-- Run the map server -->
+  <include file="$(find ucar_controller)/launch/base_driver.launch" />
+  <include file="$(find ydlidar)/launch/ydlidar.launch" />
+
+  <node name="map_server" pkg="map_server" type="map_server" args="$(find ucar_nav)/maps/map.yaml" output="screen">
+    <param name="frame_id" value="map" />
+  </node>
+
+  <include file="$(find usb_cam)/launch/usb_cam-test.launch" />
+
+  <!-- AMCL 定位 -->
+  <include file="$(find ucar_nav)/launch/config/amcl/amcl_omni.launch" />
+
+  <node pkg="move_base" type="move_base" respawn="false" name="move_base" output="screen">
+  <remap from="/cmd_vel" to="/move_base/cmd_vel_raw"/>
+    <param name="transform_tolerance" value="1.0"/>
+    <!-- 全局规划器 -->
+    <param name="base_global_planner" value="global_planner/GlobalPlanner"/>
+
+    <!-- 局部规划器：TEB -->
+    <param name="base_local_planner" value="dwa_local_planner/DWAPlannerROS"/>
+
+    <!--  加载配置文件（路径修正） -->
+    <rosparam file="$(find ucar_nav)/config/costmap/common.yaml" command="load" ns="global_costmap" />
+    <rosparam file="$(find ucar_nav)/config/costmap/common.yaml" command="load" ns="local_costmap" />
+    <rosparam file="$(find ucar_nav)/config/global_planner.yaml" command="load" />
+    <rosparam file="$(find ucar_nav)/config/costmap/local.yaml" command="load" />
+    <rosparam file="$(find ucar_nav)/config/costmap/global.yaml" command="load" />
+    <rosparam file="$(find ucar_nav)/config/move_base.yaml" command="load" />
+
+  </node>
+
+</launch>

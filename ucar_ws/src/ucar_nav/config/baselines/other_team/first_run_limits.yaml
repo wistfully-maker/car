@@ -1,0 +1,4 @@
+TebLocalPlannerROS:
+  max_vel_x: 0.20
+  max_vel_x_backwards: 0.12
+  max_vel_theta: 0.40

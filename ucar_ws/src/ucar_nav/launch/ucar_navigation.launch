@@ -1,0 +1,17 @@
+<launch>
+  <arg name="start_robot_base" default="true"/>
+  <arg name="start_camera" default="false"/>
+  <arg name="local_planner" default="dwa"/>
+  <arg name="map_file"
+       default="$(find ucar_nav)/maps/map.yaml"/>
+
+  <include if="$(arg start_robot_base)"
+           file="$(find ucar_nav)/launch/robot_base_bringup.launch">
+    <arg name="start_camera" value="$(arg start_camera)"/>
+  </include>
+
+  <include file="$(find ucar_nav)/launch/navigation_stack.launch">
+    <arg name="map_file" value="$(arg map_file)"/>
+    <arg name="local_planner" value="$(arg local_planner)"/>
+  </include>
+</launch>
