@@ -182,7 +182,7 @@ class CompetitionBringupTests(unittest.TestCase):
             "start_fast_nav", "start_base", "start_lidar", "start_camera",
             "start_fast_nav_adapter", "start_readiness_gate", "start_speech",
             "start_qr", "start_llm", "start_orchestrator",
-            "start_velocity_arbiter",
+            "start_velocity_arbiter", "start_delivery",
         }
         args = {arg.attrib["name"]: arg.attrib.get("default")
                 for arg in self.root.findall("arg")}
@@ -190,6 +190,7 @@ class CompetitionBringupTests(unittest.TestCase):
         for name in expected:
             self.assertIn("$(arg %s)" % name, self.text)
         self.assertEqual("true", args["start_velocity_arbiter"])
+        self.assertEqual("true", args["start_delivery"])
 
     def test_documents_external_contracts_and_fail_fast_boundaries(self):
         for marker in (
@@ -297,9 +298,12 @@ class CompetitionBringupTests(unittest.TestCase):
             self.assertEqual("true", values[enable_arg])
 
     def test_bans_legacy_navigation_and_extra_velocity_outputs(self):
-        for banned in ("ucar_waypoint_nav", "amcl", "dynamic_obstacle",
+        for banned in ("ucar_waypoint_nav", "dynamic_obstacle",
                        "/cmd_vel/avoidance", "/cmd_vel/line"):
             self.assertNotIn(banned, self.text)
+        # 配送阶段运行时切换 AMCL 合法（avoid.cpp switchToAmcl()），但本 launch
+        # 不得直接定义 amcl 节点。
+        self.assertNotIn('pkg="amcl"', self.text)
         self.assertEqual(1, self.text.count('to="/cmd_vel/qr"'))
         self.assertIn('value="/cmd_vel/navigation"', self.text)
         self.assertEqual("true", next(
@@ -321,6 +325,25 @@ class CompetitionBringupTests(unittest.TestCase):
                          nodes["readiness_gate"].attrib.get("if"))
         self.assertEqual("$(arg enable_velocity_arbiter)",
                          nodes["velocity_arbiter"].attrib.get("if"))
+
+    def test_delivery_group_includes_amcl_delivery_launch(self):
+        groups = [g for g in self.root.findall("group")
+                  if g.attrib.get("if") == "$(arg start_delivery)"]
+        self.assertEqual(1, len(groups))
+        include = groups[0].find("include")
+        self.assertEqual("$(arg delivery_launch)", include.attrib["file"])
+        self.assertIn("$(find ucar_avoid)/launch/amcl_delivery.launch",
+                      self.text)
+
+    def test_start_script_accepts_delivery_switch_and_conflict(self):
+        source = START_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("[start_delivery]=true", source)
+        self.assertIn("start_velocity_arbiter|start_delivery", source)
+        self.assertIn(
+            '[[ "${flags[start_delivery]}" == true ]] && '
+            'conflicts+=(/racecar_control)',
+            source,
+        )
 
     def test_start_script_static_safety_contract(self):
         source = START_SCRIPT.read_text(encoding="utf-8")

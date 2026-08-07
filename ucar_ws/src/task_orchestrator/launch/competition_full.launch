@@ -29,9 +29,12 @@
   <arg name="start_llm" default="true"/>
   <arg name="start_orchestrator" default="true"/>
   <arg name="start_velocity_arbiter" default="true"/>
+  <arg name="start_delivery" default="true"/>
 
   <arg name="fast_nav_launch"
        default="$(find ucar_fast_nav)/launch/pickup_navigation.launch"/>
+  <arg name="delivery_launch"
+       default="$(find ucar_avoid)/launch/amcl_delivery.launch"/>
   <arg name="speech_launch"
        default="$(find speech_command)/launch/speech_command.launch"/>
   <arg name="qr_launch"
@@ -48,6 +51,13 @@
       <arg name="start_lidar" value="$(arg start_lidar)"/>
       <arg name="cmd_vel_topic" value="/cmd_vel/navigation"/>
     </include>
+  </group>
+
+  <group if="$(arg start_delivery)">
+    <!-- 配送阶段避障：racecar_control 由 /task/delivery_navigation_goal 驱动，
+         依赖 fast_nav 已启动的 map_server/move_base；定位运行时从 lidar_loc
+         切换为 AMCL（见 ucar_avoid/src/avoid.cpp switchToAmcl()）。 -->
+    <include file="$(arg delivery_launch)"/>
   </group>
 
   <group if="$(arg start_camera)">
