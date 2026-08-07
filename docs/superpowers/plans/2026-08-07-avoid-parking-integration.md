@@ -58,18 +58,18 @@ ucar_ws/src/task_orchestrator/
 - 修改：`ucar_ws/src/task_orchestrator/test/test_orchestrator.py`
 - 修改：`ucar_ws/src/task_orchestrator/test/test_protocol.py`
 
-- [ ] **步骤 1：协议层增加 `parse_sim_complete(raw_json, expected_task_id)`**
+- [x] **步骤 1：协议层增加 `parse_sim_complete(raw_json, expected_task_id)`**
   校验 protocol_version=1、task_id、status（"success"/"failed"）、可选 message。与现有 `parse_arrival` 模式一致。
-- [ ] **步骤 2：状态机增加仿真阶段**
+- [x] **步骤 2：状态机增加仿真阶段**
   - 新状态：`SIM_DELIVERY`（将来：导航去仿真物品车间）与 `WAITING_SIM`（等待仿真完成信号），进 `_ACTIVE_STATES`
   - 新动作：`publish_sim_trigger`（触发仿真）、`publish_speech`（播报"仿真任务已完成，已将X放入Y"）
   - 转换：`delivery_arrived(success)` → 若 `simulation_phase_enabled`（构造参数）为 false → COMPLETE（现有行为不变）；为 true → `SIM_DELIVERY`（发布 sim_trigger）
   - `on_sim_complete(success)` → 播报"仿真任务已完成，已将X放入Y" → COMPLETE
-- [ ] **步骤 3：ROS 层接线**
+- [x] **步骤 3：ROS 层接线**
   订阅 `/task/sim_complete`（仅仿真启用时）；`publish_sim_trigger` 发布到 `/task/sim_trigger`。
-- [ ] **步骤 4：单元测试**
+- [x] **步骤 4：单元测试**
   覆盖：禁用仿真时 delivery_arrived 直接 complete（回归）；启用仿真时进入 SIM_DELIVERY → sim_complete → 播报文本正确 → complete；sim_complete 身份不匹配拒绝。
-- [ ] **步骤 5：提交**
+- [x] **步骤 5：提交**
   `feat: reserve simulation delivery phase in orchestrator`
 
 ## Task 3：配送适配器（avoid.cpp 命令式化）
@@ -79,25 +79,25 @@ ucar_ws/src/task_orchestrator/
 - 修改：`ucar_ws/src/ucar_avoid/CMakeLists.txt`
 - 新建：`ucar_ws/src/ucar_avoid/launch/amcl_delivery.launch`
 
-- [ ] **步骤 1：接入协议**
+- [x] **步骤 1：接入协议**
   用 jsoncpp 实现最小 JSON 解析/构造（ROS Noetic 自带）：
   - 订阅 `/task/delivery_navigation_goal`：解析 `task_id`、`goal_id`、`target_workshop`、`selected_item`
   - 订阅 `/task/cancel`：解析 `task_id`（当前任务时取消）
   - 发布 `/task/delivery_arrived`：`{protocol_version:1, task_id, goal_id, status:"success"/"failed", message}`
   - 构造函数不再自动执行 `executeMission()`，改为收到 goal 才执行
-- [ ] **步骤 2：参数化**
+- [x] **步骤 2：参数化**
   - 删除 `TASK2_*`/`TASK3_*` 硬编码，`current_target`/`current_cargo` 来自 goal
   - `~cmd_vel_topic` 参数（默认 `/cmd_vel/navigation`），`cmd_pub` 用它发布
   - 扫描航点保留（队员后续可调），从代码常量改为参数/配置文件时标记 TODO（本次不动）
-- [ ] **步骤 3：播报链路**
+- [x] **步骤 3：播报链路**
   `speak()` 改为发布 `/voice/speak`（JSON：protocol_version、task_id、speech_id（自生成）、text），不等待 speak_done；去掉 `system()` TTS 调用。
-- [ ] **步骤 4：AMCL 切换**
+- [x] **步骤 4：AMCL 切换**
   新增 `switchToAmcl()`：cancel move_base → `rosnode kill /lidar_loc` → tf2 查询 `map→base_link` 得 initial_pose → `roslaunch ucar_avoid amcl_delivery.launch initial_x/y/a`（后台进程）→ 轮询 `map→odom` TF 出现（超时则失败）。配送失败路径发布 failed 并恢复。
-- [ ] **步骤 5：执行流程**
+- [x] **步骤 5：执行流程**
   收到 goal → switchToAmcl → 现有 Task2 流程（遍历航点扫描 → 匹配 `target_workshop` → 停车）→ 播报"已将X放入Y" → 发布 arrived(success)；超时/未匹配 → arrived(failed)。
-- [ ] **步骤 6：CMake 链接**
+- [x] **步骤 6：CMake 链接**
   `target_link_libraries(racecar_control ${catkin_LIBRARIES} jsoncpp)`；catkin_install_python 增加 vision_node.py（已有）。
-- [ ] **步骤 7：提交**
+- [x] **步骤 7：提交**
   `feat: drive avoid parking from orchestrator protocol`
 
 ## Task 4：launch 与启动脚本集成
@@ -107,20 +107,20 @@ ucar_ws/src/task_orchestrator/
 - 修改：`ucar_ws/src/task_orchestrator/launch/competition_full.launch`（`start_delivery` 组）
 - 修改：`ucar_ws/src/task_orchestrator/scripts/start_competition.sh`（冲突检查 + 设备检查）
 
-- [ ] **步骤 1：delivery.launch**
+- [x] **步骤 1：delivery.launch**
   常驻启动 vision_node 与 racecar_control，节点名固定（/vision_node、/racecar_control），不与现有冲突。
-- [ ] **步骤 2：competition_full.launch**
+- [x] **步骤 2：competition_full.launch**
   新增 `start_delivery`（默认 true）：include delivery.launch。注意与 fast_nav 组的 move_base 复用关系。
-- [ ] **步骤 3：start_competition.sh**
+- [x] **步骤 3：start_competition.sh**
   冲突检查新增 `/vision_node`、`/racecar_control`；`cmd_vel` 所有权检查保持（arbiter 独占）。
-- [ ] **步骤 4：提交**
+- [x] **步骤 4：提交**
   `feat: integrate delivery adapter into competition launch`
 
 ## Task 5：编译与静态验证
 
-- [ ] **步骤 1：同步到车上**（ucar_avoid、task_orchestrator 改动）
-- [ ] **步骤 2：车上 `catkin_make` 编译** ucar_avoid（C++ 语法、jsoncpp/tf2 链接）
-- [ ] **步骤 3：本机 Python 单元测试**（orchestrator/protocol 改动）
+- [x] **步骤 1：同步到车上**（ucar_avoid、task_orchestrator 改动）
+- [x] **步骤 2：车上 `catkin_make` 编译** ucar_avoid（C++ 语法、jsoncpp/tf2 链接）
+- [x] **步骤 3：本机 Python 单元测试**（orchestrator/protocol 改动）
 - [ ] **步骤 4：协议 dry-run**：启动 competition_full.launch，手工发布 delivery_goal，核对日志流程（不实车运动时仅验证协议解析与状态流转）
 
 ## Task 6：实车验证（用户在旁）
