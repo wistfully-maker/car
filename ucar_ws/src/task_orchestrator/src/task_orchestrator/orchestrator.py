@@ -12,6 +12,8 @@ class TaskOrchestrator:
     WAITING_LLM = "WAITING_LLM"
     WAITING_SPEECH = "WAITING_SPEECH"
     NAVIGATING_TO_WORKSHOP = "NAVIGATING_TO_WORKSHOP"
+    SIM_DELIVERY = "SIM_DELIVERY"
+    WAITING_SIM = "WAITING_SIM"
     COMPLETE = "COMPLETE"
     ERROR = "ERROR"
     CANCELLED = "CANCELLED"
@@ -24,6 +26,8 @@ class TaskOrchestrator:
             WAITING_LLM,
             WAITING_SPEECH,
             NAVIGATING_TO_WORKSHOP,
+            SIM_DELIVERY,
+            WAITING_SIM,
         )
     )
     _TERMINAL_STATES = frozenset((IDLE, COMPLETE, ERROR, CANCELLED))
@@ -34,13 +38,17 @@ class TaskOrchestrator:
         WAITING_LLM: "llm_classification",
         WAITING_SPEECH: "speech",
         NAVIGATING_TO_WORKSHOP: "delivery_navigation",
+        SIM_DELIVERY: "sim_delivery",
+        WAITING_SIM: "sim_wait",
     }
 
-    def __init__(self, outputs, clock, id_factory, timeouts):
+    def __init__(self, outputs, clock, id_factory, timeouts,
+                 simulation_phase_enabled=False):
         self._outputs = outputs
         self._clock = clock
         self._id_factory = id_factory
         self._timeouts = dict(timeouts)
+        self.simulation_phase_enabled = bool(simulation_phase_enabled)
         self.state = self.IDLE
         self.task = None
         self.deadline = None
@@ -284,8 +292,52 @@ class TaskOrchestrator:
         if message["status"] == "failed":
             self._fail(message["message"])
             return
+        if not self.simulation_phase_enabled:
+            self._transition(self.COMPLETE)
+            self._publish_status("complete")
+            return
+        # 仿真阶段：实物配送完成后触发仿真任务，等待仿真完成信号。
+        self._transition(self.SIM_DELIVERY)
+        self._publish_status("running")
+        trigger_id = self._id_factory()
+        self.task["sim_trigger_id"] = trigger_id
+        self._emit(
+            "publish_sim_trigger",
+            {
+                "protocol_version": 1,
+                "task_id": self.task["task_id"],
+                "trigger_id": trigger_id,
+                "selected_item": self.task["simulation"]["selected_item"],
+                "target_workshop": self.task["simulation"]["workshop"],
+            },
+        )
+        self._transition(self.WAITING_SIM)
+        self._publish_status("running")
+
+    def on_sim_complete(self, message):
+        if self.state != self.WAITING_SIM:
+            return
+        if not self._matches(message):
+            return
+        if message["status"] == "failed":
+            self._fail(message["message"])
+            return
+        speech_id = self._id_factory()
+        text = "仿真任务已完成，已将%s放入%s" % (
+            self.task["simulation"]["selected_item"],
+            self.task["simulation"]["workshop"],
+        )
         self._transition(self.COMPLETE)
         self._publish_status("complete")
+        self._emit(
+            "publish_speech",
+            {
+                "protocol_version": 1,
+                "task_id": self.task["task_id"],
+                "speech_id": speech_id,
+                "text": text,
+            },
+        )
 
     def on_cancel(self, message):
         if self.state not in self._ACTIVE_STATES:

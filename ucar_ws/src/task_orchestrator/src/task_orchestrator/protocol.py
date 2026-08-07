@@ -280,6 +280,19 @@ def parse_speech_done(
     return message
 
 
+def parse_sim_complete(raw_json, expected_task_id):
+    message = load_object(raw_json)
+    _require_identity(message, "task_id", expected_task_id)
+    status = require_text(message.get("status"), "status")
+    if status not in ("success", "failed"):
+        raise ProtocolError("simulation status must be success or failed")
+    if status == "failed":
+        message["message"] = _require_failure_message(message)
+    else:
+        message["message"] = _optional_message(message)
+    return message
+
+
 def parse_cancel(raw_json, expected_task_id):
     message = load_object(raw_json)
     _require_identity(message, "task_id", expected_task_id)

@@ -16,22 +16,33 @@ TIMEOUTS = {
     "llm_classification": 60.0,
     "speech": 60.0,
     "delivery_navigation": 300.0,
+    "sim_delivery": 300.0,
+    "sim_wait": 600.0,
     "cancel_ack": 15.0,
 }
 
 
 class Harness:
-    def __init__(self):
+    def __init__(self, simulation_phase_enabled=False):
         self.outputs = []
         self.now = [1000.0]
         self.ids = iter(
-            ["pickup-1", "search-1", "llm-1", "speech-1", "delivery-1"]
+            [
+                "pickup-1",
+                "search-1",
+                "llm-1",
+                "speech-1",
+                "delivery-1",
+                "sim-trigger-1",
+                "sim-speech-1",
+            ]
         )
         self.orch = TaskOrchestrator(
             self.outputs,
             lambda: self.now[0],
             lambda: next(self.ids),
             dict(TIMEOUTS),
+            simulation_phase_enabled=simulation_phase_enabled,
         )
 
     def task_request(self, task_id="task-1"):
@@ -164,12 +175,12 @@ class Harness:
 
 
 class OrchestratorHappyPathTests(unittest.TestCase):
-    def test_every_transition_emits_motion_mode_and_delivery_is_idle(self):
+    def test_every_transition_emits_motion_mode_and_delivery_is_navigation(self):
         h = Harness()
         self.assertEqual(["IDLE"], h.actions("publish_motion_mode"))
         h.reach("COMPLETE")
         self.assertEqual(
-            ["IDLE", "IDLE", "NAVIGATION", "QR_SEARCH", "IDLE", "IDLE", "IDLE", "IDLE"],
+            ["IDLE", "IDLE", "NAVIGATION", "QR_SEARCH", "IDLE", "IDLE", "NAVIGATION", "IDLE"],
             h.actions("publish_motion_mode"),
         )
 
@@ -369,6 +380,104 @@ class OrchestratorSafetyTests(unittest.TestCase):
         )
         self.assertEqual("CHECKING_DEPENDENCIES", h.orch.state)
         self.assertEqual("task-2", h.orch.task["task_id"])
+
+
+class OrchestratorSimulationPhaseTests(unittest.TestCase):
+    def test_simulation_disabled_goes_directly_to_complete(self):
+        h = Harness(simulation_phase_enabled=False)
+        h.reach("NAVIGATING_TO_WORKSHOP")
+        h.delivery_arrived()
+        self.assertEqual("COMPLETE", h.orch.state)
+        self.assertEqual([], h.actions("publish_sim_trigger"))
+        self.assertEqual(
+            "complete",
+            h.actions("publish_status")[-1]["status"],
+        )
+
+    def test_simulation_enabled_waits_for_sim_complete_then_speaks(self):
+        h = Harness(simulation_phase_enabled=True)
+        h.reach("NAVIGATING_TO_WORKSHOP")
+        h.delivery_arrived()
+        self.assertEqual("WAITING_SIM", h.orch.state)
+
+        trigger = h.actions("publish_sim_trigger")[0]
+        self.assertEqual("task-1", trigger["task_id"])
+        self.assertEqual("sim-trigger-1", trigger["trigger_id"])
+        self.assertEqual("毛巾", trigger["selected_item"])
+        self.assertEqual("日用品加工车间", trigger["target_workshop"])
+
+        h.orch.on_sim_complete(
+            {
+                "protocol_version": 1,
+                "task_id": "task-1",
+                "status": "success",
+                "message": "",
+            }
+        )
+        self.assertEqual("COMPLETE", h.orch.state)
+        self.assertEqual(
+            "仿真任务已完成，已将毛巾放入日用品加工车间",
+            h.actions("publish_speech")[-1]["text"],
+        )
+        self.assertEqual(
+            "complete",
+            h.actions("publish_status")[-1]["status"],
+        )
+
+    def test_sim_complete_failure_enters_error_without_speech(self):
+        h = Harness(simulation_phase_enabled=True)
+        h.reach("NAVIGATING_TO_WORKSHOP")
+        h.delivery_arrived()
+        h.orch.on_sim_complete(
+            {
+                "protocol_version": 1,
+                "task_id": "task-1",
+                "status": "failed",
+                "message": "simulation crashed",
+            }
+        )
+        self.assertEqual("ERROR", h.orch.state)
+        self.assertEqual(
+            "simulation crashed",
+            h.actions("publish_status")[-1]["message"],
+        )
+        self.assertEqual(1, len(h.actions("publish_speech")))
+
+    def test_stale_sim_complete_is_ignored(self):
+        h = Harness(simulation_phase_enabled=True)
+        h.reach("NAVIGATING_TO_WORKSHOP")
+        h.delivery_arrived()
+        output_count = len(h.outputs)
+        h.orch.on_sim_complete(
+            {
+                "protocol_version": 1,
+                "task_id": "stale-task",
+                "status": "success",
+                "message": "",
+            }
+        )
+        self.assertEqual("WAITING_SIM", h.orch.state)
+        self.assertEqual(output_count, len(h.outputs))
+
+    def test_sim_stages_have_timeouts(self):
+        h = Harness(simulation_phase_enabled=True)
+        h.reach("NAVIGATING_TO_WORKSHOP")
+        h.delivery_arrived()
+        self.assertEqual("WAITING_SIM", h.orch.state)
+        h.now[0] = h.orch.deadline + 0.01
+        h.orch.tick()
+        self.assertEqual("ERROR", h.orch.state)
+        self.assertIn("WAITING_SIM", h.actions("publish_status")[-1]["message"])
+
+    def test_cancel_works_in_simulation_stages(self):
+        h = Harness(simulation_phase_enabled=True)
+        h.reach("NAVIGATING_TO_WORKSHOP")
+        h.delivery_arrived()
+        self.assertEqual("WAITING_SIM", h.orch.state)
+        h.orch.on_cancel(
+            {"task_id": "task-1", "reason": "operator_cancel"}
+        )
+        self.assertEqual("CANCELLED", h.orch.state)
 
 
 if __name__ == "__main__":

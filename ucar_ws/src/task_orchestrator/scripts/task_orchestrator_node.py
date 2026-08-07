@@ -17,6 +17,7 @@ from task_orchestrator.protocol import (
     parse_dependencies_ready,
     parse_llm_result,
     parse_qr_result,
+    parse_sim_complete,
     parse_speech_done,
     parse_task_request,
 )
@@ -29,6 +30,8 @@ DEFAULT_TIMEOUTS = {
     "llm_classification": 120.0,
     "speech": 60.0,
     "delivery_navigation": 300.0,
+    "sim_delivery": 300.0,
+    "sim_wait": 600.0,
     "cancel_ack": 15.0,
 }
 
@@ -58,6 +61,9 @@ def _make_publishers():
         ),
         "publish_delivery_goal": rospy.Publisher(
             "/task/delivery_navigation_goal", String, queue_size=10
+        ),
+        "publish_sim_trigger": rospy.Publisher(
+            "/task/sim_trigger", String, queue_size=10
         ),
     }
 
@@ -269,6 +275,22 @@ def _subscribe(orchestrator, outputs, publishers, callback_lock):
         ),
     )
     rospy.Subscriber(
+        "/task/sim_complete",
+        String,
+        _callback(
+            orchestrator,
+            outputs,
+            publishers,
+            lambda raw: parse_sim_complete(
+                raw,
+                orchestrator.task["task_id"],
+            ),
+            orchestrator.on_sim_complete,
+            callback_lock,
+            TaskOrchestrator.WAITING_SIM,
+        ),
+    )
+    rospy.Subscriber(
         "/task/cancel",
         String,
         _callback(
@@ -298,11 +320,15 @@ def main():
     outputs = []
     callback_lock = threading.RLock()
     timeouts = rospy.get_param("~timeouts", DEFAULT_TIMEOUTS)
+    simulation_phase_enabled = bool(
+        rospy.get_param("~simulation_phase_enabled", False)
+    )
     orchestrator = TaskOrchestrator(
         outputs,
         rospy.get_time,
         lambda: uuid.uuid4().hex,
         timeouts,
+        simulation_phase_enabled=simulation_phase_enabled,
     )
     publishers = _make_publishers()
     with callback_lock:

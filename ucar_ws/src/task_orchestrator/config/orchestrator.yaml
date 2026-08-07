@@ -5,7 +5,13 @@ timeouts:
   llm_classification: 120.0
   speech: 60.0
   delivery_navigation: 300.0
+  sim_delivery: 300.0
+  sim_wait: 600.0
   cancel_ack: 15.0
+
+# 仿真阶段开关：false 时实物配送完成即 complete（当前比赛状态）；
+# true 时实物配送完成后触发仿真任务，等待 /task/sim_complete 信号并播报。
+simulation_phase_enabled: false
 
 voice_adapter:
   debounce_seconds: 2.0
