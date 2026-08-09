@@ -532,6 +532,61 @@ class CompetitionBringupTests(unittest.TestCase):
             if line.rstrip().endswith("|"):
                 self.fail("Bash case pattern must not end a physical line: %s" % line)
 
+    def test_start_script_boolean_whitelist_is_exactly_start_switches(self):
+        source = START_SCRIPT.read_text(encoding="utf-8")
+        argument_case = source.split('case "$key" in', 1)[1].split("esac", 1)[0]
+        patterns = set()
+        for line in argument_case.splitlines():
+            stripped = line.strip().rstrip("|)\\").strip()
+            if not stripped or stripped == ";;":
+                continue
+            if "normalise_bool" in stripped or stripped.startswith("#"):
+                continue
+            if stripped.startswith("*)"):
+                continue
+            for part in stripped.split("|"):
+                part = part.strip()
+                if part:
+                    patterns.add(part)
+        for pattern in patterns:
+            self.assertRegex(pattern, r"^start_[a-z_]+$", pattern)
+        self.assertEqual(
+            {
+                "start_fast_nav", "start_base", "start_lidar",
+                "start_camera", "start_fast_nav_adapter",
+                "start_readiness_gate", "start_speech", "start_qr",
+                "start_llm", "start_orchestrator", "start_velocity_arbiter",
+            },
+            patterns,
+        )
+
+    def test_start_script_keeps_all_layer_security_contracts(self):
+        source = START_SCRIPT.read_text(encoding="utf-8")
+        for conflict in (
+            "conflicts+=(/usb_cam)",
+            "conflicts+=(/speech_command_node)",
+            "conflicts+=(/qr_scanner /item_search_controller)",
+            "conflicts+=(/spark_llm_node)",
+            "conflicts+=(/task_orchestrator /voice_task_adapter /tts_bridge)",
+            "conflicts+=(/fast_nav_adapter)",
+            "conflicts+=(/readiness_gate)",
+            "conflicts+=(/velocity_arbiter)",
+            "conflicts+=(/map_server /lidar_loc /move_base)",
+            "conflicts+=(/base_driver)",
+            "conflicts+=(/ydlidar_node)",
+        ):
+            self.assertIn(conflict, source)
+        for guard in (
+            "live node conflict",
+            "stale ROS master registration",
+            "requires /lidar_loc",
+            "/cmd_vel already has a direct publisher",
+            "external arbiter mode requires exactly one /cmd_vel publisher",
+            "exec roslaunch task_orchestrator competition_full.launch",
+        ):
+            self.assertIn(guard, source)
+        self.assertNotIn("start_delivery", source)
+
 
 @unittest.skipUnless(working_bash(), "no working Bash available")
 class CompetitionStartScriptTests(unittest.TestCase):
@@ -728,6 +783,25 @@ class CompetitionStartScriptTests(unittest.TestCase):
         recorded = [line[len(prefix):] for line in fake.calls().splitlines()
                     if line.startswith("roslaunch-arg:")]
         self.assertEqual(["task_orchestrator", "competition_full.launch", *arguments], recorded)
+
+    def test_tuning_parameters_are_forwarded_verbatim(self):
+        fake = FakeRosEnvironment(self, master=False)
+        self.addCleanup(fake.close)
+        arguments = (
+            "qr_step_angle_deg:=30.0", "qr_scan_window:=0.8",
+            "qr_search_total_timeout:=120.0", "llm_request_timeout:=45.0",
+            "timeout_qr_search:=180.0", "qr_cruise_angular_speed:=0.60",
+        )
+        result = fake.run(*arguments)
+        self.assertEqual(0, result.returncode, result.stderr)
+        prefix = "roslaunch-arg:"
+        recorded = [line[len(prefix):] for line in fake.calls().splitlines()
+                    if line.startswith("roslaunch-arg:")]
+        self.assertEqual(
+            ["task_orchestrator", "competition_full.launch", *arguments],
+            recorded,
+        )
+        self.assertNotIn("normalise_bool", fake.calls())
 
 
 if __name__ == "__main__":
