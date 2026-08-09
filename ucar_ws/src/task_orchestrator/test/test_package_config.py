@@ -399,8 +399,9 @@ class PackageConfigTests(unittest.TestCase):
 
         launch = ET.parse(ROOT / "launch/competition_full.launch").getroot()
         launch_args = {node.attrib["name"] for node in launch.findall("arg")}
-        self.assertNotIn("request_timeout", launch_args)
-        self.assertIn("未转发这个 arg", readme)
+        self.assertIn("llm_request_timeout", launch_args)
+        self.assertIn("timeout_qr_search", launch_args)
+        self.assertIn("总 launch 显式值 > `orchestrator.yaml` 默认值", readme)
 
         if handoff_path.exists():
             handoff = handoff_path.read_text(encoding="utf-8")

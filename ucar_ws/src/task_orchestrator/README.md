@@ -12,10 +12,10 @@ protocol v1 串起来；它负责校验 `task_id` 与各阶段 identity、超时
 它不实现底盘驱动、定位、规划、二维码识别、语音识别、LLM 或 TTS 算法，也不应重复启动
 现场已有的硬件 owner。
 
-当前自动流程的真实业务终点是 **TTS 完成**。TTS 成功后，状态机会保留兼容接口并发布
-`/task/delivery_navigation_goal`，业务状态可显示 `NAVIGATING_TO_WORKSHOP`；但是
-`/task/motion_mode` 此时严格为 `IDLE`，总 launch 没有配送适配器。因此这个 delivery goal
-只是消息，不授予任何运动权限，**不启动二维码后的动态避障、巡线或车间导航**，更不能把
+当前自动流程的真实业务终点是 **TTS 完成后的交接**。TTS 成功后，状态机只发布一次
+`/task/delivery_navigation_goal` 并停留在 `DELIVERY_HANDED_OFF`；`/task/motion_mode`
+此时严格为 `IDLE`，总 launch 没有配送适配器。因此这个 delivery goal 只是交接消息，
+不授予任何运动权限，**不启动二维码后的动态避障、巡线或车间导航**，更不能把
 “发布了目标”误判为“车已经配送”。不要人工伪造 `/task/delivery_arrived` 来证明实车完成。
 
 自动链路是：
@@ -30,8 +30,8 @@ protocol v1 串起来；它负责校验 `task_id` 与各阶段 identity、超时
  -> /qr_item_search/start -> 三个物品 /qr_item_search/result
  -> /llm/classify/request -> 实物/仿真双目标 /llm/classify/result
  -> /voice/speak -> tts_bridge -> /voice/speak_done
- -> /task/delivery_navigation_goal（兼容消息）
- -> /task/motion_mode = IDLE（真实安全终点）
+ -> /task/delivery_navigation_goal（唯一一次，交接收发）
+ -> DELIVERY_HANDED_OFF，/task/motion_mode = IDLE（真实安全终点）
 ```
 
 ## 2. 三种入口不能混用
@@ -104,7 +104,15 @@ source /opt/ros/noetic/setup.bash
 source /home/ucar/ucar_ws/devel/setup.bash
 cd /home/ucar/ucar_ws
 ./src/task_orchestrator/scripts/start_competition.sh
+
+清洗节点（仅在确认原 root 已退出、只有僵尸登记时使用）
+source /opt/ros/noetic/setup.bash
+source /home/ucar/ucar_ws/devel/setup.bash
+rosnode cleanup
 ```
+
+`rosnode cleanup` 只清除 ROS Master 上已经死掉的僵尸登记，**不能关闭任何 live 节点**，
+也不是停止比赛的方法；停止请见第 6 节（先 `/task/cancel`，再回根终端 `Ctrl+C`，机械断能确认）。
 
 启动参数均为布尔值，格式 `name:=true|false`：
 
@@ -193,7 +201,7 @@ rostopic echo /task/delivery_navigation_goal
 ```
 
 状态依次应为 `CHECKING_DEPENDENCIES`、`NAVIGATING_TO_PICKUP`、`WAITING_QR`、
-`WAITING_LLM`、`WAITING_SPEECH`、`NAVIGATING_TO_WORKSHOP`。readiness 回执示例：
+`WAITING_LLM`、`WAITING_SPEECH`、`DELIVERY_HANDED_OFF`。readiness 回执示例：
 
 ```json
 {"protocol_version":1,"task_id":"task-...","status":"ready"}
@@ -247,12 +255,18 @@ done 示例：
 {"protocol_version":1,"task_id":"task-...","speech_id":"speech-...","status":"success","message":""}
 ```
 
-最后会看到 delivery message（含 `task_id/goal_id/target_workshop/selected_item`），同时必须确认：
+最后会看到一次 delivery message（`protocol_version/task_id/goal_id/target_workshop/selected_item`
+五字段齐全），随后 `/task/status` 停留在 `DELIVERY_HANDED_OFF`，同时必须确认：
 
 ```bash
 rostopic echo -n 1 /task/motion_mode    # data: "IDLE"
 rostopic echo -n 1 /cmd_vel             # 六个分量均为 0
 ```
+
+本次自动运行到此结束：不会再启动避障导航，也不会进入 `COMPLETE`。未来避障模块接入后，
+它订阅 `/task/delivery_navigation_goal`，用 `task_id/goal_id` 去重执行配送，到达后回传
+`/task/delivery_arrived`（同样带 `task_id/goal_id`），状态机才会继续后续流程；在本阶段
+这些都不存在，请勿伪造回执。
 
 identity 必须从上一阶段实际输出复制，不能猜。旧 `task_id`、错 `goal_id/search_id/request_id/speech_id`
 会被忽略；这属于防串任务机制，不是节点“没反应”。
@@ -267,8 +281,8 @@ identity 必须从上一阶段实际输出复制，不能猜。旧 `task_id`、�
 | 同文件 `velocity_arbiter` | source timeout 0.3、周期 0.05、线速度绝对上限 1.0、角速度绝对上限 2.0 | 启动读取，重启 |
 | `ucar_fast_nav/config/pickup_goal.yaml` | `/ucar_fast_nav/pickup_goal` 航点、frame/yaw、地图路径/校验契约 | fast-nav launch 统一加载，禁止本包重复加载 |
 | `ucar_fast_nav/config` planner/map | `move_base` planner 参数、地图文件及定位配置 | 属于外部任务 5 契约；改后重启 fast-nav root |
-| `qr_item_search/launch/qr_item_search.launch` | image `/usb_cam/image_raw`；HTTP 1/2 秒、1 重试/3 workers；角速 0.40/0.20、最小 0.11、总搜索 40 秒等 | launch `<param>`，需重启 QR 所属 root |
-| `llm_spark/launch/llm_spark.launch` | URL arg；`request_timeout:=90.0` | 仅单包调试可用该 launch arg，节点启动后固定 |
+| `qr_item_search/launch/qr_item_search.launch` | image/解码/步进/角速度/驻留/超时等全部由总 launch 的 `qr_*` 参数显式转发；HTTP 1/2 秒、1 重试/3 workers 为内部值 | 调 `qr_*` 参数后重启根 launch（见 5.1） |
+| `llm_spark/launch/llm_spark.launch` | `url`/`request_timeout` 由总 launch 的 `llm_url`/`llm_request_timeout` 转发 | 单包调试可直接给该 launch 传 arg；正式流程用全局参数 |
 | `speech_command/launch/speech_command.launch` | 无本总 launch 可传 arg；输出 `/question` | 改外部包配置后重启 root |
 | `tts_bridge` | `python3 .../tts_http.py`，timeout 30 秒 | YAML，重启 |
 
@@ -276,11 +290,64 @@ identity 必须从上一阶段实际输出复制，不能猜。旧 `task_id`、�
 需要不同运行参数时，优先使用明确支持的控制 topic 或 launch arg；必须重载时在根终端 `Ctrl+C`，
 确认退出后整套重启。参数统一在启动时加载，不允许为套用另一组参数而重复启动同名节点。
 
-`request_timeout:=90.0` 只在直接运行
-`roslaunch llm_spark llm_spark.launch request_timeout:=90.0` 时有效；当前
-`competition_full.launch` 未转发这个 arg，所以不可把它直接追加到 `start_competition.sh` 尾部。
-正式总流程若要改该值，必须先给 competition launch 增加显式 arg/转发并配套测试，然后
-`Ctrl+C` 根 launch 后重启；不能假设未知尾部参数会穿透 include。
+### 5.1 全局 launch 可调参数
+
+`competition_full.launch` 统一暴露比赛现场要调的参数（带 `qr_` 前缀的参数原样转发给
+`qr_item_search.launch`，`llm_`/`timeout_` 参数分别转发给 LLM 与编排器）：
+
+| 全局参数 | 默认值 | 下游映射 |
+|---|---:|---|
+| `qr_image_topic` | `/usb_cam/image_raw` | `image_topic` |
+| `qr_start_debug_stream` | `false` | `start_debug_stream` |
+| `qr_debug_host` | `0.0.0.0` | `debug_host` |
+| `qr_debug_port` | `8080` | `debug_port` |
+| `qr_metrics_dir` | `$(env HOME)/qr_metrics` | `metrics_dir` |
+| `qr_keyframe_dir` | `$(env HOME)/qr_keyframes` | `keyframe_dir` |
+| `qr_decode_scale` | `1.5` | `decode_scale` |
+| `qr_step_angle_deg` | `45.0` | `step_angle_deg` |
+| `qr_cruise_angular_speed` | `0.50` | `cruise_angular_speed` |
+| `qr_approach_angular_speed` | `0.20` | `approach_angular_speed` |
+| `qr_approach_zone_deg` | `10.0` | `approach_zone_deg` |
+| `qr_yaw_tolerance_deg` | `2.0` | `yaw_tolerance_deg` |
+| `qr_settled_angular_speed` | `0.03` | `settled_angular_speed` |
+| `qr_settled_duration` | `0.20` | `settled_duration` |
+| `qr_scan_window` | `1.0` | `scan_window` |
+| `qr_offset_angle_deg` | `22.5` | `offset_angle_deg` |
+| `qr_max_passes` | `2` | `max_passes` |
+| `qr_search_total_timeout` | `90.0` | `search_total_timeout` |
+| `qr_settling_timeout` | `3.0` | `settling_timeout` |
+| `qr_heading_timeout` | `1.0` | `heading_timeout` |
+| `qr_camera_timeout` | `1.0` | `camera_timeout` |
+| `llm_url` | 讯飞 Spark URL（见 `llm_spark.launch`） | `url` |
+| `llm_request_timeout` | `90.0` | `request_timeout` |
+| `timeout_dependency_ready` | `120.0` | 编排 `timeouts/dependency_ready` |
+| `timeout_pickup_navigation` | `300.0` | 编排 `timeouts/pickup_navigation` |
+| `timeout_qr_search` | `150.0` | 编排 `timeouts/qr_search` |
+| `timeout_llm_classification` | `120.0` | 编排 `timeouts/llm_classification` |
+| `timeout_speech` | `60.0` | 编排 `timeouts/speech` |
+
+固定连接不允许通过比赛命令改写：QR 速度 remap 到 `/cmd_vel/qr`、导航 remap 到
+`/cmd_vel/navigation`、最终唯一 `/cmd_vel` 由 velocity_arbiter 发布、QR 图像默认
+`/usb_cam/image_raw`。
+
+覆盖优先级：**总 launch 显式值 > `orchestrator.yaml` 默认值 > Python 内建兜底**。
+例如把 QR 搜索编排超时调成 180 秒：
+
+```bash
+./src/task_orchestrator/scripts/start_competition.sh timeout_qr_search:=180.0
+```
+
+调参必须一次只改一个变量并重启根 launch（`Ctrl+C` 后重新执行）。QR 示例：
+
+- 二维码间距更小时改用 30° 步进：`qr_step_angle_deg:=30.0`，同时通常配套
+  `qr_offset_angle_deg:=15.0` 并适当增大 `qr_search_total_timeout`（如 120.0）；
+- 扫码驻留过短导致漏码：把 `qr_scan_window` 从 1.0 逐步加大到 1.2~1.5；
+- 旋转过快：减小 `qr_cruise_angular_speed`（0.50 → 0.40），一次只调一个量；
+- 总搜索时间不够：增大 `qr_search_total_timeout`，同时确认
+  `timeout_qr_search`（编排超时）仍严格大于它；默认 150 > 90，禁止设成相等或更小。
+
+`start_*:=true|false` 仍是唯一的布尔开关；`qr_*`、`llm_*`、`timeout_*` 等调参参数按原文、
+逐参数边界安全地透传给根 roslaunch，不做布尔校验，也不做 shell 展开。
 
 ## 6. 停止、急停与常驻原则
 
