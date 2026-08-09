@@ -1,7 +1,7 @@
 # task_orchestrator 操作、部署与联调手册
 
-> **当前状态：已于 2026-08-03 部署到 `ucar@172.20.10.3`，完成 Catkin 编译、Bash
-> 语法检查和 153 项车端离线测试。** 本文不表示完整实车流程已经通过；本次没有启动业务
+> **当前状态：已于 2026-08-09 部署到 `ucar@192.168.1.109`，完成 Catkin 编译、
+> 179 项编排器测试和 8 项车端 LLM 测试。** 本文不表示完整实车流程已经通过；本次没有启动业务
 > 节点，也没有进行实车运动。首次上车必须有人看护、保留急停，
 > 按本文从静态检查、零速度检查再逐步放开运动。
 
@@ -49,19 +49,18 @@ protocol v1 串起来；它负责校验 `task_id` 与各阶段 identity、超时
 
 ### 3.1 登录、构建、权限
 
-车端旧包已于 2026-08-03 09:29 完整备份到：
+本次部署前的车端旧包已完整备份到：
 
 ```text
-/home/ucar/ucar_backups/task_orchestrator.backup_20260803_0929
+/home/ucar/ucar_backups/task_orchestrator.backup_20260809_183954
 ```
 
 该目录是本轮部署前的恢复基线，不得被后续同步覆盖或删除。本文不给出覆盖式删除命令。
 
 ```bash
-ssh ucar@172.20.10.3
+ssh ucar@192.168.1.109
 source /opt/ros/noetic/setup.bash
 cd /home/ucar/ucar_ws
-catkin_make
 source /home/ucar/ucar_ws/devel/setup.bash
 rospack find task_orchestrator
 chmod +x /home/ucar/ucar_ws/src/task_orchestrator/scripts/start_competition.sh
@@ -104,8 +103,11 @@ source /opt/ros/noetic/setup.bash
 source /home/ucar/ucar_ws/devel/setup.bash
 cd /home/ucar/ucar_ws
 ./src/task_orchestrator/scripts/start_competition.sh
+```
 
-清洗节点（仅在确认原 root 已退出、只有僵尸登记时使用）
+清洗节点（仅在确认原 root 已退出、只有僵尸登记时使用）：
+
+```bash
 source /opt/ros/noetic/setup.bash
 source /home/ucar/ucar_ws/devel/setup.bash
 rosnode cleanup
