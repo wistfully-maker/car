@@ -17,6 +17,12 @@
     start_velocity_arbiter=false is only for a deployment already providing an
     external equivalent sole arbiter. Navigation and QR remain isolated on
     /cmd_vel/navigation and /cmd_vel/qr; preflight ownership is task 6.
+
+    This phase does NOT auto-start the unfinished avoidance navigation stage.
+    After the post-speech handoff the orchestrator publishes
+    /task/delivery_navigation_goal once and keeps /task/motion_mode at IDLE; a
+    future avoidance module subscribes to it and reports back on
+    /task/delivery_arrived.
   -->
   <arg name="start_fast_nav" default="true"/>
   <arg name="start_base" default="true"/>
@@ -29,12 +35,9 @@
   <arg name="start_llm" default="true"/>
   <arg name="start_orchestrator" default="true"/>
   <arg name="start_velocity_arbiter" default="true"/>
-  <arg name="start_delivery" default="true"/>
 
   <arg name="fast_nav_launch"
        default="$(find ucar_fast_nav)/launch/pickup_navigation.launch"/>
-  <arg name="delivery_launch"
-       default="$(find ucar_avoid)/launch/amcl_delivery.launch"/>
   <arg name="speech_launch"
        default="$(find speech_command)/launch/speech_command.launch"/>
   <arg name="qr_launch"
@@ -51,13 +54,6 @@
       <arg name="start_lidar" value="$(arg start_lidar)"/>
       <arg name="cmd_vel_topic" value="/cmd_vel/navigation"/>
     </include>
-  </group>
-
-  <group if="$(arg start_delivery)">
-    <!-- 配送阶段避障：racecar_control 由 /task/delivery_navigation_goal 驱动，
-         依赖 fast_nav 已启动的 map_server/move_base；定位运行时从 lidar_loc
-         切换为 AMCL（见 ucar_avoid/src/avoid.cpp switchToAmcl()）。 -->
-    <include file="$(arg delivery_launch)"/>
   </group>
 
   <group if="$(arg start_camera)">

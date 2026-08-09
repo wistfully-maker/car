@@ -24,7 +24,7 @@ declare -A flags=(
   [start_camera]=true [start_fast_nav_adapter]=true
   [start_readiness_gate]=true [start_speech]=true [start_qr]=true
   [start_llm]=true [start_orchestrator]=true
-  [start_velocity_arbiter]=true [start_delivery]=true
+  [start_velocity_arbiter]=true
 )
 
 normalise_bool() {
@@ -43,7 +43,7 @@ for arg in "${launch_args[@]}"; do
     case "$key" in
       start_fast_nav|start_base|start_lidar|start_camera|\
       start_fast_nav_adapter|start_readiness_gate|start_speech|start_qr|\
-      start_llm|start_orchestrator|start_velocity_arbiter|start_delivery)
+      start_llm|start_orchestrator|start_velocity_arbiter)
         normalise_bool "$key" "$value"
         ;;
       *) : ;;  # Unknown roslaunch arguments are forwarded unchanged.
@@ -216,7 +216,6 @@ if [[ "$master_available" == true ]]; then
   [[ "${flags[start_fast_nav_adapter]}" == true ]] && conflicts+=(/fast_nav_adapter)
   [[ "${flags[start_readiness_gate]}" == true ]] && conflicts+=(/readiness_gate)
   [[ "${flags[start_velocity_arbiter]}" == true ]] && conflicts+=(/velocity_arbiter)
-  [[ "${flags[start_delivery]}" == true ]] && conflicts+=(/vision_node /racecar_control)
   if [[ "${flags[start_fast_nav]}" == true ]]; then
     # Vendor runtime_check.sh contract; navigation_full.launch owns the includes.
     conflicts+=(/map_server /lidar_loc /move_base)

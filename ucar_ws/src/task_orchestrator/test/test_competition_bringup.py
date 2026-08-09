@@ -182,7 +182,7 @@ class CompetitionBringupTests(unittest.TestCase):
             "start_fast_nav", "start_base", "start_lidar", "start_camera",
             "start_fast_nav_adapter", "start_readiness_gate", "start_speech",
             "start_qr", "start_llm", "start_orchestrator",
-            "start_velocity_arbiter", "start_delivery",
+            "start_velocity_arbiter",
         }
         args = {arg.attrib["name"]: arg.attrib.get("default")
                 for arg in self.root.findall("arg")}
@@ -190,7 +190,7 @@ class CompetitionBringupTests(unittest.TestCase):
         for name in expected:
             self.assertIn("$(arg %s)" % name, self.text)
         self.assertEqual("true", args["start_velocity_arbiter"])
-        self.assertEqual("true", args["start_delivery"])
+        self.assertNotIn("start_delivery", args)
 
     def test_documents_external_contracts_and_fail_fast_boundaries(self):
         for marker in (
@@ -326,24 +326,22 @@ class CompetitionBringupTests(unittest.TestCase):
         self.assertEqual("$(arg enable_velocity_arbiter)",
                          nodes["velocity_arbiter"].attrib.get("if"))
 
-    def test_delivery_group_includes_amcl_delivery_launch(self):
-        groups = [g for g in self.root.findall("group")
-                  if g.attrib.get("if") == "$(arg start_delivery)"]
-        self.assertEqual(1, len(groups))
-        include = groups[0].find("include")
-        self.assertEqual("$(arg delivery_launch)", include.attrib["file"])
-        self.assertIn("$(find ucar_avoid)/launch/amcl_delivery.launch",
-                      self.text)
+    def test_no_delivery_auto_start_in_this_phase(self):
+        self.assertNotIn("$(find ucar_avoid)", self.text)
+        self.assertNotIn("amcl_delivery.launch", self.text)
+        self.assertNotIn("delivery_launch", self.text)
+        self.assertNotIn("start_delivery", self.text)
+        args = {arg.attrib["name"] for arg in self.root.findall("arg")}
+        self.assertNotIn("start_delivery", args)
+        self.assertNotIn("/vision_node", self.text)
+        self.assertNotIn("/racecar_control", self.text)
+        self.assertNotIn("/cmd_vel/avoidance", self.text)
 
-    def test_start_script_accepts_delivery_switch_and_conflict(self):
+    def test_start_script_does_not_own_delivery_nodes(self):
         source = START_SCRIPT.read_text(encoding="utf-8")
-        self.assertIn("[start_delivery]=true", source)
-        self.assertIn("start_velocity_arbiter|start_delivery", source)
-        self.assertIn(
-            '[[ "${flags[start_delivery]}" == true ]] && '
-            'conflicts+=(/vision_node /racecar_control)',
-            source,
-        )
+        self.assertNotIn("start_delivery", source)
+        self.assertNotIn("/vision_node", source)
+        self.assertNotIn("/racecar_control", source)
 
     def test_start_script_static_safety_contract(self):
         source = START_SCRIPT.read_text(encoding="utf-8")
