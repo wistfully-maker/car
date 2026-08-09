@@ -252,7 +252,7 @@ class CompetitionBringupTests(unittest.TestCase):
         )
         image_args = [arg for arg in qr.iter("arg")
                       if arg.attrib.get("name") == "image_topic"]
-        self.assertEqual(["/usb_cam/image_raw"],
+        self.assertEqual(["$(arg qr_image_topic)"],
                          [arg.attrib.get("value") for arg in image_args])
 
     def test_delegates_waypoint_loading_exclusively_to_vendor_launch(self):
@@ -325,6 +325,119 @@ class CompetitionBringupTests(unittest.TestCase):
                          nodes["readiness_gate"].attrib.get("if"))
         self.assertEqual("$(arg enable_velocity_arbiter)",
                          nodes["velocity_arbiter"].attrib.get("if"))
+
+    def test_global_qr_parameters_have_exact_defaults(self):
+        defaults = {
+            "qr_image_topic": "/usb_cam/image_raw",
+            "qr_start_debug_stream": "false",
+            "qr_debug_host": "0.0.0.0",
+            "qr_debug_port": "8080",
+            "qr_metrics_dir": "$(env HOME)/qr_metrics",
+            "qr_keyframe_dir": "$(env HOME)/qr_keyframes",
+            "qr_decode_scale": "1.5",
+            "qr_step_angle_deg": "45.0",
+            "qr_cruise_angular_speed": "0.50",
+            "qr_approach_angular_speed": "0.20",
+            "qr_approach_zone_deg": "10.0",
+            "qr_yaw_tolerance_deg": "2.0",
+            "qr_settled_angular_speed": "0.03",
+            "qr_settled_duration": "0.20",
+            "qr_scan_window": "1.0",
+            "qr_offset_angle_deg": "22.5",
+            "qr_max_passes": "2",
+            "qr_search_total_timeout": "90.0",
+            "qr_settling_timeout": "3.0",
+            "qr_heading_timeout": "1.0",
+            "qr_camera_timeout": "1.0",
+        }
+        args = {arg.attrib["name"]: arg.attrib.get("default")
+                for arg in self.root.findall("arg")}
+        for name, default in defaults.items():
+            self.assertEqual(default, args[name], name)
+
+    def test_qr_include_forwards_every_global_parameter(self):
+        qr_groups = [group for group in self.root.findall("group")
+                     if group.attrib.get("if") == "$(arg start_qr)"]
+        self.assertEqual(1, len(qr_groups))
+        forwarded = {arg.attrib["name"]: arg.attrib["value"]
+                     for arg in qr_groups[0].find("include").findall("arg")}
+        downstream = {
+            "image_topic": "qr_image_topic",
+            "start_debug_stream": "qr_start_debug_stream",
+            "debug_host": "qr_debug_host",
+            "debug_port": "qr_debug_port",
+            "metrics_dir": "qr_metrics_dir",
+            "keyframe_dir": "qr_keyframe_dir",
+            "decode_scale": "qr_decode_scale",
+            "step_angle_deg": "qr_step_angle_deg",
+            "cruise_angular_speed": "qr_cruise_angular_speed",
+            "approach_angular_speed": "qr_approach_angular_speed",
+            "approach_zone_deg": "qr_approach_zone_deg",
+            "yaw_tolerance_deg": "qr_yaw_tolerance_deg",
+            "settled_angular_speed": "qr_settled_angular_speed",
+            "settled_duration": "qr_settled_duration",
+            "scan_window": "qr_scan_window",
+            "offset_angle_deg": "qr_offset_angle_deg",
+            "max_passes": "qr_max_passes",
+            "search_total_timeout": "qr_search_total_timeout",
+            "settling_timeout": "qr_settling_timeout",
+            "heading_timeout": "qr_heading_timeout",
+            "camera_timeout": "qr_camera_timeout",
+        }
+        for downstream_arg, global_arg in downstream.items():
+            self.assertEqual("$(arg %s)" % global_arg,
+                             forwarded[downstream_arg], downstream_arg)
+        self.assertEqual(21, len(forwarded))
+
+    def test_llm_launch_parameters_are_forwarded(self):
+        args = {arg.attrib["name"]: arg.attrib.get("default")
+                for arg in self.root.findall("arg")}
+        self.assertEqual(
+            "https://spark-api-open.xf-yun.com/x2/chat/completions",
+            args["llm_url"],
+        )
+        self.assertEqual("90.0", args["llm_request_timeout"])
+        llm_groups = [group for group in self.root.findall("group")
+                      if group.attrib.get("if") == "$(arg start_llm)"]
+        self.assertEqual(1, len(llm_groups))
+        forwarded = {arg.attrib["name"]: arg.attrib["value"]
+                     for arg in llm_groups[0].find("include").findall("arg")}
+        self.assertEqual("$(arg llm_url)", forwarded["url"])
+        self.assertEqual("$(arg llm_request_timeout)",
+                         forwarded["request_timeout"])
+
+    def test_orchestrator_stage_timeouts_are_forwarded(self):
+        defaults = {
+            "timeout_dependency_ready": "120.0",
+            "timeout_pickup_navigation": "300.0",
+            "timeout_qr_search": "150.0",
+            "timeout_llm_classification": "120.0",
+            "timeout_speech": "60.0",
+        }
+        args = {arg.attrib["name"]: arg.attrib.get("default")
+                for arg in self.root.findall("arg")}
+        for name, default in defaults.items():
+            self.assertEqual(default, args[name], name)
+        orchestrator_groups = [
+            group for group in self.root.findall("group")
+            if group.attrib.get("if") == "$(arg start_orchestrator)"
+        ]
+        self.assertEqual(1, len(orchestrator_groups))
+        forwarded = {arg.attrib["name"]: arg.attrib["value"]
+                     for arg in orchestrator_groups[0].find("include").findall("arg")}
+        for name in defaults:
+            self.assertEqual("$(arg %s)" % name, forwarded[name], name)
+        self.assertGreater(float(args["timeout_qr_search"]),
+                           float(args["qr_search_total_timeout"]))
+
+    def test_global_launch_does_not_duplicate_hardware_owners(self):
+        self.assertEqual(
+            1, len([node for node in self.root.iter("node")
+                    if node.attrib.get("pkg") == "usb_cam"]),
+        )
+        for owner in ("/map_server", "/lidar_loc", "/move_base",
+                      "/base_driver", "/ydlidar_node"):
+            self.assertNotIn('name="%s"' % owner, self.text)
 
     def test_no_delivery_auto_start_in_this_phase(self):
         self.assertNotIn("$(find ucar_avoid)", self.text)

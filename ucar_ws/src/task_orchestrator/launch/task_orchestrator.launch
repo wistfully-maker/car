@@ -6,6 +6,14 @@
   <arg name="enable_readiness_gate" default="false"/>
   <arg name="enable_velocity_arbiter" default="false"/>
 
+  <!-- 阶段超时：competition_full.launch 显式覆盖；默认值镜像
+       orchestrator.yaml，私有 <param> 在 rosparam load 之后覆盖同 key。 -->
+  <arg name="timeout_dependency_ready" default="120.0"/>
+  <arg name="timeout_pickup_navigation" default="300.0"/>
+  <arg name="timeout_qr_search" default="120.0"/>
+  <arg name="timeout_llm_classification" default="120.0"/>
+  <arg name="timeout_speech" default="60.0"/>
+
   <node pkg="task_orchestrator"
         type="task_orchestrator_node.py"
         name="task_orchestrator"
@@ -13,6 +21,14 @@
         if="$(arg enable_task_orchestrator)">
     <rosparam command="load"
               file="$(find task_orchestrator)/config/orchestrator.yaml"/>
+    <param name="timeouts/dependency_ready"
+           value="$(arg timeout_dependency_ready)"/>
+    <param name="timeouts/pickup_navigation"
+           value="$(arg timeout_pickup_navigation)"/>
+    <param name="timeouts/qr_search" value="$(arg timeout_qr_search)"/>
+    <param name="timeouts/llm_classification"
+           value="$(arg timeout_llm_classification)"/>
+    <param name="timeouts/speech" value="$(arg timeout_speech)"/>
   </node>
   <node pkg="task_orchestrator"
         type="voice_task_adapter_node.py"

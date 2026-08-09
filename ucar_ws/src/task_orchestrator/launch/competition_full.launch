@@ -36,6 +36,43 @@
   <arg name="start_orchestrator" default="true"/>
   <arg name="start_velocity_arbiter" default="true"/>
 
+  <!-- QR 全局参数：qr_ 前缀 + 显式转发给 qr_item_search.launch（915aa37 契约）。
+       qr_scan_window 默认 1.0 s 为实车解码更稳定的驻留值。 -->
+  <arg name="qr_image_topic" default="/usb_cam/image_raw"/>
+  <arg name="qr_start_debug_stream" default="false"/>
+  <arg name="qr_debug_host" default="0.0.0.0"/>
+  <arg name="qr_debug_port" default="8080"/>
+  <arg name="qr_metrics_dir" default="$(env HOME)/qr_metrics"/>
+  <arg name="qr_keyframe_dir" default="$(env HOME)/qr_keyframes"/>
+  <arg name="qr_decode_scale" default="1.5"/>
+  <arg name="qr_step_angle_deg" default="45.0"/>
+  <arg name="qr_cruise_angular_speed" default="0.50"/>
+  <arg name="qr_approach_angular_speed" default="0.20"/>
+  <arg name="qr_approach_zone_deg" default="10.0"/>
+  <arg name="qr_yaw_tolerance_deg" default="2.0"/>
+  <arg name="qr_settled_angular_speed" default="0.03"/>
+  <arg name="qr_settled_duration" default="0.20"/>
+  <arg name="qr_scan_window" default="1.0"/>
+  <arg name="qr_offset_angle_deg" default="22.5"/>
+  <arg name="qr_max_passes" default="2"/>
+  <arg name="qr_search_total_timeout" default="90.0"/>
+  <arg name="qr_settling_timeout" default="3.0"/>
+  <arg name="qr_heading_timeout" default="1.0"/>
+  <arg name="qr_camera_timeout" default="1.0"/>
+
+  <!-- LLM 全局参数 -->
+  <arg name="llm_url"
+       default="https://spark-api-open.xf-yun.com/x2/chat/completions"/>
+  <arg name="llm_request_timeout" default="90.0"/>
+
+  <!-- 编排阶段超时：显式传给 task_orchestrator.launch，覆盖 orchestrator.yaml。
+       timeout_qr_search 默认 150.0 必须大于 QR 内部总搜索超时 90.0。 -->
+  <arg name="timeout_dependency_ready" default="120.0"/>
+  <arg name="timeout_pickup_navigation" default="300.0"/>
+  <arg name="timeout_qr_search" default="150.0"/>
+  <arg name="timeout_llm_classification" default="120.0"/>
+  <arg name="timeout_speech" default="60.0"/>
+
   <arg name="fast_nav_launch"
        default="$(find ucar_fast_nav)/launch/pickup_navigation.launch"/>
   <arg name="speech_launch"
@@ -67,12 +104,35 @@
   <group if="$(arg start_qr)">
     <remap from="/cmd_vel" to="/cmd_vel/qr"/>
     <include file="$(arg qr_launch)">
-      <arg name="image_topic" value="/usb_cam/image_raw"/>
+      <arg name="image_topic" value="$(arg qr_image_topic)"/>
+      <arg name="start_debug_stream" value="$(arg qr_start_debug_stream)"/>
+      <arg name="debug_host" value="$(arg qr_debug_host)"/>
+      <arg name="debug_port" value="$(arg qr_debug_port)"/>
+      <arg name="metrics_dir" value="$(arg qr_metrics_dir)"/>
+      <arg name="keyframe_dir" value="$(arg qr_keyframe_dir)"/>
+      <arg name="decode_scale" value="$(arg qr_decode_scale)"/>
+      <arg name="step_angle_deg" value="$(arg qr_step_angle_deg)"/>
+      <arg name="cruise_angular_speed" value="$(arg qr_cruise_angular_speed)"/>
+      <arg name="approach_angular_speed" value="$(arg qr_approach_angular_speed)"/>
+      <arg name="approach_zone_deg" value="$(arg qr_approach_zone_deg)"/>
+      <arg name="yaw_tolerance_deg" value="$(arg qr_yaw_tolerance_deg)"/>
+      <arg name="settled_angular_speed" value="$(arg qr_settled_angular_speed)"/>
+      <arg name="settled_duration" value="$(arg qr_settled_duration)"/>
+      <arg name="scan_window" value="$(arg qr_scan_window)"/>
+      <arg name="offset_angle_deg" value="$(arg qr_offset_angle_deg)"/>
+      <arg name="max_passes" value="$(arg qr_max_passes)"/>
+      <arg name="search_total_timeout" value="$(arg qr_search_total_timeout)"/>
+      <arg name="settling_timeout" value="$(arg qr_settling_timeout)"/>
+      <arg name="heading_timeout" value="$(arg qr_heading_timeout)"/>
+      <arg name="camera_timeout" value="$(arg qr_camera_timeout)"/>
     </include>
   </group>
 
   <group if="$(arg start_llm)">
-    <include file="$(arg llm_launch)"/>
+    <include file="$(arg llm_launch)">
+      <arg name="url" value="$(arg llm_url)"/>
+      <arg name="request_timeout" value="$(arg llm_request_timeout)"/>
+    </include>
   </group>
 
   <group if="$(arg start_orchestrator)">
@@ -83,6 +143,11 @@
       <arg name="enable_fast_nav_adapter" value="false"/>
       <arg name="enable_readiness_gate" value="false"/>
       <arg name="enable_velocity_arbiter" value="false"/>
+      <arg name="timeout_dependency_ready" value="$(arg timeout_dependency_ready)"/>
+      <arg name="timeout_pickup_navigation" value="$(arg timeout_pickup_navigation)"/>
+      <arg name="timeout_qr_search" value="$(arg timeout_qr_search)"/>
+      <arg name="timeout_llm_classification" value="$(arg timeout_llm_classification)"/>
+      <arg name="timeout_speech" value="$(arg timeout_speech)"/>
     </include>
   </group>
 
