@@ -11,7 +11,7 @@
 ```text
 worktree: D:\program_sec\智能车\.worktrees\task_orchestrator
 branch:   feature/task-orchestrator
-HEAD:     23ab880（任务 E 文档提交后 HEAD 为下方最终提交）
+HEAD:     2fab15b
 起点:     86cf663
 ```
 
@@ -23,7 +23,7 @@ HEAD:     23ab880（任务 E 文档提交后 HEAD 为下方最终提交）
 | `13a5f83` `refactor(bringup): stop auto-starting unfinished delivery navigation` | 删除 `competition_full.launch` 的 `start_delivery`/`delivery_launch` 与 `ucar_avoid` include；删除 `start_competition.sh` 中 start_delivery flag、case 分支和 `/vision_node /racecar_control` 冲突检查；保留 `/task/delivery_navigation_goal` 发布器与协议 |
 | `ac9142e` `feat(bringup): forward global QR LLM and timeout parameters` | 总 launch 新增 21 个 `qr_*` 参数（含 `qr_scan_window=1.0`、`qr_search_total_timeout=90.0`）、`llm_url`/`llm_request_timeout=90.0`、5 个阶段超时（`timeout_qr_search=150.0 > 90.0`）并显式转发；`task_orchestrator.launch` 增加私有 `<param>` 在 rosparam load 后覆盖 `timeouts/*` |
 | `23ab880` `test(bringup): harden parameter and preflight contracts` | 静态锁定：case 白名单只含 `start_*` 布尔开关、全部层安全冲突检查保留；动态（Linux）验证 `qr_*`/`llm_*`/`timeout_*` 调参参数原样、逐参数边界安全转发 |
-| 任务 E 提交（待做） | README 参数/交接文档更新 + `test_package_config.py` 断言反转（见第 10 节） |
+| `2fab15b` `docs(orchestrator): document full launch tuning and delivery handoff` | README 参数/交接文档更新 + `test_package_config.py` 断言反转 |
 
 ## 3. 修改文件清单
 
@@ -50,12 +50,11 @@ ucar_ws/src/task_orchestrator/HANDOFF_TO_CODEX.md（本文件）
 python -m unittest discover -s ucar_ws/src/task_orchestrator/test -p "test_*.py" -v
 ```
 
-- 179 项通过，18 项跳过，耗时约 0.5 s（Windows 无 WSL/Bash，`CompetitionStartScriptTests`
+- 共运行 179 项，其中 161 项通过、18 项跳过，耗时约 0.5 s（Windows 无可用的 Unix Bash，`CompetitionStartScriptTests`
   中的 fake-ROS Bash 测试在 Windows 跳过；车端 Linux 可全量执行，命令相同）。
 - 17 项跳过为任务前既有环境限制（`no working Bash available`），1 项为本阶段新增的
   `test_tuning_parameters_are_forwarded_verbatim`（同为 Bash 环境）。
-- llm_spark 回归：未改动 llm_spark 包源码，本阶段未单独运行其测试（按协议不修改外部包；
-  若需复核可在车端跑 `python -m unittest discover -s ucar_ws/src/llm_spark/test`）。
+- llm_spark 回归：Codex 复核时已运行 11 项，全部通过。
 - 未执行（也禁止 DeepSeek 执行）：车端编译、部署、roslaunch 展开实测、实车运动。
 
 ## 5. 全局 launch 实际启动的每个模块
@@ -126,7 +125,8 @@ competition_full.launch
 ## 8. 明确未实现（本阶段终点，不是完成比赛）
 
 - 避障导航（`ucar_avoid` 未启动、未 include、未授权任何底盘运动）
-- `/task/delivery_arrived` 无发布者、无消费者（订阅保留，`expected_state=DELIVERY_HANDED_OFF`）
+- `/task/delivery_arrived` 当前无发布者；编排器订阅者已保留，
+  `expected_state=DELIVERY_HANDED_OFF`，供后续避障导航回传。
 - 两次停车、动态避障、巡线、车间导航
 - Gazebo、仿真任务、仿真完成播报
 - 状态 `NAVIGATING_TO_WORKSHOP`/`COMPLETE` 在本阶段不可达（代码保留供未来阶段使用）
@@ -148,14 +148,14 @@ M  ucar_ws/src/task_orchestrator/README.md      # 任务前差异见下；本阶
 本阶段在保留该段落基础上补充了"`rosnode cleanup` 只清除僵尸登记、不能关闭 live 节点"
 的定位说明（AGENTS.md 任务 E 第 12 条要求）。
 
-## 10. 任务 E 收尾（本会话内即将完成）
+## 10. 任务 E 收尾（已完成）
 
 - README 已更新：终点 DELIVERY_HANDED_OFF、状态序列、五字段 delivery 消息、5.1 全局参数
   表（QR/LLM/超时 + 下游映射 + 覆盖优先级 + 30°/45° 与 1.0 s 驻留调参指引 + 重启要求 +
   rosnode cleanup 定位 + 未来避障节点订阅/去重/回传说明）。
 - `test_package_config.py` 原"未转发 request_timeout"断言已反转为"已转发
   llm_request_timeout/timeout_qr_search + README 优先级说明"断言。
-- 随后提交 `docs(orchestrator): document full launch tuning and delivery handoff`。
+- 已提交 `2fab15b docs(orchestrator): document full launch tuning and delivery handoff`。
 
 ## 11. 已知外部依赖与风险
 
