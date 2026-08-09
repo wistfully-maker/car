@@ -11,6 +11,7 @@ class TaskOrchestrator:
     WAITING_QR = "WAITING_QR"
     WAITING_LLM = "WAITING_LLM"
     WAITING_SPEECH = "WAITING_SPEECH"
+    DELIVERY_HANDED_OFF = "DELIVERY_HANDED_OFF"
     NAVIGATING_TO_WORKSHOP = "NAVIGATING_TO_WORKSHOP"
     SIM_DELIVERY = "SIM_DELIVERY"
     WAITING_SIM = "WAITING_SIM"
@@ -30,7 +31,9 @@ class TaskOrchestrator:
             WAITING_SIM,
         )
     )
-    _TERMINAL_STATES = frozenset((IDLE, COMPLETE, ERROR, CANCELLED))
+    _TERMINAL_STATES = frozenset(
+        (IDLE, DELIVERY_HANDED_OFF, COMPLETE, ERROR, CANCELLED)
+    )
     _TIMEOUT_KEYS = {
         CHECKING_DEPENDENCIES: "dependency_ready",
         NAVIGATING_TO_PICKUP: "pickup_navigation",
@@ -271,7 +274,10 @@ class TaskOrchestrator:
 
         goal_id = self._id_factory()
         self.task["delivery_goal_id"] = goal_id
-        self._transition(self.NAVIGATING_TO_WORKSHOP)
+        # 本阶段终点：TTS 完成后发布避障导航交接消息，但不授予任何运动权限；
+        # 状态停留在 DELIVERY_HANDED_OFF（motion mode 保持 IDLE），等待未来
+        # 避障导航模块接入后通过 /task/delivery_arrived 继续。
+        self._transition(self.DELIVERY_HANDED_OFF)
         self._publish_status("running")
         self._emit(
             "publish_delivery_goal",
@@ -285,7 +291,7 @@ class TaskOrchestrator:
         )
 
     def on_delivery_arrived(self, message):
-        if self.state != self.NAVIGATING_TO_WORKSHOP:
+        if self.state != self.DELIVERY_HANDED_OFF:
             return
         if not self._matches(message, "goal_id", "delivery_goal_id"):
             return
