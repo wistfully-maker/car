@@ -239,15 +239,24 @@ class CompetitionBringupTests(unittest.TestCase):
         group = next(
             g for g in self.root.findall("group")
             if g.attrib.get("if") == "$(arg start_navigation_handoff)"
-            and g.find("include") is not None
+            and len(g.findall("group")) == 2
+            and any("unless" in child.attrib for child in g.findall("group"))
         )
-        include = group.find("include")
-        self.assertEqual("$(arg orchestrator_launch)", include.attrib["file"])
-        values = {a.attrib["name"]: a.attrib["value"]
-                  for a in include.findall("arg")}
-        self.assertEqual("true", values["enable_navigation_handoff_supervisor"])
-        self.assertEqual("$(arg legacy_nav_launch)", values["legacy_nav_launch"])
-        self.assertIn("stop_integration_launch", values)
+        enabled_group = next(g for g in group.findall("group") if "if" in g.attrib)
+        disabled_group = next(g for g in group.findall("group") if "unless" in g.attrib)
+        self.assertEqual("$(arg start_stop_stack)", enabled_group.attrib["if"])
+        self.assertEqual("$(arg start_stop_stack)", disabled_group.attrib["unless"])
+        for child, expected_stop_launch in (
+            (enabled_group, "$(arg stop_integration_launch)"),
+            (disabled_group, ""),
+        ):
+            include = child.find("include")
+            self.assertEqual("$(arg orchestrator_launch)", include.attrib["file"])
+            values = {a.attrib["name"]: a.attrib["value"]
+                      for a in include.findall("arg")}
+            self.assertEqual("true", values["enable_navigation_handoff_supervisor"])
+            self.assertEqual("$(arg legacy_nav_launch)", values["legacy_nav_launch"])
+            self.assertEqual(expected_stop_launch, values["stop_integration_launch"])
         defaults = {a.attrib["name"]: a.attrib.get("default")
                     for a in self.root.findall("arg")}
         self.assertIn("mission_integration.launch",

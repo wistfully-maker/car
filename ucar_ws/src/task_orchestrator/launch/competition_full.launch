@@ -211,6 +211,7 @@
 
   <group if="$(arg start_navigation_handoff)">
     <!-- 导航栈交接 supervisor：两个导航 launch 的唯一生命周期 owner。 -->
+    <group if="$(arg start_stop_stack)">
     <include file="$(arg orchestrator_launch)">
       <arg name="enable_task_orchestrator" value="false"/>
       <arg name="enable_voice_adapter" value="false"/>
@@ -220,8 +221,21 @@
       <arg name="enable_velocity_arbiter" value="false"/>
       <arg name="enable_navigation_handoff_supervisor" value="true"/>
       <arg name="legacy_nav_launch" value="$(arg legacy_nav_launch)"/>
-      <arg name="stop_integration_launch"
-           value="$(eval arg('stop_integration_launch') if arg('start_stop_stack') == 'true' else '')"/>
+      <arg name="stop_integration_launch" value="$(arg stop_integration_launch)"/>
     </include>
+    </group>
+    <group unless="$(arg start_stop_stack)">
+      <include file="$(arg orchestrator_launch)">
+        <arg name="enable_task_orchestrator" value="false"/>
+        <arg name="enable_voice_adapter" value="false"/>
+        <arg name="enable_tts_bridge" value="false"/>
+        <arg name="enable_fast_nav_adapter" value="false"/>
+        <arg name="enable_readiness_gate" value="false"/>
+        <arg name="enable_velocity_arbiter" value="false"/>
+        <arg name="enable_navigation_handoff_supervisor" value="true"/>
+        <arg name="legacy_nav_launch" value="$(arg legacy_nav_launch)"/>
+        <arg name="stop_integration_launch" value=""/>
+      </include>
+    </group>
   </group>
 </launch>
