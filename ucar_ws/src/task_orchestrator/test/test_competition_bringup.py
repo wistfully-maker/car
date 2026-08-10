@@ -239,6 +239,7 @@ class CompetitionBringupTests(unittest.TestCase):
         group = next(
             g for g in self.root.findall("group")
             if g.attrib.get("if") == "$(arg start_navigation_handoff)"
+            and g.find("include") is not None
         )
         include = group.find("include")
         self.assertEqual("$(arg orchestrator_launch)", include.attrib["file"])
@@ -290,11 +291,14 @@ class CompetitionBringupTests(unittest.TestCase):
     def test_base_and_lidar_are_root_owned_in_handoff_mode(self):
         # 交接模式下公共硬件由根 launch 一次性启动；导航进程组不含硬件，
         # fast-nav 只在非交接模式直接启动。
-        hardware = [
+        handoff = next(
             group for group in self.root.findall("group")
-            if group.attrib.get("if", "").startswith("$(eval")
-            and ("start_base" in group.attrib.get("if", "")
-                 or "start_lidar" in group.attrib.get("if", ""))
+            if group.attrib.get("if") == "$(arg start_navigation_handoff)"
+        )
+        hardware = [
+            group for group in handoff.findall("group")
+            if group.attrib.get("if") in
+            ("$(arg start_base)", "$(arg start_lidar)")
         ]
         self.assertEqual(2, len(hardware))
         files = {

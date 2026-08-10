@@ -96,11 +96,13 @@
 
   <!-- 交接模式下公共硬件由根 launch 一次性启动；导航进程组不含硬件，
        交接 supervisor 停止旧栈时不会误停底盘/雷达。 -->
-  <group if="$(eval arg('start_navigation_handoff') == 'true' and arg('start_base') == 'true')">
-    <include file="$(find ucar_controller)/launch/base_driver.launch"/>
-  </group>
-  <group if="$(eval arg('start_navigation_handoff') == 'true' and arg('start_lidar') == 'true')">
-    <include file="$(find ydlidar)/launch/ydlidar.launch"/>
+  <group if="$(arg start_navigation_handoff)">
+    <group if="$(arg start_base)">
+      <include file="$(find ucar_controller)/launch/base_driver.launch"/>
+    </group>
+    <group if="$(arg start_lidar)">
+      <include file="$(find ydlidar)/launch/ydlidar.launch"/>
+    </group>
   </group>
 
   <group if="$(eval arg('start_navigation_handoff') == 'false')">
