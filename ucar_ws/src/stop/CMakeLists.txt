@@ -17,13 +17,13 @@ add_message_files(
   BoundingBoxes.msg
 )
 
+catkin_python_setup()
+
 generate_messages(
   DEPENDENCIES
   std_msgs
   sensor_msgs
 )
-
-catkin_python_setup()
 
 catkin_package(
   CATKIN_DEPENDS

@@ -17,6 +17,13 @@ class MissionIntegrationLaunchTests(unittest.TestCase):
         cmake = (STOP_ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
         self.assertIn("catkin_install_python(PROGRAMS", cmake)
 
+    def test_python_setup_precedes_message_generation(self):
+        cmake = (STOP_ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
+        self.assertLess(
+            cmake.index("catkin_python_setup()"),
+            cmake.index("generate_messages("),
+        )
+
     def test_mission_integration_parses_as_valid_xml(self):
         ET.parse(MISSION_INTEGRATION)
 
