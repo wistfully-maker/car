@@ -9,7 +9,12 @@ import rospy
 from std_msgs.msg import String
 
 from task_orchestrator.orchestrator import TaskOrchestrator
-from task_orchestrator.motion_mode import IDLE, NAVIGATION, QR_SEARCH
+from task_orchestrator.motion_mode import (
+    IDLE,
+    NAVIGATION,
+    QR_SEARCH,
+    STOP_NAVIGATION,
+)
 from task_orchestrator.protocol import (
     ProtocolError,
     parse_arrival,
@@ -89,6 +94,7 @@ def _motion_mode_message(payload):
         IDLE,
         NAVIGATION,
         QR_SEARCH,
+        STOP_NAVIGATION,
     ):
         rospy.logerr("invalid motion mode payload; publishing safe IDLE")
         payload = IDLE

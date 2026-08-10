@@ -7,7 +7,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from task_orchestrator.motion_mode import IDLE, NAVIGATION, QR_SEARCH
+from task_orchestrator.motion_mode import (
+    IDLE,
+    NAVIGATION,
+    QR_SEARCH,
+    STOP_NAVIGATION,
+)
 from task_orchestrator.velocity_arbiter import VelocityArbiter, validate_positive_finite
 
 
@@ -73,6 +78,36 @@ class VelocityArbiterTests(unittest.TestCase):
         self.assertEqual((0.0,) * 6, values(self.arbiter.set_mode(QR_SEARCH, 2.1)))
         self.assertEqual((0.0,) * 6, values(self.arbiter.set_mode("bad", 2.2)))
         self.assertEqual(IDLE, self.arbiter.mode)
+
+    def test_stop_navigation_forwards_only_stop_source(self):
+        self.assertEqual((0.0,) * 6, values(self.arbiter.set_mode(STOP_NAVIGATION, 1.0)))
+        self.assertIsNone(self.arbiter.accept("navigation", twist(9.0), 1.1))
+        self.assertIsNone(self.arbiter.accept("qr", twist(9.0), 1.1))
+        output = self.arbiter.accept("stop", twist(0.5, 0.2), 1.2)
+        self.assertEqual((0.5, 0.0, 0.0, 0.0, 0.0, 0.2), values(output))
+
+    def test_stop_source_is_ignored_outside_stop_navigation(self):
+        self.arbiter.set_mode(NAVIGATION, 1.0)
+        self.assertIsNone(self.arbiter.accept("stop", twist(9.0), 1.1))
+        self.arbiter.set_mode(IDLE, 2.0)
+        self.assertIsNone(self.arbiter.accept("stop", twist(9.0), 2.1))
+
+    def test_transitions_into_and_out_of_stop_navigation_publish_zero(self):
+        self.arbiter.set_mode(NAVIGATION, 1.0)
+        self.arbiter.accept("navigation", twist(1.0), 1.1)
+        into = self.arbiter.set_mode(STOP_NAVIGATION, 1.2)
+        self.assertEqual((0.0,) * 6, values(into))
+        self.arbiter.accept("stop", twist(0.5), 1.3)
+        out = self.arbiter.set_mode(NAVIGATION, 1.4)
+        self.assertEqual((0.0,) * 6, values(out))
+
+    def test_stop_source_timeout_and_rollback_fail_closed(self):
+        self.arbiter.set_mode(STOP_NAVIGATION, 10.0)
+        self.arbiter.accept("stop", twist(0.5), 10.1)
+        self.assertIsNone(self.arbiter.tick(10.39))
+        self.assertEqual((0.0,) * 6, values(self.arbiter.tick(10.41)))
+        self.arbiter.accept("stop", twist(0.5), 10.5)
+        self.assertEqual((0.0,) * 6, values(self.arbiter.accept("stop", twist(0.6), 9.9)))
 
     def test_invalid_values_and_clock_rollback_zero_and_reset(self):
         self.arbiter.set_mode(NAVIGATION, 10.0)

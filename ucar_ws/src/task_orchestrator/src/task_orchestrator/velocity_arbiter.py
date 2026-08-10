@@ -1,8 +1,13 @@
-"""ROS-independent two-source velocity arbiter."""
+"""ROS-independent three-source velocity arbiter."""
 
 import math
 
-from task_orchestrator.motion_mode import IDLE, NAVIGATION, QR_SEARCH
+from task_orchestrator.motion_mode import (
+    IDLE,
+    NAVIGATION,
+    QR_SEARCH,
+    STOP_NAVIGATION,
+)
 
 
 class VectorValue:
@@ -44,8 +49,12 @@ def _normalized(message, max_linear_abs, max_angular_abs):
 
 
 class VelocityArbiter:
-    SOURCES = frozenset(("navigation", "qr"))
-    ACTIVE_SOURCE = {NAVIGATION: "navigation", QR_SEARCH: "qr"}
+    SOURCES = frozenset(("navigation", "qr", "stop"))
+    ACTIVE_SOURCE = {
+        NAVIGATION: "navigation",
+        QR_SEARCH: "qr",
+        STOP_NAVIGATION: "stop",
+    }
 
     def __init__(self, source_timeout=0.3, max_linear_abs=1.0,
                  max_angular_abs=2.0):
@@ -72,7 +81,7 @@ class VelocityArbiter:
 
     def set_mode(self, mode, timestamp):
         _, rolled_back = self._observe_time(timestamp)
-        valid = mode in (IDLE, NAVIGATION, QR_SEARCH)
+        valid = mode in (IDLE, NAVIGATION, QR_SEARCH, STOP_NAVIGATION)
         safe_mode = mode if valid else IDLE
         changed = safe_mode != self.mode
         self.mode = safe_mode

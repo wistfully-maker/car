@@ -298,6 +298,8 @@ class NavigationHandoffDriver:
         self._active_probe = "readiness"
 
     def _effect_release_task(self, payload):
+        # 先授权 stop 来源运动，再放行任务；模式切换本身先发零速度。
+        self._actions.publish_motion_mode("STOP_NAVIGATION")
         self._actions.release_task(payload, self._goal)
 
     def _effect_publish_diagnostic(self, payload):
@@ -318,6 +320,7 @@ class _RosHandoffActions:
         release_pub,
         zero_pubs,
         initial_pose_pub,
+        mode_pub,
     ):
         self._config = config
         self._supervisor = supervisor_config
@@ -325,6 +328,7 @@ class _RosHandoffActions:
         self._release_pub = release_pub
         self._zero_pubs = zero_pubs
         self._initial_pose_pub = initial_pose_pub
+        self._mode_pub = mode_pub
         self._driver = None
         self._cancel_client = actionlib.SimpleActionClient(
             "/move_base", MoveBaseAction
@@ -461,6 +465,12 @@ class _RosHandoffActions:
             json.dumps(payload, ensure_ascii=False),
         )
 
+    def publish_motion_mode(self, mode):
+        try:
+            self._mode_pub.publish(String(data=mode))
+        except Exception as exc:
+            rospy.logerr("motion mode publish failed: %s", exc)
+
     def shutdown(self):
         for group in (self._legacy_group, self._stop_group):
             if group is not None:
@@ -510,6 +520,9 @@ class NavigationHandoffSupervisorNode:
         self._initial_pose_pub = rospy.Publisher(
             "/initialpose", PoseWithCovarianceStamped, queue_size=1
         )
+        self._mode_pub = rospy.Publisher(
+            "/task/motion_mode", String, queue_size=1, latch=True
+        )
         if actions is None:
             actions = _RosHandoffActions(
                 self._config,
@@ -518,6 +531,7 @@ class NavigationHandoffSupervisorNode:
                 self._release_pub,
                 self._zero_pubs,
                 self._initial_pose_pub,
+                self._mode_pub,
             )
         self._driver = NavigationHandoffDriver(self._machine, actions)
         self._actions = actions

@@ -209,6 +209,32 @@ class VelocityArbiterNodeTests(unittest.TestCase):
         state.subscribers["/task/motion_mode"](capture.messages[-1])
         self.assertEqual("IDLE", node._arbiter.mode)
 
+    def test_stop_navigation_forwards_only_stop_source(self):
+        node, state = install_node()
+        state.subscribers["/task/motion_mode"](String("STOP_NAVIGATION"))
+        self.assertEqual(0.0, state.messages[-1].linear.x)
+        state.subscribers["/cmd_vel/navigation"](Twist(8.0))
+        self.assertNotEqual(8.0, state.messages[-1].linear.x)
+        state.subscribers["/cmd_vel/qr"](Twist(8.0))
+        self.assertNotEqual(8.0, state.messages[-1].linear.x)
+        state.subscribers["/cmd_vel/stop"](Twist(0.5))
+        self.assertEqual(0.5, state.messages[-1].linear.x)
+        state.subscribers["/task/motion_mode"](String("NAVIGATION"))
+        self.assertEqual(0.0, state.messages[-1].linear.x)
+        state.subscribers["/cmd_vel/stop"](Twist(0.5))
+        self.assertNotEqual(0.5, state.messages[-1].linear.x)
+
+    def test_orchestrator_dispatches_stop_navigation_mode(self):
+        _node, _state = install_node()
+        adapter = load_orchestrator_adapter()
+        capture = types.SimpleNamespace(messages=[])
+        capture.publish = lambda message: capture.messages.append(message)
+        adapter._dispatch(
+            [("publish_motion_mode", "STOP_NAVIGATION")],
+            {"publish_motion_mode": capture},
+        )
+        self.assertEqual("STOP_NAVIGATION", capture.messages[-1].data)
+
     def test_start_sources_switch_watchdog_invalid_and_shutdown(self):
         node, state = install_node()
         self.assertEqual(0.0, state.messages[-1].linear.x)

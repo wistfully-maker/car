@@ -4,7 +4,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from task_orchestrator.motion_mode import IDLE, NAVIGATION, QR_SEARCH, motion_mode_for_state
+from task_orchestrator.motion_mode import (
+    IDLE,
+    NAVIGATION,
+    QR_SEARCH,
+    STOP_NAVIGATION,
+    motion_mode_for_state,
+)
 from task_orchestrator.orchestrator import TaskOrchestrator
 
 
@@ -18,7 +24,7 @@ class MotionModeTests(unittest.TestCase):
             TaskOrchestrator.WAITING_LLM: IDLE,
             TaskOrchestrator.WAITING_SPEECH: IDLE,
             TaskOrchestrator.NAVIGATING_TO_WORKSHOP: NAVIGATION,
-            TaskOrchestrator.NAVIGATING_TO_SIM_WORKSHOP: NAVIGATION,
+            TaskOrchestrator.NAVIGATING_TO_SIM_WORKSHOP: STOP_NAVIGATION,
             TaskOrchestrator.COMPLETE: IDLE,
             TaskOrchestrator.ERROR: IDLE,
             TaskOrchestrator.CANCELLED: IDLE,
@@ -26,6 +32,12 @@ class MotionModeTests(unittest.TestCase):
         self.assertEqual(expected, {state: motion_mode_for_state(state) for state in expected})
         self.assertEqual(IDLE, motion_mode_for_state("UNKNOWN"))
         self.assertEqual(IDLE, motion_mode_for_state(None))
+
+    def test_stop_navigation_is_a_declared_mode(self):
+        self.assertEqual("STOP_NAVIGATION", STOP_NAVIGATION)
+        self.assertIn(STOP_NAVIGATION, (
+            IDLE, NAVIGATION, QR_SEARCH, STOP_NAVIGATION,
+        ))
 
 
 if __name__ == "__main__":

@@ -117,6 +117,7 @@ class FakeActions:
         self.readiness_ok = False
         self.legacy_handle = FakeProcess("legacy")
         self.stop_handle = FakeProcess("stop")
+        self.modes_published = []
         self.other_handles = [
             FakeProcess(name)
             for name in ("base", "lidar", "camera", "speech", "qr", "llm")
@@ -156,6 +157,9 @@ class FakeActions:
     def release_task(self, payload, _goal):
         self.effects.append("release_task")
         self.released.append(payload)
+
+    def publish_motion_mode(self, mode):
+        self.modes_published.append(mode)
 
     def publish_diagnostic(self, payload):
         self.diagnostics.append(payload)
@@ -247,6 +251,12 @@ class HandoffDriverHappyPathTests(unittest.TestCase):
         release = fake.released[0]
         self.assertEqual("task-1", release["task_id"])
         self.assertEqual("delivery-1", release["goal_id"])
+
+    def test_release_publishes_stop_navigation_motion_mode(self):
+        module = load_module()
+        fake = FakeActions()
+        drive_happy_path(module, fake)
+        self.assertEqual(["STOP_NAVIGATION"], fake.modes_published)
 
     def test_only_owned_legacy_handle_is_terminated(self):
         module = load_module()
