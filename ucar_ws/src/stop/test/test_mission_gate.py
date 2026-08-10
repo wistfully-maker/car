@@ -137,6 +137,64 @@ class MissionGateValidationTests(unittest.TestCase):
         self.assertNotIn("simulation", accepted.mission)
 
 
+class MissionGateSimulationUpdateTests(unittest.TestCase):
+    def test_update_simulation_fills_active_mission(self):
+        gate = MissionGate()
+        mission = full_mission()
+        del mission["simulation"]
+        gate.accept(mission)
+        updated = gate.update_simulation(
+            "task-1", "simulation-1",
+            {"target_workshop": "日用品加工车间", "selected_item": "毛巾"},
+        )
+        self.assertEqual("simulation-1", updated["simulation_goal_id"])
+        self.assertEqual("毛巾", updated["simulation"]["selected_item"])
+
+    def test_update_simulation_for_wrong_task_is_rejected(self):
+        gate = MissionGate()
+        mission = full_mission()
+        del mission["simulation"]
+        gate.accept(mission)
+        with self.assertRaises(ValueError):
+            gate.update_simulation(
+                "task-2", "simulation-1",
+                {"target_workshop": "日用品加工车间", "selected_item": "毛巾"},
+            )
+
+    def test_update_simulation_without_active_mission_is_rejected(self):
+        gate = MissionGate()
+        with self.assertRaises(ValueError):
+            gate.update_simulation(
+                "task-1", "simulation-1",
+                {"target_workshop": "日用品加工车间", "selected_item": "毛巾"},
+            )
+
+    def test_update_simulation_rejects_empty_targets(self):
+        gate = MissionGate()
+        mission = full_mission()
+        del mission["simulation"]
+        gate.accept(mission)
+        with self.assertRaises(ValueError):
+            gate.update_simulation(
+                "task-1", "simulation-1",
+                {"target_workshop": " ", "selected_item": "毛巾"},
+            )
+
+    def test_full_mission_after_update_completes_terminal(self):
+        gate = MissionGate()
+        mission = full_mission()
+        del mission["simulation"]
+        gate.accept(mission)
+        gate.update_simulation(
+            "task-1", "simulation-1",
+            {"target_workshop": "日用品加工车间", "selected_item": "毛巾"},
+        )
+        gate.record_result("task-1", "done", "")
+        cached = gate.accept(full_mission())
+        self.assertFalse(cached.start)
+        self.assertEqual("done", cached.terminal["status"])
+
+
 class MissionGateResultTests(unittest.TestCase):
     def test_record_result_clears_active_mission(self):
         gate = MissionGate()

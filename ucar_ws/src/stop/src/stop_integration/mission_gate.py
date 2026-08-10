@@ -35,6 +35,14 @@ class MissionGate:
     def active_task_id(self):
         return self._active["task_id"] if self._active else None
 
+    @property
+    def active_mission(self):
+        return dict(self._active) if self._active else None
+
+    @property
+    def terminal(self):
+        return dict(self._terminal) if self._terminal else None
+
     def accept(self, mission):
         try:
             normalized = self._validate(mission)
@@ -64,6 +72,23 @@ class MissionGate:
         }
         self._active = None
 
+    def update_simulation(self, task_id, simulation_goal_id, simulation):
+        """活动任务收到仿真目标后合并仿真身份与目标；错误身份/空目标拒绝。"""
+        if self._active is None:
+            raise MissionError("no active mission")
+        if self._active["task_id"] != task_id:
+            raise MissionError(
+                "active mission %s; simulation goal for %s rejected"
+                % (self._active["task_id"], task_id)
+            )
+        self._active["simulation_goal_id"] = _require_text(
+            simulation_goal_id, "simulation_goal_id"
+        )
+        self._active["simulation"] = self._validate_target(
+            simulation, "simulation"
+        )
+        return dict(self._active)
+
     def _validate(self, mission):
         if not isinstance(mission, dict):
             raise MissionError("mission must be an object")
@@ -79,14 +104,14 @@ class MissionGate:
         normalized["physical_goal_id"] = _require_text(
             mission.get("physical_goal_id"), "physical_goal_id"
         )
-        normalized["simulation_goal_id"] = _require_text(
-            mission.get("simulation_goal_id"), "simulation_goal_id"
-        )
         normalized["physical"] = self._validate_target(
             mission.get("physical"), "physical"
         )
         simulation = mission.get("simulation")
         if simulation is not None:
+            normalized["simulation_goal_id"] = _require_text(
+                mission.get("simulation_goal_id"), "simulation_goal_id"
+            )
             normalized["simulation"] = self._validate_target(
                 simulation, "simulation"
             )

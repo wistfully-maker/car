@@ -234,6 +234,11 @@ class MissionSeamContractTests(unittest.TestCase):
         self.assertIn("/stop/motion_mode", MISSION_SOURCE)
         self.assertIn("_set_mode", MISSION_SOURCE)
 
+    def test_phase2_waits_for_global_ack(self):
+        self.assertIn("/stop/mission_ack", MISSION_SOURCE)
+        self.assertIn("phase2_pending", MISSION_SOURCE)
+        self.assertIn("update_simulation", MISSION_SOURCE)
+
 
 if __name__ == "__main__":
     unittest.main()

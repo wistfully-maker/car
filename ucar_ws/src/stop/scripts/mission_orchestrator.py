@@ -128,6 +128,8 @@ cancel_pub = None         # /move_base/cancel 取消遗留目标
 motion_mode_pub = None    # /stop/motion_mode 给 stop_velocity_mux 的模式
 current_motion_mode = None
 gate = None               # MissionGate 任务身份/去重/终态缓存
+phase2_pending = False    # Phase 1 停车后等待全局仿真目标放行
+phase2_ack_timeout = 60.0
 
 # ==============================================================================
 # TTS —— 调用 speech_command/scripts/tts_http.py
@@ -392,7 +394,7 @@ def switch_to_phase2():
 def mission_done():
     """当前阶段完成（防重入）"""
     global search_item_stage, is_searching_item, current_phase
-    global mission_done_called
+    global mission_done_called, phase2_pending
 
     if mission_done_called:
         return
@@ -404,12 +406,16 @@ def mission_done():
     cmd_vel_pub.publish(Twist())
 
     if current_phase == "real":
-        # Phase 1 完成 → 发内部事件（TTS 交给全局编排器）→ 切 Phase 2
+        # Phase 1 完成 → 发内部事件（TTS 交给全局编排器），
+        # 停在原地等待全局编排器的仿真目标放行，不自动进入 Phase 2。
         text = "已将{}放入{}".format(real_cargo, real_warehouse)
         rospy.loginfo("==== Phase 1 DONE: %s ====", text)
         result_pub.publish(String(data="phase1_done"))
         event_pub.publish(String(data="phase1_done"))
-        switch_to_phase2()
+        phase2_pending = True
+        rospy.Timer(rospy.Duration(phase2_ack_timeout),
+                    _phase2_ack_timeout, oneshot=True)
+        rospy.loginfo("[mission] Phase 1 parked, waiting for simulation goal ack")
     else:
         # Phase 2 完成 → 发内部事件 → 任务结束
         text = "仿真任务已完成，已将{}放入{}".format(sim_cargo, sim_warehouse)
@@ -765,10 +771,11 @@ def activate(physical, simulation=None):
 
 def cancel_mission():
     """取消当前任务：停止搜索、取消 move_base 目标、零速、只发一次失败。"""
-    global is_searching_item, mission_done_called
+    global is_searching_item, mission_done_called, phase2_pending
     if mission_done_called:
         return
     is_searching_item = False
+    phase2_pending = False
     _set_mode("IDLE")
     cmd_vel_pub.publish(Twist())
     try:
@@ -822,6 +829,68 @@ def _on_cancel(message):
         rospy.logwarn("[mission] Ignored cancel for unknown task %s", task_id)
         return
     cancel_mission()
+
+
+def _phase2_ack_timeout(event=None):
+    """Phase 2 放行确认超时：停在原地并报告失败，不自动运动。"""
+    global phase2_pending
+    if not phase2_pending:
+        return
+    phase2_pending = False
+    _set_mode("IDLE")
+    cmd_vel_pub.publish(Twist())
+    result_pub.publish(String(data="failed:phase2_timeout"))
+    event_pub.publish(String(data="failed:phase2_timeout"))
+    if gate is not None and gate.active_task_id is not None:
+        gate.record_result(gate.active_task_id, "failed:phase2_timeout",
+                           "simulation goal ack timeout")
+    rospy.logerr("[mission] Phase 2 ack timeout, mission failed")
+
+
+def _on_phase2_ack(message):
+    """全局编排器确认仿真目标后放行 Phase 2（身份必须匹配活动任务）。"""
+    global phase2_pending, sim_keyword, sim_cargo, sim_warehouse
+    try:
+        payload = json.loads(message.data)
+        if not isinstance(payload, dict):
+            raise ValueError("ack must be an object")
+        task_id = payload.get("task_id")
+        goal_id = payload.get("goal_id")
+        action = payload.get("action")
+        simulation = payload.get("simulation")
+        workshop = simulation.get("target_workshop")
+        item = simulation.get("selected_item")
+        if not isinstance(task_id, str) or not task_id.strip():
+            raise ValueError("task_id")
+        if not isinstance(goal_id, str) or not goal_id.strip():
+            raise ValueError("goal_id")
+        if action != "start_phase2":
+            raise ValueError("action")
+        if not isinstance(workshop, str) or not workshop.strip():
+            raise ValueError("target_workshop")
+        if not isinstance(item, str) or not item.strip():
+            raise ValueError("selected_item")
+    except (TypeError, ValueError, AttributeError) as exc:
+        rospy.logwarn("[mission] Ignored invalid phase2 ack: %s", exc)
+        return
+    if gate.active_task_id != task_id:
+        rospy.logwarn("[mission] Ignored phase2 ack for unknown task %s", task_id)
+        return
+    if not phase2_pending:
+        rospy.logwarn("[mission] Ignored phase2 ack without pending phase 1")
+        return
+    phase2_pending = False
+    sim_keyword = _keyword_for_workshop(workshop)
+    sim_cargo = item
+    sim_warehouse = workshop
+    try:
+        gate.update_simulation(task_id, goal_id,
+                               {"target_workshop": workshop,
+                                "selected_item": item})
+    except Exception as exc:
+        rospy.logwarn("[mission] Phase2 ack simulation update failed: %s", exc)
+    rospy.loginfo("[mission] Phase 2 released by global orchestrator")
+    switch_to_phase2()
 
 
 # ==============================================================================
@@ -912,8 +981,10 @@ if __name__ == "__main__":
 
     # ---- 任务注入（不自动运动；等结构化任务到达才激活）----
     gate = MissionGate()
+    phase2_ack_timeout = rospy.get_param("~phase2_ack_timeout", 60.0)
     rospy.Subscriber('/task/stop_mission_goal', String, _on_mission_goal, queue_size=1)
     rospy.Subscriber('/task/cancel', String, _on_cancel, queue_size=1)
+    rospy.Subscriber('/stop/mission_ack', String, _on_phase2_ack, queue_size=1)
 
     # ---- 初始 IDLE（stop mux 在收到模式前不允许任何运动）----
     _set_mode("IDLE")
