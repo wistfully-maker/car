@@ -21,6 +21,7 @@ from task_orchestrator.protocol import (
     parse_cancel,
     parse_dependencies_ready,
     parse_llm_result,
+    parse_navigation_handoff_status,
     parse_qr_result,
     parse_speech_done,
     parse_task_request,
@@ -262,6 +263,23 @@ def _subscribe(orchestrator, outputs, publishers, callback_lock):
         ),
     )
     rospy.Subscriber(
+        "/task/navigation_handoff_status",
+        String,
+        _callback(
+            orchestrator,
+            outputs,
+            publishers,
+            lambda raw: parse_navigation_handoff_status(
+                raw,
+                orchestrator.task["task_id"],
+                orchestrator.task["delivery_goal_id"],
+            ),
+            orchestrator.on_navigation_handoff_status,
+            callback_lock,
+            TaskOrchestrator.DELIVERY_HANDED_OFF,
+        ),
+    )
+    rospy.Subscriber(
         "/task/delivery_arrived",
         String,
         _callback(
@@ -275,7 +293,7 @@ def _subscribe(orchestrator, outputs, publishers, callback_lock):
             ),
             orchestrator.on_delivery_arrived,
             callback_lock,
-            TaskOrchestrator.DELIVERY_HANDED_OFF,
+            TaskOrchestrator.NAVIGATING_TO_WORKSHOP,
         ),
     )
     rospy.Subscriber(
@@ -314,6 +332,8 @@ def _subscribe(orchestrator, outputs, publishers, callback_lock):
                 TaskOrchestrator.WAITING_QR,
                 TaskOrchestrator.WAITING_LLM,
                 TaskOrchestrator.WAITING_SPEECH,
+                TaskOrchestrator.DELIVERY_HANDED_OFF,
+                TaskOrchestrator.NAVIGATING_TO_WORKSHOP,
                 TaskOrchestrator.NAVIGATING_TO_SIM_WORKSHOP,
             ),
         ),

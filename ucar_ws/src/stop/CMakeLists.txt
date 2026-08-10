@@ -35,7 +35,7 @@ catkin_package(
 )
 
 # ---- 安装脚本 ----
-install(PROGRAMS
+catkin_install_python(PROGRAMS
   scripts/scan_and_park.py
   scripts/precision_park.py
   scripts/ocr_native_node.py

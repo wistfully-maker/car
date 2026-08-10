@@ -14,6 +14,7 @@ from task_orchestrator.protocol import (
     parse_cancel,
     parse_dependencies_ready,
     parse_llm_result,
+    parse_navigation_handoff_status,
     parse_qr_result,
     parse_speak_request,
     parse_speech_done,
@@ -26,6 +27,29 @@ def encode(value):
 
 
 class ProtocolTests(unittest.TestCase):
+    def test_navigation_handoff_status_is_correlated_and_bounded(self):
+        ready = {
+            "protocol_version": 1, "task_id": "task-001",
+            "goal_id": "delivery-001", "status": "ready", "message": "",
+        }
+        parsed = parse_navigation_handoff_status(
+            encode(ready), "task-001", "delivery-001"
+        )
+        self.assertEqual("ready", parsed["status"])
+        failed = dict(ready, status="failed", message="move_base unavailable")
+        self.assertEqual("move_base unavailable", parse_navigation_handoff_status(
+            encode(failed), "task-001", "delivery-001"
+        )["message"])
+        for invalid in (
+            dict(ready, status="switching"),
+            dict(ready, status="failed", message=""),
+            dict(ready, goal_id="stale"),
+        ):
+            with self.assertRaises(ProtocolError):
+                parse_navigation_handoff_status(
+                    encode(invalid), "task-001", "delivery-001"
+                )
+
     def test_speak_request_requires_identity_and_text(self):
         message = {
             "protocol_version": 1,

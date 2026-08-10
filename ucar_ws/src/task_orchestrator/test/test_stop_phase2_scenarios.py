@@ -340,6 +340,11 @@ class Scenario:
         self.handoff_odom_stop()
         self.driver.poll()  # legacy 缺席验证
         self.driver.poll()  # stop 就绪验证
+        if self.machine.state == "READY":
+            self.orch.on_navigation_handoff_status(
+                {"protocol_version": 1, "task_id": self.task_id,
+                 "goal_id": "delivery-1", "status": "ready", "message": ""}
+            )
         self.sync_modes()
 
     def run_to_complete(self):
@@ -410,6 +415,10 @@ class HappyPathScenarioTests(unittest.TestCase):
         s.handoff_odom_stop()
         s.driver.poll()
         s.driver.poll()
+        s.orch.on_navigation_handoff_status(
+            {"protocol_version": 1, "task_id": s.task_id,
+             "goal_id": "delivery-1", "status": "ready", "message": ""}
+        )
         s.adapter.mission.phase1_arrived()
         sim_goal = s.actions_("publish_simulation_navigation_goal")[-1]
         s.adapter.on_simulation_goal(sim_goal)
@@ -427,6 +436,10 @@ class HappyPathScenarioTests(unittest.TestCase):
         s.driver.poll()  # readiness 重试失败
         s.actions.readiness_ok = True
         s.driver.poll()
+        s.orch.on_navigation_handoff_status(
+            {"protocol_version": 1, "task_id": s.task_id,
+             "goal_id": "delivery-1", "status": "ready", "message": ""}
+        )
         s.adapter.mission.phase1_arrived()
         sim_goal = s.actions_("publish_simulation_navigation_goal")[-1]
         s.adapter.on_simulation_goal(sim_goal)

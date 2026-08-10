@@ -448,6 +448,7 @@ class _RosHandoffActions:
             "selected_item": goal["selected_item"],
         }
         try:
+            self._publish_handoff_status(payload, "ready", "")
             self._release_pub.publish(
                 String(data=json.dumps(message, ensure_ascii=False))
             )
@@ -466,10 +467,28 @@ class _RosHandoffActions:
 
     def handoff_failed(self, payload):
         self.publish_diagnostic(payload)
+        self._publish_handoff_status(
+            payload, "failed", payload.get("reason") or "navigation handoff failed"
+        )
         rospy.logerr(
             "navigation handoff failed: %s",
             json.dumps(payload, ensure_ascii=False),
         )
+
+    def _publish_handoff_status(self, payload, status, message):
+        result = {
+            "protocol_version": 1,
+            "task_id": payload["task_id"],
+            "goal_id": payload["goal_id"],
+            "status": status,
+            "message": message,
+        }
+        try:
+            self._status_pub.publish(
+                String(data=json.dumps(result, ensure_ascii=False))
+            )
+        except Exception as exc:
+            rospy.logerr("handoff status publish failed: %s", exc)
 
     def publish_motion_mode(self, mode):
         try:

@@ -148,6 +148,17 @@ class Harness:
             }
         )
 
+    def handoff_status(self, status="ready", goal_id="delivery-1"):
+        self.orch.on_navigation_handoff_status(
+            {
+                "protocol_version": 1,
+                "task_id": "task-1",
+                "goal_id": goal_id,
+                "status": status,
+                "message": "" if status == "ready" else "handoff failed",
+            }
+        )
+
     def simulation_arrived(self, goal_id="simulation-1", status="arrived"):
         self.orch.on_simulation_arrived(
             {
@@ -177,6 +188,9 @@ class Harness:
             return
         self.speech_done()
         if state == "DELIVERY_HANDED_OFF":
+            return
+        self.handoff_status()
+        if state == "NAVIGATING_TO_WORKSHOP":
             return
         self.delivery_arrived()
 
@@ -253,7 +267,7 @@ class OrchestratorFailureTests(unittest.TestCase):
             ("WAITING_QR", lambda h: h.qr_result("not_found")),
             ("WAITING_LLM", lambda h: h.llm_result("error")),
             ("WAITING_SPEECH", lambda h: h.speech_done("error")),
-            ("DELIVERY_HANDED_OFF", lambda h: h.delivery_arrived("failed")),
+            ("NAVIGATING_TO_WORKSHOP", lambda h: h.delivery_arrived("failed")),
         )
         for state, failure in cases:
             with self.subTest(state=state):
@@ -371,10 +385,10 @@ class OrchestratorSafetyTests(unittest.TestCase):
 
     def test_terminal_state_accepts_a_new_task(self):
         h = Harness()
-        h.reach("DELIVERY_HANDED_OFF")
+        h.reach("NAVIGATING_TO_WORKSHOP")
         output_count = len(h.outputs)
         h.task_request()
-        self.assertEqual("DELIVERY_HANDED_OFF", h.orch.state)
+        self.assertEqual("NAVIGATING_TO_WORKSHOP", h.orch.state)
         self.assertEqual(output_count + 1, len(h.outputs))
 
         h.orch.on_task_request(
@@ -385,8 +399,8 @@ class OrchestratorSafetyTests(unittest.TestCase):
                 "raw_text": "new task",
             }
         )
-        self.assertEqual("CHECKING_DEPENDENCIES", h.orch.state)
-        self.assertEqual("task-2", h.orch.task["task_id"])
+        self.assertEqual("NAVIGATING_TO_WORKSHOP", h.orch.state)
+        self.assertEqual("task-1", h.orch.task["task_id"])
 
 
 class OrchestratorDualWorkshopTests(unittest.TestCase):
@@ -394,7 +408,7 @@ class OrchestratorDualWorkshopTests(unittest.TestCase):
 
     def test_simulation_disabled_goes_directly_to_complete(self):
         h = Harness(simulation_phase_enabled=False)
-        h.reach("DELIVERY_HANDED_OFF")
+        h.reach("NAVIGATING_TO_WORKSHOP")
         h.delivery_arrived()
         self.assertEqual("COMPLETE", h.orch.state)
         self.assertEqual([], h.actions("publish_simulation_navigation_goal"))
@@ -405,7 +419,7 @@ class OrchestratorDualWorkshopTests(unittest.TestCase):
 
     def test_matching_physical_arrival_publishes_simulation_goal(self):
         h = Harness(simulation_phase_enabled=True)
-        h.reach("DELIVERY_HANDED_OFF")
+        h.reach("NAVIGATING_TO_WORKSHOP")
         h.delivery_arrived(status="arrived")
         self.assertEqual("NAVIGATING_TO_SIM_WORKSHOP", h.orch.state)
         goal = h.actions("publish_simulation_navigation_goal")[-1]
@@ -430,14 +444,14 @@ class OrchestratorDualWorkshopTests(unittest.TestCase):
 
     def test_physical_failure_never_publishes_simulation_goal(self):
         h = Harness(simulation_phase_enabled=True)
-        h.reach("DELIVERY_HANDED_OFF")
+        h.reach("NAVIGATING_TO_WORKSHOP")
         h.delivery_arrived(status="failed")
         self.assertEqual("ERROR", h.orch.state)
         self.assertEqual([], h.actions("publish_simulation_navigation_goal"))
 
     def test_simulation_arrival_failure_enters_error_without_complete(self):
         h = Harness(simulation_phase_enabled=True)
-        h.reach("DELIVERY_HANDED_OFF")
+        h.reach("NAVIGATING_TO_WORKSHOP")
         h.delivery_arrived()
         h.simulation_arrived(status="failed")
         self.assertEqual("ERROR", h.orch.state)
@@ -448,7 +462,7 @@ class OrchestratorDualWorkshopTests(unittest.TestCase):
 
     def test_first_arrival_never_publishes_complete(self):
         h = Harness(simulation_phase_enabled=True)
-        h.reach("DELIVERY_HANDED_OFF")
+        h.reach("NAVIGATING_TO_WORKSHOP")
         h.delivery_arrived()
         self.assertEqual("NAVIGATING_TO_SIM_WORKSHOP", h.orch.state)
         self.assertNotEqual(
@@ -458,7 +472,7 @@ class OrchestratorDualWorkshopTests(unittest.TestCase):
 
     def test_stale_simulation_results_never_advance(self):
         h = Harness(simulation_phase_enabled=True)
-        h.reach("DELIVERY_HANDED_OFF")
+        h.reach("NAVIGATING_TO_WORKSHOP")
         h.delivery_arrived()
         for label, message in (
             (
@@ -480,7 +494,7 @@ class OrchestratorDualWorkshopTests(unittest.TestCase):
 
     def test_simulation_navigation_has_own_timeout(self):
         h = Harness(simulation_phase_enabled=True)
-        h.reach("DELIVERY_HANDED_OFF")
+        h.reach("NAVIGATING_TO_WORKSHOP")
         h.delivery_arrived()
         self.assertIsNotNone(h.orch.deadline)
         h.now[0] = h.orch.deadline + 0.01
@@ -493,13 +507,39 @@ class OrchestratorDualWorkshopTests(unittest.TestCase):
 
     def test_cancel_works_in_simulation_navigation(self):
         h = Harness(simulation_phase_enabled=True)
-        h.reach("DELIVERY_HANDED_OFF")
+        h.reach("NAVIGATING_TO_WORKSHOP")
         h.delivery_arrived()
         h.orch.on_cancel(
             {"task_id": "task-1", "reason": "operator_cancel"}
         )
         self.assertEqual("CANCELLED", h.orch.state)
         self.assertEqual("IDLE", h.actions("publish_motion_mode")[-1])
+
+
+class OrchestratorNavigationHandoffTests(unittest.TestCase):
+    def test_ready_handoff_starts_bounded_stop_navigation(self):
+        h = Harness(simulation_phase_enabled=True)
+        h.reach("DELIVERY_HANDED_OFF")
+        h.handoff_status()
+        self.assertEqual("NAVIGATING_TO_WORKSHOP", h.orch.state)
+        self.assertEqual("STOP_NAVIGATION", h.actions("publish_motion_mode")[-1])
+        self.assertIsNotNone(h.orch.deadline)
+
+    def test_failed_handoff_enters_error(self):
+        h = Harness(simulation_phase_enabled=True)
+        h.reach("DELIVERY_HANDED_OFF")
+        h.handoff_status(status="failed")
+        self.assertEqual("ERROR", h.orch.state)
+        self.assertEqual("handoff failed", h.actions("publish_status")[-1]["message"])
+
+    def test_arrival_before_ready_and_stale_handoff_are_ignored(self):
+        h = Harness(simulation_phase_enabled=True)
+        h.reach("DELIVERY_HANDED_OFF")
+        output_count = len(h.outputs)
+        h.delivery_arrived()
+        h.handoff_status(goal_id="stale-delivery")
+        self.assertEqual("DELIVERY_HANDED_OFF", h.orch.state)
+        self.assertEqual(output_count, len(h.outputs))
 
 
 class OrchestratorDeliveryHandoffTests(unittest.TestCase):

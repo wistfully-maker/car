@@ -13,6 +13,10 @@ LEGACY_WRAPPER = ORCH_ROOT / "launch" / "legacy_navigation_include.launch"
 
 
 class MissionIntegrationLaunchTests(unittest.TestCase):
+    def test_python_nodes_use_catkin_wrappers(self):
+        cmake = (STOP_ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
+        self.assertIn("catkin_install_python(PROGRAMS", cmake)
+
     def test_mission_integration_parses_as_valid_xml(self):
         ET.parse(MISSION_INTEGRATION)
 
@@ -45,12 +49,15 @@ class MissionIntegrationLaunchTests(unittest.TestCase):
         move_base = next(
             n for n in root.iter("node") if n.attrib.get("pkg") == "move_base"
         )
-        params = {
-            p.attrib.get("name"): p.attrib.get("value")
-            for p in move_base.findall("param")
+        remaps = {
+            item.attrib["from"]: item.attrib["to"]
+            for item in move_base.findall("remap")
         }
-        self.assertEqual("/cmd_vel/stop_navigation", params["cmd_vel_topic"])
-        self.assertNotEqual("/cmd_vel", params["cmd_vel_topic"])
+        self.assertEqual("/cmd_vel/stop_navigation", remaps["cmd_vel"])
+        self.assertFalse(any(
+            item.attrib.get("name") == "cmd_vel_topic"
+            for item in move_base.findall("param")
+        ))
 
     def test_no_node_except_competition_arbiter_publishes_final_cmd_vel(self):
         text = MISSION_INTEGRATION.read_text(encoding="utf-8")

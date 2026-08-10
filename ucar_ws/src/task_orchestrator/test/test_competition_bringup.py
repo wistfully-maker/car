@@ -309,8 +309,13 @@ class CompetitionBringupTests(unittest.TestCase):
             },
             files,
         )
-        legacy_nav = next(
+        outer = next(
             group for group in self.root.findall("group")
+            if group.attrib.get("if") ==
+            "$(eval arg('start_navigation_handoff') == 'false')"
+        )
+        legacy_nav = next(
+            group for group in outer.findall("group")
             if group.attrib.get("if") == "$(arg start_fast_nav)"
         )
         self.assertEqual(
@@ -319,6 +324,22 @@ class CompetitionBringupTests(unittest.TestCase):
                 g.attrib["if"] for g in self.root.findall("group")
                 if legacy_nav in list(g)
             ),
+        )
+
+    def test_continuous_two_workshop_phase_is_enabled_and_forwarded(self):
+        args = {arg.attrib["name"]: arg.attrib.get("default")
+                for arg in self.root.findall("arg")}
+        self.assertEqual("true", args["simulation_phase_enabled"])
+        orchestrator_include = next(
+            include for group in self.root.findall("group")
+            if group.attrib.get("if") == "$(arg start_orchestrator)"
+            for include in group.findall("include")
+        )
+        forwarded = {arg.attrib["name"]: arg.attrib["value"]
+                     for arg in orchestrator_include.findall("arg")}
+        self.assertEqual(
+            "$(arg simulation_phase_enabled)",
+            forwarded["simulation_phase_enabled"],
         )
 
     def test_has_one_shared_camera_and_remaps_qr_velocity(self):

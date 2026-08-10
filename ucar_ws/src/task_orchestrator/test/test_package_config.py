@@ -82,6 +82,7 @@ class PackageConfigTests(unittest.TestCase):
                 "/qr_item_search/result",
                 "/llm/classify/result",
                 "/voice/speak_done",
+                "/task/navigation_handoff_status",
                 "/task/delivery_arrived",
                 "/task/cancel",
                 "/task/simulation_arrived",

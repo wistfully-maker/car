@@ -6,6 +6,7 @@
   <arg name="enable_readiness_gate" default="false"/>
   <arg name="enable_velocity_arbiter" default="false"/>
   <arg name="enable_navigation_handoff_supervisor" default="false"/>
+  <arg name="simulation_phase_enabled" default="false"/>
   <arg name="legacy_nav_launch"
        default="$(find task_orchestrator)/launch/legacy_navigation_include.launch"/>
   <arg name="stop_integration_launch"
@@ -34,6 +35,8 @@
     <param name="timeouts/llm_classification"
            value="$(arg timeout_llm_classification)"/>
     <param name="timeouts/speech" value="$(arg timeout_speech)"/>
+    <param name="simulation_phase_enabled"
+           value="$(arg simulation_phase_enabled)"/>
   </node>
   <node pkg="task_orchestrator"
         type="voice_task_adapter_node.py"

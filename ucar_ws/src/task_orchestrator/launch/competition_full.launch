@@ -40,6 +40,7 @@
   <arg name="start_navigation_handoff" default="true"/>
   <!-- stop 栈外部提供时显式关闭（supervisor 不持有 stop launch）。 -->
   <arg name="start_stop_stack" default="true"/>
+  <arg name="simulation_phase_enabled" default="true"/>
   <arg name="legacy_nav_launch"
        default="$(find task_orchestrator)/launch/legacy_navigation_include.launch"/>
   <arg name="stop_integration_launch"
@@ -163,6 +164,8 @@
       <arg name="enable_fast_nav_adapter" value="false"/>
       <arg name="enable_readiness_gate" value="false"/>
       <arg name="enable_velocity_arbiter" value="false"/>
+      <arg name="simulation_phase_enabled"
+           value="$(arg simulation_phase_enabled)"/>
       <arg name="timeout_dependency_ready" value="$(arg timeout_dependency_ready)"/>
       <arg name="timeout_pickup_navigation" value="$(arg timeout_pickup_navigation)"/>
       <arg name="timeout_qr_search" value="$(arg timeout_qr_search)"/>

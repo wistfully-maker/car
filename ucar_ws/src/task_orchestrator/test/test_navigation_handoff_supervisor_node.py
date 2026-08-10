@@ -237,6 +237,36 @@ class HandoffDriverHappyPathTests(unittest.TestCase):
         self.assertNotIn("pkill", fake.effects)
         self.assertNotIn("rosnode kill -a", fake.effects)
 
+
+class RosHandoffStatusTests(unittest.TestCase):
+    def _actions(self, module):
+        published = []
+        actions = module._RosHandoffActions.__new__(module._RosHandoffActions)
+        actions._status_pub = types.SimpleNamespace(
+            publish=lambda message: published.append(json.loads(message.data))
+        )
+        actions._release_pub = types.SimpleNamespace(publish=lambda _message: None)
+        module.String = lambda data: types.SimpleNamespace(data=data)
+        return actions, published
+
+    def test_release_reports_correlated_ready(self):
+        module = load_module()
+        actions, published = self._actions(module)
+        actions.release_task(dict(GOAL), dict(GOAL))
+        self.assertEqual("ready", published[-1]["status"])
+        self.assertEqual("task-1", published[-1]["task_id"])
+        self.assertEqual("delivery-1", published[-1]["goal_id"])
+
+    def test_failure_reports_correlated_failed(self):
+        module = load_module()
+        actions, published = self._actions(module)
+        module.rospy.logerr = lambda *args: None
+        actions.handoff_failed(dict(
+            task_id="task-1", goal_id="delivery-1", reason="stop not ready"
+        ))
+        self.assertEqual("failed", published[-1]["status"])
+        self.assertEqual("stop not ready", published[-1]["message"])
+
     def test_publish_zero_precedes_every_lifecycle_step(self):
         module = load_module()
         fake = FakeActions()

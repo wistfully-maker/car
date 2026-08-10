@@ -23,7 +23,7 @@ class MotionModeTests(unittest.TestCase):
             TaskOrchestrator.WAITING_QR: QR_SEARCH,
             TaskOrchestrator.WAITING_LLM: IDLE,
             TaskOrchestrator.WAITING_SPEECH: IDLE,
-            TaskOrchestrator.NAVIGATING_TO_WORKSHOP: NAVIGATION,
+            TaskOrchestrator.NAVIGATING_TO_WORKSHOP: STOP_NAVIGATION,
             TaskOrchestrator.NAVIGATING_TO_SIM_WORKSHOP: STOP_NAVIGATION,
             TaskOrchestrator.COMPLETE: IDLE,
             TaskOrchestrator.ERROR: IDLE,

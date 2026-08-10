@@ -25,12 +25,13 @@ class TaskOrchestrator:
             WAITING_QR,
             WAITING_LLM,
             WAITING_SPEECH,
+            DELIVERY_HANDED_OFF,
             NAVIGATING_TO_WORKSHOP,
             NAVIGATING_TO_SIM_WORKSHOP,
         )
     )
     _TERMINAL_STATES = frozenset(
-        (IDLE, DELIVERY_HANDED_OFF, COMPLETE, ERROR, CANCELLED)
+        (IDLE, COMPLETE, ERROR, CANCELLED)
     )
     _TIMEOUT_KEYS = {
         CHECKING_DEPENDENCIES: "dependency_ready",
@@ -38,6 +39,7 @@ class TaskOrchestrator:
         WAITING_QR: "qr_search",
         WAITING_LLM: "llm_classification",
         WAITING_SPEECH: "speech",
+        DELIVERY_HANDED_OFF: "delivery_navigation",
         NAVIGATING_TO_WORKSHOP: "delivery_navigation",
         NAVIGATING_TO_SIM_WORKSHOP: "simulation_navigation",
     }
@@ -288,7 +290,7 @@ class TaskOrchestrator:
         )
 
     def on_delivery_arrived(self, message):
-        if self.state != self.DELIVERY_HANDED_OFF:
+        if self.state != self.NAVIGATING_TO_WORKSHOP:
             return
         if not self._matches(message, "goal_id", "delivery_goal_id"):
             return
@@ -315,6 +317,17 @@ class TaskOrchestrator:
                 "selected_item": self.task["simulation"]["selected_item"],
             },
         )
+
+    def on_navigation_handoff_status(self, message):
+        if self.state != self.DELIVERY_HANDED_OFF:
+            return
+        if not self._matches(message, "goal_id", "delivery_goal_id"):
+            return
+        if message["status"] == "failed":
+            self._fail(message.get("message") or "navigation handoff failed")
+            return
+        self._transition(self.NAVIGATING_TO_WORKSHOP)
+        self._publish_status("running")
 
     def on_simulation_arrived(self, message):
         if self.state != self.NAVIGATING_TO_SIM_WORKSHOP:

@@ -109,6 +109,22 @@ def parse_arrival(raw_json, expected_task_id, expected_goal_id):
     return message
 
 
+def parse_navigation_handoff_status(
+    raw_json, expected_task_id, expected_goal_id
+):
+    message = load_object(raw_json)
+    _require_identity(message, "task_id", expected_task_id)
+    _require_identity(message, "goal_id", expected_goal_id)
+    status = require_text(message.get("status"), "status")
+    if status not in ("ready", "failed"):
+        raise ProtocolError("handoff status must be ready or failed")
+    if status == "failed":
+        message["message"] = _require_failure_message(message)
+    else:
+        message["message"] = _optional_message(message)
+    return message
+
+
 def parse_qr_result(raw_json, expected_task_id, expected_search_id):
     message = load_object(raw_json)
     _require_identity(message, "task_id", expected_task_id)

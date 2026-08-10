@@ -32,7 +32,7 @@
   <node pkg="move_base" type="move_base" respawn="false" name="move_base" output="screen">
     <param name="base_global_planner" value="global_planner/GlobalPlanner"/>
     <param name="base_local_planner" value="teb_local_planner/TebLocalPlannerROS"/>
-    <param name="cmd_vel_topic" value="/cmd_vel/stop_navigation"/>
+    <remap from="cmd_vel" to="/cmd_vel/stop_navigation"/>
 
     <rosparam file="$(find ucar_nav)/launch/config/move_base/move_base_params.yaml" command="load" />
     <rosparam file="$(find ucar_nav)/launch/config/move_base/costmap_common_params.yaml" command="load" ns="global_costmap" />

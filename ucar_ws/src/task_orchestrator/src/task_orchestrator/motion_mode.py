@@ -7,9 +7,9 @@ STOP_NAVIGATION = "STOP_NAVIGATION"
 
 
 def motion_mode_for_state(state):
-    if state in ("NAVIGATING_TO_PICKUP", "NAVIGATING_TO_WORKSHOP"):
+    if state == "NAVIGATING_TO_PICKUP":
         return NAVIGATION
-    if state == "NAVIGATING_TO_SIM_WORKSHOP":
+    if state in ("NAVIGATING_TO_WORKSHOP", "NAVIGATING_TO_SIM_WORKSHOP"):
         # 仿真阶段由 stop 栈导航，只转发 /cmd_vel/stop 来源。
         return STOP_NAVIGATION
     if state == "WAITING_QR":
