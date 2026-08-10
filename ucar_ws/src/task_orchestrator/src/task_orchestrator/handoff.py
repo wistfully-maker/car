@@ -238,6 +238,8 @@ class NavigationHandoff:
         self._odom_last_stamp = None
 
     def _on_action_goal_cancelled(self, _observation):
+        if self.state != self.CANCELLING:
+            return []
         self._transition(self.VERIFYING_STOP)
         return [
             ("publish_zero", None),
@@ -245,11 +247,15 @@ class NavigationHandoff:
         ]
 
     def _on_action_goal_cancel_failed(self, _observation):
+        if self.state != self.CANCELLING:
+            return []
         return self._retry(
             None, "cancel", "cancel_goals", "cancel_exhausted"
         )
 
     def _on_odom_stopped(self, observation):
+        if self.state != self.VERIFYING_STOP:
+            return []
         stamp = observation.stamp
         if (
             isinstance(stamp, bool)
@@ -285,12 +291,18 @@ class NavigationHandoff:
         ]
 
     def _on_odom_not_stopped(self, _observation):
+        if self.state != self.VERIFYING_STOP:
+            return []
         return self._odom_miss("vehicle_moving")
 
     def _on_odom_stale(self, _observation):
+        if self.state != self.VERIFYING_STOP:
+            return []
         return self._odom_miss("odom_stale")
 
     def _on_legacy_stack_exited(self, _observation):
+        if self.state != self.STOPPING_LEGACY:
+            return []
         self._transition(self.STARTING_STOP)
         return [
             ("publish_zero", None),
@@ -298,11 +310,15 @@ class NavigationHandoff:
         ]
 
     def _on_legacy_stack_still_running(self, _observation):
+        if self.state != self.STOPPING_LEGACY:
+            return []
         return self._retry(
             None, "legacy_exit", "verify_legacy_absent", "legacy_exit_exhausted"
         )
 
     def _on_stop_stack_started(self, _observation):
+        if self.state != self.STARTING_STOP:
+            return []
         self._transition(self.WAITING_STOP_READY)
         return [
             ("publish_zero", None),
@@ -310,9 +326,13 @@ class NavigationHandoff:
         ]
 
     def _on_stop_stack_start_failed(self, _observation):
+        if self.state != self.STARTING_STOP:
+            return []
         return self._fail("stop_stack_start_failed", "start_stop")
 
     def _on_stop_stack_ready(self, _observation):
+        if self.state != self.WAITING_STOP_READY:
+            return []
         self._transition(self.READY)
         return [
             ("publish_zero", None),
@@ -320,6 +340,8 @@ class NavigationHandoff:
         ]
 
     def _on_stop_stack_not_ready(self, _observation):
+        if self.state != self.WAITING_STOP_READY:
+            return []
         return self._retry(
             None, "readiness", "wait_stop_ready", "readiness_exhausted"
         )

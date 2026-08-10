@@ -365,12 +365,39 @@ class HandoffDeadlineTests(unittest.TestCase):
         self.assertEqual([], machine.tick())
 
 
+class HandoffStateGatingTests(unittest.TestCase):
+    def test_stale_cancel_failure_in_verify_stop_is_ignored(self):
+        machine = NavigationHandoff(make_config(), FakeClock())
+        machine.start("task-1", "delivery-1")
+        machine.observe(ActionGoalCancelled())
+        self.assertEqual([], machine.observe(ActionGoalCancelFailed()))
+        self.assertEqual("VERIFYING_STOP", machine.state)
+
+    def test_stale_start_failure_in_other_states_is_ignored(self):
+        machine = NavigationHandoff(make_config(), FakeClock())
+        machine.start("task-1", "delivery-1")
+        machine.observe(ActionGoalCancelled())
+        self.assertEqual([], machine.observe(StopStackStartFailed()))
+        self.assertEqual("VERIFYING_STOP", machine.state)
+
+    def test_stale_readiness_event_in_legacy_stop_is_ignored(self):
+        machine = NavigationHandoff(make_config(), FakeClock())
+        machine.start("task-1", "delivery-1")
+        machine.observe(ActionGoalCancelled())
+        machine.observe(OdomStopped(stamp=0.1))
+        machine.observe(OdomStopped(stamp=0.5))
+        machine.observe(OdomStopped(stamp=0.9))
+        self.assertEqual([], machine.observe(StopStackNotReady()))
+        self.assertEqual("STOPPING_LEGACY", machine.state)
+
+
 class HandoffTerminalTests(unittest.TestCase):
     def test_ready_is_terminal_and_idempotent(self):
         machine = NavigationHandoff(make_config(), FakeClock())
         machine.start("task-1", "delivery-1")
         machine.observe(ActionGoalCancelled())
         machine.observe(OdomStopped(stamp=0.1))
+        machine.observe(OdomStopped(stamp=0.5))
         machine.observe(OdomStopped(stamp=0.9))
         machine.observe(LegacyStackExited())
         machine.observe(StopStackStarted())
