@@ -29,6 +29,7 @@ mission_orchestrator.py —— 全流程任务编排（学习 item_finder.py 逻
     roslaunch stop mission.launch task_input:="食品，苹果；电子，手机"
 """
 
+import json
 import math
 import os
 import sys
@@ -38,12 +39,14 @@ import cv2
 import cv_bridge
 import rospy
 
+from actionlib_msgs.msg import GoalID
 from sensor_msgs.msg import Image, LaserScan
 from geometry_msgs.msg import PoseStamped, Twist
 from move_base_msgs.msg import MoveBaseActionResult
 from std_msgs.msg import String
 from std_srvs.srv import Empty
 from stop.msg import BoundingBoxes
+from stop_integration.mission_gate import MissionGate
 
 # ==============================================================================
 # 全局变量（同 item_finder.py 风格）
@@ -120,6 +123,9 @@ goal_pub = None
 img_pub = None
 cmd_vel_pub = None
 result_pub = None
+event_pub = None          # /stop/mission_event 私有集成事件
+cancel_pub = None         # /move_base/cancel 取消遗留目标
+gate = None               # MissionGate 任务身份/去重/终态缓存
 
 # ==============================================================================
 # TTS —— 调用 speech_command/scripts/tts_http.py
@@ -310,6 +316,10 @@ def handle_phase_exhausted():
         rospy.logerr("[Phase 2] Sim workshop not found, mission failed")
         is_searching_item = False
         result_pub.publish(String(data="failed:not_found"))
+        event_pub.publish(String(data="failed:not_found"))
+        if gate is not None and gate.active_task_id is not None:
+            gate.record_result(gate.active_task_id, "failed:not_found",
+                               "sim workshop not found")
         rospy.loginfo("未找到目标车间")
 
 
@@ -387,18 +397,20 @@ def mission_done():
     cmd_vel_pub.publish(Twist())
 
     if current_phase == "real":
-        # Phase 1 完成 → 播报实车语音 → 切 Phase 2
+        # Phase 1 完成 → 发内部事件（TTS 交给全局编排器）→ 切 Phase 2
         text = "已将{}放入{}".format(real_cargo, real_warehouse)
         rospy.loginfo("==== Phase 1 DONE: %s ====", text)
         result_pub.publish(String(data="phase1_done"))
-        speak(text)
+        event_pub.publish(String(data="phase1_done"))
         switch_to_phase2()
     else:
-        # Phase 2 完成 → 播报仿真语音 → 任务结束
+        # Phase 2 完成 → 发内部事件 → 任务结束
         text = "仿真任务已完成，已将{}放入{}".format(sim_cargo, sim_warehouse)
         rospy.loginfo("==== Phase 2 DONE: %s ====", text)
         result_pub.publish(String(data="done"))
-        speak(text)
+        event_pub.publish(String(data="done"))
+        if gate is not None and gate.active_task_id is not None:
+            gate.record_result(gate.active_task_id, "done", "")
 
 
 # ==============================================================================
@@ -702,6 +714,94 @@ def LidarCallback(msg):
 
 
 # ==============================================================================
+# 集成车缝：任务注入与取消（不自动运动，算法回调保持不变）
+# ==============================================================================
+
+def _keyword_for_workshop(workshop):
+    """按 WAREHOUSE_MAP 反查 OCR 关键字；未知车间回退为去“车间”后缀。"""
+    for key, value in WAREHOUSE_MAP.items():
+        if value == workshop:
+            return key
+    if workshop.endswith("车间"):
+        return workshop[:-2]
+    return workshop
+
+
+def activate(physical, simulation=None):
+    """注入经校验的实物/仿真目标后启动 Phase 1（替代原自动启动）。"""
+    global real_keyword, real_cargo, real_warehouse
+    global sim_keyword, sim_cargo, sim_warehouse
+    real_keyword = _keyword_for_workshop(physical["target_workshop"])
+    real_cargo = physical["selected_item"]
+    real_warehouse = physical["target_workshop"]
+    if simulation:
+        sim_keyword = _keyword_for_workshop(simulation["target_workshop"])
+        sim_cargo = simulation["selected_item"]
+        sim_warehouse = simulation["target_workshop"]
+    start_mission()
+
+
+def cancel_mission():
+    """取消当前任务：停止搜索、取消 move_base 目标、零速、只发一次失败。"""
+    global is_searching_item, mission_done_called
+    if mission_done_called:
+        return
+    is_searching_item = False
+    cmd_vel_pub.publish(Twist())
+    try:
+        cancel_pub.publish(GoalID())
+    except Exception as exc:
+        rospy.logwarn("[mission] Cancel goal failed: %s", exc)
+    mission_done_called = True
+    result_pub.publish(String(data="failed:cancelled"))
+    event_pub.publish(String(data="failed:cancelled"))
+    if gate is not None and gate.active_task_id is not None:
+        gate.record_result(gate.active_task_id, "failed:cancelled",
+                           "operator cancel")
+    rospy.logwarn("[mission] Mission cancelled")
+
+
+def _on_mission_goal(message):
+    """接收 protocol v1 任务目标；门控通过才激活（重复/跨任务/终态去重）。"""
+    try:
+        mission = json.loads(message.data)
+    except (TypeError, ValueError) as exc:
+        rospy.logwarn("[mission] Ignored invalid task goal: %s", exc)
+        return
+    acceptance = gate.accept(mission)
+    if acceptance.error:
+        rospy.logwarn("[mission] Rejected task goal: %s", acceptance.error)
+        return
+    if acceptance.start:
+        rospy.loginfo("[mission] Activating task %s",
+                      acceptance.mission["task_id"])
+        activate(acceptance.mission["physical"],
+                 acceptance.mission.get("simulation"))
+    elif acceptance.terminal is not None:
+        # 重复终态任务只重发缓存结果，不重复运动。
+        rospy.logwarn("[mission] Duplicate terminal task %s, replay cached",
+                      acceptance.terminal["task_id"])
+        result_pub.publish(String(data=acceptance.terminal["status"]))
+        event_pub.publish(String(data=acceptance.terminal["status"]))
+
+
+def _on_cancel(message):
+    """取消当前任务（校验 task_id 属于活动任务）。"""
+    try:
+        payload = json.loads(message.data)
+        task_id = payload.get("task_id")
+        if not isinstance(task_id, str) or not task_id.strip():
+            raise ValueError("task_id")
+    except (TypeError, ValueError) as exc:
+        rospy.logwarn("[mission] Ignored invalid cancel: %s", exc)
+        return
+    if gate.active_task_id != task_id:
+        rospy.logwarn("[mission] Ignored cancel for unknown task %s", task_id)
+        return
+    cancel_mission()
+
+
+# ==============================================================================
 # 启动
 # ==============================================================================
 
@@ -775,12 +875,19 @@ if __name__ == "__main__":
     img_pub = rospy.Publisher('/perception/detect_image', Image, queue_size=1)
     cmd_vel_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=1)
     result_pub = rospy.Publisher('/mission/result', String, queue_size=1)
+    event_pub = rospy.Publisher('/stop/mission_event', String, queue_size=10)
+    cancel_pub = rospy.Publisher('/move_base/cancel', GoalID, queue_size=1)
 
     # ---- 订阅者 ----
     rospy.Subscriber('/usb_cam/image_raw', Image, img_callback, queue_size=1)
     rospy.Subscriber('/perception/bounding_boxes', BoundingBoxes, boxes_callback)
     rospy.Subscriber('/move_base/result', MoveBaseActionResult, goal_callback)
     rospy.Subscriber('/scan', LaserScan, LidarCallback, queue_size=1)
+
+    # ---- 任务注入（不自动运动；等结构化任务到达才激活）----
+    gate = MissionGate()
+    rospy.Subscriber('/task/stop_mission_goal', String, _on_mission_goal, queue_size=1)
+    rospy.Subscriber('/task/cancel', String, _on_cancel, queue_size=1)
 
     # ---- 自动设置初始位姿 ----
     from geometry_msgs.msg import PoseWithCovarianceStamped
@@ -816,30 +923,6 @@ if __name__ == "__main__":
     else:
         rospy.loginfo("[mission] No initial pose configured, set in RViz if needed")
 
-    # ---- 等待 TF 就绪后自动启动 ----
-    def _wait_and_start(event=None):
-        """等待 /map 坐标系可用后启动任务"""
-        import tf2_ros as _tf2r
-        _tf_buf = _tf2r.Buffer(rospy.Duration(5.0))
-        _tf_lis = _tf2r.TransformListener(_tf_buf)
-        rospy.loginfo("[mission] Waiting for /map frame from AMCL...")
-
-        waited = 0
-        while not rospy.is_shutdown():
-            try:
-                _tf_buf.lookup_transform("map", "base_link", rospy.Time(0), rospy.Duration(2.0))
-                rospy.loginfo("[mission] TF ready! (waited %ds)", waited)
-                start_mission()
-                return
-            except Exception:
-                if waited % 10 == 0:
-                    rospy.loginfo("[mission] Waiting for /map... (%ds elapsed)", waited)
-                rospy.sleep(1.0)
-                waited += 1
-
-    # 延迟足够时间让 AMCL 收到 initialpose 后再开始 TF 检查
-    extra_delay = max(auto_start_delay, 5.0) if (init_x != 0.0 or init_y != 0.0) else max(auto_start_delay, 1.0)
-    rospy.Timer(rospy.Duration(extra_delay), _wait_and_start, oneshot=True)
-
+    rospy.loginfo("[mission] Waiting for /task/stop_mission_goal (no auto motion)")
     rospy.spin()
 
