@@ -1,3 +1,4 @@
+import hashlib
 import unittest
 import xml.etree.ElementTree as ET
 import os
@@ -85,6 +86,34 @@ class FakeRosEnvironment:
             "roslaunch",
             'for arg in "$@"; do printf "roslaunch-arg:%s\\n" "$arg" >> "$CALL_LOG"; done\nexit 0',
         )
+        self._install_stop_package()
+
+    def _install_stop_package(self):
+        """模拟 stop 包：模型文件 + 快照清单，供 preflight 模型校验使用。"""
+        self.stop_root = self.root / "stop"
+        models = self.stop_root / "scripts" / "models"
+        models.mkdir(parents=True)
+        model_bytes = {
+            "ppocrv4_det.rknn": b"fake-det-model",
+            "ppocrv4_rec.rknn": b"fake-rec-model",
+            "ppocr_keys_v1.txt": b"fake-keys\n",
+        }
+        manifest = ["# Source: fake stop package"]
+        for name, content in model_bytes.items():
+            (models / name).write_bytes(content)
+            manifest.append(
+                "%s  scripts/models/%s"
+                % (hashlib.sha256(content).hexdigest(), name)
+            )
+        (self.stop_root / "VEHICLE_SNAPSHOT.sha256").write_text(
+            "\n".join(manifest) + "\n", encoding="utf-8"
+        )
+        self._write_fake(
+            "rospack",
+            'if [[ "$1 $2" == "find stop" ]]; then\n'
+            '  echo "%s"\n  exit 0\nfi\nexit 1' % str(self.stop_root),
+        )
+        self._write_fake("sha256sum", 'exec /usr/bin/sha256sum "$@"')
 
     def _write_fake(self, name, body):
         path = self.bin / name
@@ -192,6 +221,39 @@ class CompetitionBringupTests(unittest.TestCase):
         self.assertEqual("true", args["start_velocity_arbiter"])
         self.assertNotIn("start_delivery", args)
 
+    def test_declares_handoff_and_stop_stack_switches(self):
+        args = {arg.attrib["name"]: arg.attrib.get("default")
+                for arg in self.root.findall("arg")}
+        self.assertEqual("true", args["start_navigation_handoff"])
+        self.assertEqual("true", args["start_stop_stack"])
+        self.assertIn("$(arg start_navigation_handoff)", self.text)
+        self.assertIn("start_stop_stack", self.text)
+
+    def test_navigation_stacks_are_only_supervisor_owned(self):
+        includes = [include.attrib.get("file", "")
+                    for include in self.root.iter("include")]
+        self.assertFalse(any("mission_integration" in f for f in includes))
+        self.assertFalse(any("legacy_navigation_include" in f for f in includes))
+
+    def test_supervisor_group_forwards_handoff_launches(self):
+        group = next(
+            g for g in self.root.findall("group")
+            if g.attrib.get("if") == "$(arg start_navigation_handoff)"
+        )
+        include = group.find("include")
+        self.assertEqual("$(arg orchestrator_launch)", include.attrib["file"])
+        values = {a.attrib["name"]: a.attrib["value"]
+                  for a in include.findall("arg")}
+        self.assertEqual("true", values["enable_navigation_handoff_supervisor"])
+        self.assertEqual("$(arg legacy_nav_launch)", values["legacy_nav_launch"])
+        self.assertIn("stop_integration_launch", values)
+        defaults = {a.attrib["name"]: a.attrib.get("default")
+                    for a in self.root.findall("arg")}
+        self.assertIn("mission_integration.launch",
+                      defaults["stop_integration_launch"])
+        self.assertIn("legacy_navigation_include.launch",
+                      defaults["legacy_nav_launch"])
+
     def test_documents_external_contracts_and_fail_fast_boundaries(self):
         for marker in (
             "EXTERNAL_CONTRACT",
@@ -225,18 +287,39 @@ class CompetitionBringupTests(unittest.TestCase):
                       self.text)
         self.assertIn("$(find llm_spark)/launch/llm_spark.launch", self.text)
 
-    def test_base_and_lidar_are_only_fast_nav_downstream_switches(self):
-        nav_group = next(group for group in self.root.findall("group")
-                         if group.attrib.get("if") == "$(arg start_fast_nav)")
-        nav_args = {arg.attrib["name"]: arg.attrib["value"]
-                    for arg in nav_group.find("include").findall("arg")}
-        self.assertEqual("$(arg start_base)", nav_args["start_base"])
-        self.assertEqual("$(arg start_lidar)", nav_args["start_lidar"])
-        outside = "".join(ET.tostring(group, encoding="unicode")
-                          for group in self.root.findall("group")
-                          if group is not nav_group)
-        self.assertNotIn("$(arg start_base)", outside)
-        self.assertNotIn("$(arg start_lidar)", outside)
+    def test_base_and_lidar_are_root_owned_in_handoff_mode(self):
+        # 交接模式下公共硬件由根 launch 一次性启动；导航进程组不含硬件，
+        # fast-nav 只在非交接模式直接启动。
+        hardware = [
+            group for group in self.root.findall("group")
+            if group.attrib.get("if", "").startswith("$(eval")
+            and ("start_base" in group.attrib.get("if", "")
+                 or "start_lidar" in group.attrib.get("if", ""))
+        ]
+        self.assertEqual(2, len(hardware))
+        files = {
+            include.attrib["file"]
+            for group in hardware
+            for include in group.findall("include")
+        }
+        self.assertEqual(
+            {
+                "$(find ucar_controller)/launch/base_driver.launch",
+                "$(find ydlidar)/launch/ydlidar.launch",
+            },
+            files,
+        )
+        legacy_nav = next(
+            group for group in self.root.findall("group")
+            if group.attrib.get("if") == "$(arg start_fast_nav)"
+        )
+        self.assertEqual(
+            "$(eval arg('start_navigation_handoff') == 'false')",
+            next(
+                g.attrib["if"] for g in self.root.findall("group")
+                if legacy_nav in list(g)
+            ),
+        )
 
     def test_has_one_shared_camera_and_remaps_qr_velocity(self):
         cameras = [node for node in self.root.iter("node")
@@ -316,7 +399,8 @@ class CompetitionBringupTests(unittest.TestCase):
         args = {arg.attrib["name"]: arg.attrib.get("default")
                 for arg in root.findall("arg")}
         for name in ("enable_fast_nav_adapter", "enable_readiness_gate",
-                     "enable_velocity_arbiter"):
+                     "enable_velocity_arbiter",
+                     "enable_navigation_handoff_supervisor"):
             self.assertEqual("false", args[name])
         nodes = {node.attrib["name"]: node for node in root.findall("node")}
         self.assertEqual("$(arg enable_fast_nav_adapter)",
@@ -325,6 +409,8 @@ class CompetitionBringupTests(unittest.TestCase):
                          nodes["readiness_gate"].attrib.get("if"))
         self.assertEqual("$(arg enable_velocity_arbiter)",
                          nodes["velocity_arbiter"].attrib.get("if"))
+        self.assertEqual("$(arg enable_navigation_handoff_supervisor)",
+                         nodes["navigation_handoff_supervisor"].attrib.get("if"))
 
     def test_global_qr_parameters_have_exact_defaults(self):
         defaults = {
@@ -556,9 +642,21 @@ class CompetitionBringupTests(unittest.TestCase):
                 "start_camera", "start_fast_nav_adapter",
                 "start_readiness_gate", "start_speech", "start_qr",
                 "start_llm", "start_orchestrator", "start_velocity_arbiter",
+                "start_navigation_handoff", "start_stop_stack",
             },
             patterns,
         )
+
+    def test_start_script_declares_handoff_contract(self):
+        source = START_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("[start_navigation_handoff]=true", source)
+        self.assertIn("[start_stop_stack]=true", source)
+        self.assertIn("start_navigation_handoff|start_stop_stack", source)
+        self.assertIn("conflicts+=(/navigation_handoff_supervisor)", source)
+        self.assertIn("rospack find stop", source)
+        self.assertIn("VEHICLE_SNAPSHOT.sha256", source)
+        self.assertIn("sha256sum", source)
+        self.assertNotIn("eval ", source)
 
     def test_start_script_keeps_all_layer_security_contracts(self):
         source = START_SCRIPT.read_text(encoding="utf-8")
@@ -623,7 +721,8 @@ class CompetitionStartScriptTests(unittest.TestCase):
                 self.assertIn(word, result.stderr.lower())
 
     def test_rejects_amcl_when_lidar_loc_is_internal_or_external(self):
-        for arg in ("start_fast_nav:=true", "start_fast_nav:=false"):
+        for arg in ("start_fast_nav:=true",
+                    "start_fast_nav:=false start_navigation_handoff:=false"):
             with self.subTest(arg=arg):
                 _, result = self.run_fake(arg, nodes="/amcl", live_nodes={"/amcl"})
                 self.assertNotEqual(0, result.returncode)
@@ -631,7 +730,8 @@ class CompetitionStartScriptTests(unittest.TestCase):
 
     def test_external_fastnav_does_not_claim_its_nodes_or_devices(self):
         fake, result = self.run_fake(
-            "start_fast_nav:=false", nodes="/lidar_loc", live_nodes={"/lidar_loc"},
+            "start_fast_nav:=false", "start_navigation_handoff:=false",
+            nodes="/lidar_loc", live_nodes={"/lidar_loc"},
         )
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertNotIn(str(fake.devices["BASE_DEVICE"]), fake.calls())
@@ -659,6 +759,48 @@ class CompetitionStartScriptTests(unittest.TestCase):
             fuser_available=False, lsof_available=False,
         )
         self.assertNotEqual(0, result.returncode)
+
+    def test_handoff_switches_validate_booleans(self):
+        for arg in ("start_navigation_handoff:=maybe", "start_stop_stack:=maybe"):
+            with self.subTest(arg=arg):
+                _, result = self.run_fake(arg, master=False)
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn("invalid boolean", result.stderr.lower())
+
+    def test_clean_boot_with_handoff_and_stop_stack_switches(self):
+        _, result = self.run_fake(
+            "start_navigation_handoff:=false", "start_stop_stack:=false",
+            "start_fast_nav:=false", master=False,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+
+    def test_valid_stop_models_pass_preflight(self):
+        fake, result = self.run_fake(master=False)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("rospack:", fake.calls())
+
+    def test_missing_stop_model_file_is_fatal(self):
+        fake = FakeRosEnvironment(self, master=False)
+        self.addCleanup(fake.close)
+        (fake.stop_root / "scripts/models/ppocrv4_det.rknn").unlink()
+        result = fake.run()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("missing stop model", result.stderr.lower())
+
+    def test_stop_model_manifest_mismatch_is_fatal(self):
+        fake = FakeRosEnvironment(self, master=False)
+        self.addCleanup(fake.close)
+        (fake.stop_root / "scripts/models/ppocrv4_det.rknn").write_bytes(b"tampered")
+        result = fake.run()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("manifest mismatch", result.stderr.lower())
+
+    def test_stop_model_check_is_skipped_when_stop_stack_external(self):
+        fake = FakeRosEnvironment(self, master=False)
+        self.addCleanup(fake.close)
+        (fake.stop_root / "scripts/models/ppocrv4_det.rknn").unlink()
+        result = fake.run("start_stop_stack:=false")
+        self.assertEqual(0, result.returncode, result.stderr)
 
     def test_missing_owned_device_is_fatal(self):
         fake = FakeRosEnvironment(self, master=False)

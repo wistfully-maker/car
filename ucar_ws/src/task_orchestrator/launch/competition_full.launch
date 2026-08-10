@@ -35,6 +35,15 @@
   <arg name="start_llm" default="true"/>
   <arg name="start_orchestrator" default="true"/>
   <arg name="start_velocity_arbiter" default="true"/>
+  <!-- 第二阶段：导航栈交接。true 时导航栈只由 handoff supervisor 持有；
+       false 时回到第一部分直接启动 fast-nav 的行为。 -->
+  <arg name="start_navigation_handoff" default="true"/>
+  <!-- stop 栈外部提供时显式关闭（supervisor 不持有 stop launch）。 -->
+  <arg name="start_stop_stack" default="true"/>
+  <arg name="legacy_nav_launch"
+       default="$(find task_orchestrator)/launch/legacy_navigation_include.launch"/>
+  <arg name="stop_integration_launch"
+       default="$(find stop)/launch/mission_integration.launch"/>
 
   <!-- QR 全局参数：qr_ 前缀 + 显式转发给 qr_item_search.launch（915aa37 契约）。
        qr_scan_window 默认 1.0 s 为实车解码更稳定的驻留值。 -->
@@ -84,13 +93,24 @@
   <arg name="orchestrator_launch"
        default="$(find task_orchestrator)/launch/task_orchestrator.launch"/>
 
-  <group if="$(arg start_fast_nav)">
-    <!-- pickup_navigation.launch owns the single vendor pickup_goal.yaml load. -->
-    <include file="$(arg fast_nav_launch)">
-      <arg name="start_base" value="$(arg start_base)"/>
-      <arg name="start_lidar" value="$(arg start_lidar)"/>
-      <arg name="cmd_vel_topic" value="/cmd_vel/navigation"/>
-    </include>
+  <!-- 交接模式下公共硬件由根 launch 一次性启动；导航进程组不含硬件，
+       交接 supervisor 停止旧栈时不会误停底盘/雷达。 -->
+  <group if="$(eval arg('start_navigation_handoff') == 'true' and arg('start_base') == 'true')">
+    <include file="$(find ucar_controller)/launch/base_driver.launch"/>
+  </group>
+  <group if="$(eval arg('start_navigation_handoff') == 'true' and arg('start_lidar') == 'true')">
+    <include file="$(find ydlidar)/launch/ydlidar.launch"/>
+  </group>
+
+  <group if="$(eval arg('start_navigation_handoff') == 'false')">
+    <group if="$(arg start_fast_nav)">
+      <!-- pickup_navigation.launch owns the single vendor pickup_goal.yaml load. -->
+      <include file="$(arg fast_nav_launch)">
+        <arg name="start_base" value="$(arg start_base)"/>
+        <arg name="start_lidar" value="$(arg start_lidar)"/>
+        <arg name="cmd_vel_topic" value="/cmd_vel/navigation"/>
+      </include>
+    </group>
   </group>
 
   <group if="$(arg start_camera)">
@@ -181,6 +201,22 @@
       <arg name="enable_fast_nav_adapter" value="false"/>
       <arg name="enable_readiness_gate" value="false"/>
       <arg name="enable_velocity_arbiter" value="true"/>
+    </include>
+  </group>
+
+  <group if="$(arg start_navigation_handoff)">
+    <!-- 导航栈交接 supervisor：两个导航 launch 的唯一生命周期 owner。 -->
+    <include file="$(arg orchestrator_launch)">
+      <arg name="enable_task_orchestrator" value="false"/>
+      <arg name="enable_voice_adapter" value="false"/>
+      <arg name="enable_tts_bridge" value="false"/>
+      <arg name="enable_fast_nav_adapter" value="false"/>
+      <arg name="enable_readiness_gate" value="false"/>
+      <arg name="enable_velocity_arbiter" value="false"/>
+      <arg name="enable_navigation_handoff_supervisor" value="true"/>
+      <arg name="legacy_nav_launch" value="$(arg legacy_nav_launch)"/>
+      <arg name="stop_integration_launch"
+           value="$(eval arg('stop_integration_launch') if arg('start_stop_stack') == 'true' else '')"/>
     </include>
   </group>
 </launch>

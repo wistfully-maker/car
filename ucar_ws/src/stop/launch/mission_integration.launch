@@ -1,0 +1,73 @@
+<launch>
+  <!--
+    mission_integration.launch —— stop 导航栈集成 launch（第二阶段专用）。
+
+    只启动 stop 栈自身节点：map/AMCL/move_base/OCR/mission/mux/adapter。
+    公共硬件（base/lidar/camera/speech）不在此启动，由根 launch 或外部提供，
+    因此本 launch 可以由 navigation_handoff_supervisor 安全持有。
+    所有参数默认值与车端已验证的 mission.launch 一致，仅改为可调参数。
+  -->
+
+  <!-- ====== 机器人初始位姿（map 坐标系） ====== -->
+  <arg name="initial_pose_x"   default="-0.813" />
+  <arg name="initial_pose_y"   default="-2.442" />
+  <arg name="initial_pose_yaw" default="0.0" />
+
+  <!-- ====== OCR 扫描 / PCA 停车参数（车端已验证默认值不变） ====== -->
+  <arg name="max_rotations"       default="6" />
+  <arg name="target_distance"     default="0.20" />
+  <arg name="x_align_tolerance"   default="0.50" />
+  <arg name="y_align_tolerance"   default="12" />
+  <arg name="auto_start_delay"    default="3.0" />
+  <arg name="phase2_ack_timeout"  default="60.0" />
+
+  <!-- ====== 定位（stop 栈自有 map/AMCL） ====== -->
+  <node name="map_server" pkg="map_server" type="map_server"
+        args="$(find ucar_nav)/maps/map.yaml" output="screen">
+    <param name="frame_id" value="map" />
+  </node>
+  <include file="$(find ucar_nav)/launch/config/amcl/amcl_omni.launch" />
+
+  <!-- ====== move_base + TEB 动态避障（导航速度发往隔离 topic） ====== -->
+  <node pkg="move_base" type="move_base" respawn="false" name="move_base" output="screen">
+    <param name="base_global_planner" value="global_planner/GlobalPlanner"/>
+    <param name="base_local_planner" value="teb_local_planner/TebLocalPlannerROS"/>
+    <param name="cmd_vel_topic" value="/cmd_vel/stop_navigation"/>
+
+    <rosparam file="$(find ucar_nav)/launch/config/move_base/move_base_params.yaml" command="load" />
+    <rosparam file="$(find ucar_nav)/launch/config/move_base/costmap_common_params.yaml" command="load" ns="global_costmap" />
+    <rosparam file="$(find ucar_nav)/launch/config/move_base/costmap_common_params.yaml" command="load" ns="local_costmap" />
+    <rosparam file="$(find ucar_nav)/launch/config/move_base/global_planner_params.yaml" command="load" />
+    <rosparam file="$(find ucar_nav)/launch/config/move_base/teb_local_planner_params.yaml" command="load" />
+    <rosparam file="$(find ucar_nav)/launch/config/move_base/local_costmap_params.yaml" command="load" />
+    <rosparam file="$(find ucar_nav)/launch/config/move_base/global_costmap_params.yaml" command="load" />
+  </node>
+
+  <!-- ====== OCR 节点 (RKNN NPU) ====== -->
+  <node name="ocr_native_node" pkg="stop" type="ocr_native_node.py" output="screen" />
+
+  <!-- ====== 任务编排（不自动运动，等 /task/stop_mission_goal） ====== -->
+  <node name="mission_orchestrator" pkg="stop" type="mission_orchestrator.py" output="screen">
+    <param name="initial_pose_x"     value="$(arg initial_pose_x)" />
+    <param name="initial_pose_y"     value="$(arg initial_pose_y)" />
+    <param name="initial_pose_yaw"   value="$(arg initial_pose_yaw)" />
+    <param name="max_rotations"      value="$(arg max_rotations)" />
+    <param name="target_distance"    value="$(arg target_distance)" />
+    <param name="x_align_tolerance"  value="$(arg x_align_tolerance)" />
+    <param name="y_align_tolerance"  value="$(arg y_align_tolerance)" />
+    <param name="auto_start_delay"   value="$(arg auto_start_delay)" />
+    <param name="phase2_ack_timeout" value="$(arg phase2_ack_timeout)" />
+  </node>
+
+  <!-- ====== stop 内部速度选择器（只发布 /cmd_vel/stop） ====== -->
+  <node name="stop_velocity_mux" pkg="stop" type="stop_velocity_mux_node.py" output="screen">
+    <param name="velocity_mux/source_timeout" value="0.3" />
+    <param name="velocity_mux/check_period"   value="0.05" />
+    <param name="velocity_mux/max_linear_abs" value="1.0" />
+    <param name="velocity_mux/max_angular_abs" value="2.0" />
+  </node>
+
+  <!-- ====== 协议适配（阶段事件 -> /task/delivery_arrived 等） ====== -->
+  <node name="stop_protocol_adapter" pkg="stop" type="stop_protocol_adapter_node.py" output="screen" />
+
+</launch>

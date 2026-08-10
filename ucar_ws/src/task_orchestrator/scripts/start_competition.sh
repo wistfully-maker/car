@@ -25,6 +25,7 @@ declare -A flags=(
   [start_readiness_gate]=true [start_speech]=true [start_qr]=true
   [start_llm]=true [start_orchestrator]=true
   [start_velocity_arbiter]=true
+  [start_navigation_handoff]=true [start_stop_stack]=true
 )
 
 normalise_bool() {
@@ -43,7 +44,8 @@ for arg in "${launch_args[@]}"; do
     case "$key" in
       start_fast_nav|start_base|start_lidar|start_camera|\
       start_fast_nav_adapter|start_readiness_gate|start_speech|start_qr|\
-      start_llm|start_orchestrator|start_velocity_arbiter)
+      start_llm|start_orchestrator|start_velocity_arbiter|\
+      start_navigation_handoff|start_stop_stack)
         normalise_bool "$key" "$value"
         ;;
       *) : ;;  # Unknown roslaunch arguments are forwarded unchanged.
@@ -216,8 +218,11 @@ if [[ "$master_available" == true ]]; then
   [[ "${flags[start_fast_nav_adapter]}" == true ]] && conflicts+=(/fast_nav_adapter)
   [[ "${flags[start_readiness_gate]}" == true ]] && conflicts+=(/readiness_gate)
   [[ "${flags[start_velocity_arbiter]}" == true ]] && conflicts+=(/velocity_arbiter)
-  if [[ "${flags[start_fast_nav]}" == true ]]; then
+  [[ "${flags[start_navigation_handoff]}" == true ]] && conflicts+=(/navigation_handoff_supervisor)
+  if [[ "${flags[start_fast_nav]}" == true ||
+        "${flags[start_navigation_handoff]}" == true ]]; then
     # Vendor runtime_check.sh contract; navigation_full.launch owns the includes.
+    # 交接模式下两个导航栈都由 supervisor 持有，任何存量导航节点都是冲突。
     conflicts+=(/map_server /lidar_loc /move_base)
     [[ "${flags[start_base]}" == true ]] && conflicts+=(/base_driver)
     [[ "${flags[start_lidar]}" == true ]] && conflicts+=(/ydlidar_node)
@@ -226,6 +231,7 @@ if [[ "$master_available" == true ]]; then
 
   uses_lidar_loc=false
   if [[ "${flags[start_fast_nav]}" == true ||
+        "${flags[start_navigation_handoff]}" == true ||
         "${flags[start_fast_nav_adapter]}" == true ||
         "${flags[start_readiness_gate]}" == true ]]; then
     uses_lidar_loc=true
@@ -249,7 +255,8 @@ elif [[ "${flags[start_velocity_arbiter]}" == false ]]; then
   die "external arbiter mode requires a reachable ROS master to verify /cmd_vel ownership"
 fi
 
-if [[ "${flags[start_fast_nav]}" == true ]]; then
+if [[ "${flags[start_fast_nav]}" == true ||
+      "${flags[start_navigation_handoff]}" == true ]]; then
   if [[ "${flags[start_base]}" == true ]]; then
     check_device base "$BASE_DEVICE"
   fi
@@ -262,6 +269,29 @@ if [[ "${flags[start_camera]}" == true ]]; then
 fi
 if [[ "${flags[start_speech]}" == true ]]; then
   check_device speech "$SPEECH_DEVICE"
+fi
+
+if [[ "${flags[start_stop_stack]}" == true ]]; then
+  # stop 栈模型文件必须存在且与车端快照清单一致（字节级校验）。
+  stop_root="$(rospack find stop 2>/dev/null || true)"
+  [[ -n "$stop_root" ]] || die "stop package not found (rospack find stop)"
+  for model in scripts/models/ppocrv4_det.rknn \
+               scripts/models/ppocrv4_rec.rknn \
+               scripts/models/ppocr_keys_v1.txt; do
+    [[ -f "$stop_root/$model" ]] || die "missing stop model file: $model"
+  done
+  [[ -f "$stop_root/VEHICLE_SNAPSHOT.sha256" ]] ||
+    die "missing stop snapshot manifest: VEHICLE_SNAPSHOT.sha256"
+  while read -r digest rel; do
+    case "$rel" in
+      scripts/models/ppocrv4_det.rknn|scripts/models/ppocrv4_rec.rknn|\
+      scripts/models/ppocr_keys_v1.txt)
+        actual="$(sha256sum "$stop_root/$rel" | awk '{print $1}')"
+        [[ "$actual" == "$digest" ]] ||
+          die "stop model manifest mismatch: $rel"
+        ;;
+    esac
+  done < "$stop_root/VEHICLE_SNAPSHOT.sha256"
 fi
 
 echo "Preflight OK; starting competition_full.launch"

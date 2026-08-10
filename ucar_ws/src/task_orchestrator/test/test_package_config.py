@@ -94,7 +94,8 @@ class PackageConfigTests(unittest.TestCase):
         nodes = {node.attrib["name"]: node for node in root.findall("node")}
         self.assertEqual(
             {"task_orchestrator", "voice_task_adapter", "tts_bridge",
-             "fast_nav_adapter", "readiness_gate", "velocity_arbiter"},
+             "fast_nav_adapter", "readiness_gate", "velocity_arbiter",
+             "navigation_handoff_supervisor"},
             set(nodes),
         )
         for node in nodes.values():

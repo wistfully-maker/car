@@ -1,0 +1,17 @@
+<launch>
+  <!--
+    legacy_navigation_include.launch —— 由 navigation_handoff_supervisor
+    持有的第一部分导航栈（ucar_fast_nav/pickup_navigation.launch）。
+
+    交接模式下公共硬件（base/lidar）由根 launch 一次性启动，这里默认关闭；
+    cmd_vel 保持隔离到 /cmd_vel/navigation，最终 /cmd_vel 只有全局仲裁器发布。
+  -->
+  <arg name="start_base" default="false" />
+  <arg name="start_lidar" default="false" />
+
+  <include file="$(find ucar_fast_nav)/launch/pickup_navigation.launch">
+    <arg name="start_base" value="$(arg start_base)" />
+    <arg name="start_lidar" value="$(arg start_lidar)" />
+    <arg name="cmd_vel_topic" value="/cmd_vel/navigation" />
+  </include>
+</launch>

@@ -416,10 +416,16 @@ class _RosHandoffActions:
         return not (set(self._supervisor["legacy_nodes"]) & live)
 
     def start_owned_stop(self):
-        try:
-            self._stop_group = self._runner.start(
-                self._supervisor["stop_integration_launch"]
+        launch_path = self._supervisor["stop_integration_launch"]
+        if not launch_path:
+            # 外部提供 stop 栈（start_stop_stack:=false）：不持有进程，
+            # 只验证就绪后放行；失败仍走 FAILED 路径。
+            rospy.logwarn(
+                "stop integration launch empty; external stop stack assumed"
             )
+            return True
+        try:
+            self._stop_group = self._runner.start(launch_path)
         except Exception as exc:
             rospy.logerr("failed to start stop navigation stack: %s", exc)
             return False
