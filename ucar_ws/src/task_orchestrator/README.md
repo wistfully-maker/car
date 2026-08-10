@@ -12,11 +12,13 @@ protocol v1 串起来；它负责校验 `task_id` 与各阶段 identity、超时
 它不实现底盘驱动、定位、规划、二维码识别、语音识别、LLM 或 TTS 算法，也不应重复启动
 现场已有的硬件 owner。
 
-当前自动流程的真实业务终点是 **TTS 完成后的交接**。TTS 成功后，状态机只发布一次
+第一阶段（已验收）的真实业务终点是 **TTS 完成后的交接**。TTS 成功后，状态机只发布一次
 `/task/delivery_navigation_goal` 并停留在 `DELIVERY_HANDED_OFF`；`/task/motion_mode`
-此时严格为 `IDLE`，总 launch 没有配送适配器。因此这个 delivery goal 只是交接消息，
-不授予任何运动权限，**不启动二维码后的动态避障、巡线或车间导航**，更不能把
-“发布了目标”误判为“车已经配送”。不要人工伪造 `/task/delivery_arrived` 来证明实车完成。
+此时严格为 `IDLE`。**第二阶段（stop 联调）**由 navigation handoff supervisor 受控切换到
+stop 导航栈：实物车间识别、动态避障导航与停车后回传 `/task/delivery_arrived`，再导航到
+仿真目标车间并停车后回传 `/task/simulation_arrived`，最终进入 `COMPLETE`。
+`/task/delivery_arrived` 与 `/task/simulation_arrived` 只能由 stop 协议适配器在对应
+停车确认后发布，任何人不得人工伪造来证明实车完成；重复终态消息只重发缓存结果，不重复运动。
 
 自动链路是：
 
@@ -30,9 +32,17 @@ protocol v1 串起来；它负责校验 `task_id` 与各阶段 identity、超时
  -> /qr_item_search/start -> 三个物品 /qr_item_search/result
  -> /llm/classify/request -> 实物/仿真双目标 /llm/classify/result
  -> /voice/speak -> tts_bridge -> /voice/speak_done
- -> /task/delivery_navigation_goal（唯一一次，交接收发）
- -> DELIVERY_HANDED_OFF，/task/motion_mode = IDLE（真实安全终点）
+ -> /task/delivery_navigation_goal（唯一一次，交接触发）
+ -> navigation_handoff_supervisor：CANCELLING -> VERIFYING_STOP -> STOPPING_LEGACY
+      -> STARTING_STOP -> WAITING_STOP_READY -> READY（每步有界重试，重试中零速度）
+ -> /task/stop_mission_goal -> stop 栈（OCR 车间识别 + TEB 动态避障 + PCA 停车）
+ -> /task/delivery_arrived -> NAVIGATING_TO_SIM_WORKSHOP
+ -> /task/simulation_navigation_goal -> stop 栈 Phase 2
+ -> /task/simulation_arrived -> COMPLETE
 ```
+
+第二阶段细节、参数、无运动人工注入与回滚见第 9 节和
+[`stop/README_INTEGRATION.md`](../../stop/README_INTEGRATION.md)。
 
 ## 2. 三种入口不能混用
 
@@ -40,7 +50,7 @@ protocol v1 串起来；它负责校验 `task_id` 与各阶段 identity、超时
 |---|---|---|---|---|
 | `scripts/start_competition.sh` | 先做安全 preflight，再启动 `competition_full.launch`；默认包括 `ucar_fast_nav`、`speech_command`、`usb_cam`、`qr_item_search`、`llm_spark` 和本包六个节点 | ROS/workspace 可读，设备空闲，Spark secret 合规，不存在同名 live/stale 节点、`/amcl` 或错误 `/cmd_vel` owner | preflight 无 `ERROR`，根 `roslaunch` 常驻；节点、TF、action、状态 topic 均可观察 | **推荐且唯一正式入口**；检查失败必须排因，不能绕过 |
 | `roslaunch task_orchestrator competition_full.launch` | 与总 launch 相同，但完全跳过 preflight | 操作者已独立核对所有 owner、设备、secret、`/amcl` 和 `/cmd_vel` | 所有 include 成功启动 | 仅诊断 launch 展开/缺包问题；不能作为安全启动方式 |
-| `roslaunch task_orchestrator task_orchestrator.launch` | 默认只启动 `/task_orchestrator`、`/voice_task_adapter`、`/tts_bridge`；可按 arg 单启三个适配/门控节点 | 所需上游 topic 已由人工或外部节点提供 | 目标节点存在并能收发业务 topic | 只用于业务编排调试；没有导航、相机、QR、LLM、语音和安全 preflight，**不能靠“小飞小飞”唤醒跑全流程** |
+| `roslaunch task_orchestrator task_orchestrator.launch` | 默认只启动 `/task_orchestrator`、`/voice_task_adapter`、`/tts_bridge`；可按 arg 单启适配/门控/交接节点 | 所需上游 topic 已由人工或外部节点提供 | 目标节点存在并能收发业务 topic | 只用于业务编排调试；没有导航、相机、QR、LLM、语音和安全 preflight，**不能靠“小飞小飞”唤醒跑全流程** |
 
 总 launch 是本轮节点和硬件 owner 的唯一根。节点设计为常驻，是为了避免每阶段重开串口、
 相机、定位和 `move_base` 造成抢占及状态丢失；阶段结束只归零并释放模式，不 kill 节点。
@@ -131,6 +141,8 @@ rosnode cleanup
 | `start_llm` | true | `llm_spark.launch` |
 | `start_orchestrator` | true | 编排器、voice adapter、TTS bridge |
 | `start_velocity_arbiter` | true | 唯一 `/velocity_arbiter`，唯一发布 `/cmd_vel` |
+| `start_navigation_handoff` | true | 唯一 `/navigation_handoff_supervisor`，两个导航栈的唯一生命周期 owner；`false` 时回退第一阶段直接启动 fast-nav 的行为 |
+| `start_stop_stack` | true | 交接时由 supervisor 启动 stop 栈；`false` 表示 stop 栈由外部提供（supervisor 不持有其进程，只验证就绪） |
 
 **外部 fastnav 已启动**（只允许确实由外部 root 管理且节点健康时）：
 
@@ -167,15 +179,20 @@ rostopic info /cmd_vel
 | 输入 | `/qr_item_search/result` | `std_msgs/String` | QR `search_id`、`items` 和状态 |
 | 输入 | `/llm/classify/result` | `std_msgs/String` | LLM `request_id` 与双目标选择 |
 | 输入 | `/voice/speak_done` | `std_msgs/String` | TTS `speech_id` 的 success/error |
-| 输入 | `/task/delivery_arrived` | `std_msgs/String` | 保留的配送回执接口，当前无自动发布者 |
+| 输入 | `/task/delivery_arrived` | `std_msgs/String` | 实物停车确认后由 stop 协议适配器回传（arrived/failed） |
+| 输入 | `/task/simulation_arrived` | `std_msgs/String` | 仿真停车确认后由 stop 协议适配器回传（arrived/failed） |
 | 输入 | `/task/cancel` | `std_msgs/String` | 当前任务取消原因 |
 | 输出 | `/task/status` | `std_msgs/String` | 状态机状态、业务状态和消息 |
-| 输出 | `/task/motion_mode` | `std_msgs/String` | `data` 是纯文本 `IDLE/NAVIGATION/QR_SEARCH`，不是 JSON |
+| 输出 | `/task/motion_mode` | `std_msgs/String` | `data` 是纯文本 `IDLE/NAVIGATION/QR_SEARCH/STOP_NAVIGATION`，不是 JSON |
 | 输出 | `/task/pickup_navigation_goal` | `std_msgs/String` | 取货点导航 identity |
 | 输出 | `/qr_item_search/start`、`/stop` | `std_msgs/String` | QR 搜索 identity 与控制 |
 | 输出 | `/llm/classify/request` | `std_msgs/String` | 两个母类和三候选 |
 | 输出 | `/voice/speak` | `std_msgs/String` | 待播文本和 speech identity |
-| 输出 | `/task/delivery_navigation_goal` | `std_msgs/String` | 保留的实物配送消息，不授运动权 |
+| 输出 | `/task/delivery_navigation_goal` | `std_msgs/String` | 实物配送目标（交接触发，TTS 完成后唯一一次） |
+| 输出 | `/task/simulation_navigation_goal` | `std_msgs/String` | 仿真车间目标（实物停车确认后发布） |
+| 输出 | `/task/navigation_handoff_status` | `std_msgs/String` | 交接 supervisor 状态/诊断（含重试次数与阶段） |
+| 输出 | `/task/stop_mission_goal` | `std_msgs/String` | 交接 READY 后放行给 stop 任务 |
+| 输出 | `/stop/mission_event`、`/stop/mission_ack` | `std_msgs/String` | stop 栈私有集成事件与 Phase 2 放行（不对外承诺） |
 
 先在多个终端观察：
 
@@ -281,6 +298,8 @@ identity 必须从上一阶段实际输出复制，不能猜。旧 `task_id`、�
 | 同文件 `fast_nav_adapter` | action 300、settle 0.5、线速度停止阈值 0.03、角速度停止阈值 0.05 | 启动读取，重启 |
 | 同文件 `readiness_gate` | 消息最大龄 3、检查周期 1、TF/action 探测 0.05、日志 10 秒；frame 与节点/planner 路径见文件 | 启动读取，重启 |
 | 同文件 `velocity_arbiter` | source timeout 0.3、周期 0.05、线速度绝对上限 1.0、角速度绝对上限 2.0 | 启动读取，重启 |
+| 同文件 `navigation_handoff` | cancel 重试 3/3 秒、近零时长 0.75、线/角停止阈值 0.02/0.05、odom 最大龄 0.5、旧栈退出重试 5/10 秒、就绪重试 30/1 秒、总时限 90 秒 | 启动读取，重启；调参一次只改一个变量 |
+| 同文件 `navigation_handoff_supervisor` | 两个导航 launch 路径、旧栈节点名、初始位姿、AMCL/OCR 节点名、就绪新鲜度 3 秒 | 总 launch 显式 arg 覆盖；`start_stop_stack:=false` 时 stop launch 传空 |
 | `ucar_fast_nav/config/pickup_goal.yaml` | `/ucar_fast_nav/pickup_goal` 航点、frame/yaw、地图路径/校验契约 | fast-nav launch 统一加载，禁止本包重复加载 |
 | `ucar_fast_nav/config` planner/map | `move_base` planner 参数、地图文件及定位配置 | 属于外部任务 5 契约；改后重启 fast-nav root |
 | `qr_item_search/launch/qr_item_search.launch` | image/解码/步进/角速度/驻留/超时等全部由总 launch 的 `qr_*` 参数显式转发；HTTP 1/2 秒、1 重试/3 workers 为内部值 | 调 `qr_*` 参数后重启根 launch（见 5.1） |
@@ -327,10 +346,12 @@ identity 必须从上一阶段实际输出复制，不能猜。旧 `task_id`、�
 | `timeout_qr_search` | `150.0` | 编排 `timeouts/qr_search` |
 | `timeout_llm_classification` | `120.0` | 编排 `timeouts/llm_classification` |
 | `timeout_speech` | `60.0` | 编排 `timeouts/speech` |
+| `legacy_nav_launch` | `$(find task_orchestrator)/launch/legacy_navigation_include.launch` | supervisor 持有的第一部分导航栈（默认不含硬件） |
+| `stop_integration_launch` | `$(find stop)/launch/mission_integration.launch` | supervisor 持有的 stop 导航栈（不含公共硬件） |
 
 固定连接不允许通过比赛命令改写：QR 速度 remap 到 `/cmd_vel/qr`、导航 remap 到
-`/cmd_vel/navigation`、最终唯一 `/cmd_vel` 由 velocity_arbiter 发布、QR 图像默认
-`/usb_cam/image_raw`。
+`/cmd_vel/navigation`、stop 栈内部经 `/cmd_vel/stop`（stop mux）隔离、最终唯一
+`/cmd_vel` 由 velocity_arbiter 发布、QR 图像默认 `/usb_cam/image_raw`。
 
 覆盖优先级：**总 launch 显式值 > `orchestrator.yaml` 默认值 > Python 内建兜底**。
 例如把 QR 搜索编排超时调成 180 秒：
@@ -426,5 +447,113 @@ rosnode kill /task_orchestrator
 python -m unittest discover -s ucar_ws/src/task_orchestrator/test -p "test_*.py" -v
 ```
 
-车端运行单测不代表实车验收。任务 8 仍需完成部署、构建、静态 owner 检查、架空轮/低速、
-取货导航、QR、LLM、TTS 和 TTS 后 `IDLE` 的现场证据；不验收二维码后的动态避障、巡线或配送。
+车端运行单测不代表实车验收。第一阶段现场证据仍按任务 8 检查点执行；第二阶段（stop 联调）
+的车端验收按 `HANDOFF_TO_CODEX.md` 中的检查点逐个单独授权，先无运动启动、旧栈安全退出、
+stop 栈只启动不发目标、AMCL/TF 就绪，再单独实物、单独仿真目标，最后才连续两阶段。
+
+## 9. 第二阶段：stop 导航栈交接
+
+### 9.1 单一安全入口与回滚
+
+第二阶段仍只从 `scripts/start_competition.sh` 启动（默认 `start_navigation_handoff:=true`、
+`start_stop_stack:=true`）。preflight 新增：交接 supervisor 节点冲突检查、stop 包存在性与
+三个 OCR 模型相对 `VEHICLE_SNAPSHOT.sha256` 的字节校验、交接模式下的底盘/雷达设备检查。
+
+回滚到第一阶段基线：
+
+```bash
+./src/task_orchestrator/scripts/start_competition.sh start_navigation_handoff:=false
+```
+
+此时总 launch 回到"直接启动 fast-nav、不启动任何 stop 栈节点"的第一阶段行为；
+`start_stop_stack:=false` 只用于 stop 栈确由外部 root 提供的部署（supervisor 不持有其进程，
+就绪验证失败仍 fail closed）。
+
+### 9.2 交接顺序与有界重试
+
+`/navigation_handoff_supervisor` 是导航栈生命周期唯一 owner，只管理它自己启动并持有的两个
+roslaunch 进程组（第一部分 fast-nav include 与 `stop/mission_integration.launch`），
+绝不按节点名模糊 kill，也不用 `pkill ros` / `rosnode kill -a`。顺序：
+
+```text
+IDLE -> CANCELLING（取消遗留 action goal，cancel_retries 次）
+ -> VERIFYING_STOP（新鲜 /odom 连续近零 stop_stable_duration 秒）
+ -> STOPPING_LEGACY（停止旧进程组，legacy_exit_retries 次缺席确认）
+ -> STARTING_STOP（启动 stop 栈 + 发布一次初始位姿）
+ -> WAITING_STOP_READY（readiness_retries 次探测 map/AMCL/TF/action/OCR/相机/雷达）
+ -> READY -> 发布 /task/stop_mission_goal 放行任务
+```
+
+每个状态切换先发零速度再发生命周期动作；取消、退出、就绪任一耗尽重试或超过
+`total_timeout` 都进入 `FAILED`（诊断原因发布在 `/task/navigation_handoff_status`，
+运动模式保持 `IDLE`），等待人工处理或重新启动任务，绝不带着不确定定位继续运动。
+
+### 9.3 速度所有权
+
+```text
+/cmd_vel/navigation -----\
+/cmd_vel/qr --------------> competition velocity arbiter -> /cmd_vel
+/cmd_vel/stop ------------/
+
+/cmd_vel/stop_navigation --\
+/cmd_vel/stop_manual -------> stop velocity mux -> /cmd_vel/stop
+```
+
+- 只有 `competition_velocity_arbiter` 发布最终 `/cmd_vel`；
+- 交接 READY 放行时 supervisor 把运动模式切到 `STOP_NAVIGATION`（只转发 `/cmd_vel/stop`）；
+- stop 栈内部由 stop mux 在 NAVIGATION（move_base 输出）与 MANUAL（PCA/停车/倒车）之间
+  选择，模式切换、未知模式、输入陈旧、非法数值、时间回退、异常和 shutdown 一律先发零速度；
+- 每次模式切换必须先发零速度；新模式对应来源的新鲜消息到达前不允许运动。
+
+### 9.4 两个独立到达契约
+
+- 第一次停车（实物车间）确认后才发布 `/task/delivery_arrived`（goal_id = delivery goal 的
+  goal_id），不提前 `COMPLETE`；
+- 第二次停车（仿真目标车间）稳定确认后才发布 `/task/simulation_arrived`（goal_id =
+  simulation goal 的 goal_id）；
+- stop 任务启动后不自动运动，等 `/task/stop_mission_goal`；Phase 1 停车后停在原地等待
+  全局编排器的 `/task/simulation_navigation_goal` 放行（`/stop/mission_ack`，超时
+  `phase2_ack_timeout` 秒报失败），放行前不自动进入 Phase 2 运动；
+- 重复终态消息只重发缓存结果，不重复运动；过期、错误 phase、错误身份一律忽略。
+
+### 9.5 参数与调参（一次只改一个变量）
+
+| 参数 | 默认 | 单位/说明 |
+|---|---:|---|
+| `navigation_handoff/cancel_retries` | 3 | 次，action 取消重试 |
+| `navigation_handoff/cancel_timeout` | 3.0 | 秒 |
+| `navigation_handoff/stop_stable_duration` | 0.75 | 秒，近零持续时长 |
+| `navigation_handoff/linear_stop_threshold` | 0.02 | m/s |
+| `navigation_handoff/angular_stop_threshold` | 0.05 | rad/s |
+| `navigation_handoff/odom_max_age` | 0.5 | 秒 |
+| `navigation_handoff/legacy_exit_retries` | 5 | 次 |
+| `navigation_handoff/legacy_exit_timeout` | 10.0 | 秒 |
+| `navigation_handoff/readiness_retries` | 30 | 次 |
+| `navigation_handoff/readiness_poll_period` | 1.0 | 秒 |
+| `navigation_handoff/total_timeout` | 90.0 | 秒，交接总时限 |
+| `stop/mission_integration` `max_rotations` | 6 | 次，OCR 旋转上限 |
+| `stop/mission_integration` `target_distance` | 0.20 | m，PCA 停车目标距离 |
+| `stop/mission_integration` `x_align_tolerance` | 0.50 | m |
+| `stop/mission_integration` `y_align_tolerance` | 12 | 度 |
+| `stop/mission_integration` `phase2_ack_timeout` | 60.0 | 秒 |
+| `stop/mission_integration` `initial_pose_x/y/yaw` | -0.813/-2.442/0.0 | 车端已验证起点 |
+
+调参必须一次只改一个变量并重启根 launch；stop 栈参数默认值与车端已验证
+`mission.launch` 完全一致，未经验证不得批量改动。
+
+### 9.6 停止、残留诊断与禁止事项
+
+停止仍按第 6 节：先 `/task/cancel`（带当前真实 `task_id`），再回根终端 `Ctrl+C`；
+supervisor 的 shutdown 会停止它持有的两个导航进程组并发布零速度。`rosnode cleanup`
+只清除僵尸登记，**不是 live 节点停止机制**。残留诊断：
+
+```bash
+rosnode list | grep -E 'move_base|amcl|lidar_loc|map_server|navigation_handoff'
+rostopic info /cmd_vel          # 唯一 owner 必须是 /velocity_arbiter
+rostopic info /cmd_vel/stop     # 唯一 owner 必须是 /stop_velocity_mux
+rostopic echo -n 1 /task/navigation_handoff_status
+```
+
+禁止：同时启动 lidar_loc 与 AMCL、同时启动两个 move_base/map server/相机/雷达/底盘
+driver；让 stop、move_base 或其他节点直接发布最终 `/cmd_vel`；伪造
+`/task/delivery_arrived`、`/task/simulation_arrived`；用 `rosnode cleanup` 停 live 节点。
