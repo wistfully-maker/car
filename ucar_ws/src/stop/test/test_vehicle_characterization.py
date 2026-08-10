@@ -227,6 +227,13 @@ class MissionSeamContractTests(unittest.TestCase):
     def test_cancel_subscription_is_wired(self):
         self.assertIn("/task/cancel", MISSION_SOURCE)
 
+    def test_manual_velocity_is_isolated(self):
+        self.assertIn("/cmd_vel/stop_manual", MISSION_SOURCE)
+
+    def test_motion_mode_is_published_for_stop_mux(self):
+        self.assertIn("/stop/motion_mode", MISSION_SOURCE)
+        self.assertIn("_set_mode", MISSION_SOURCE)
+
 
 if __name__ == "__main__":
     unittest.main()

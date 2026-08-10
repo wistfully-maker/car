@@ -121,10 +121,12 @@ max_navigation_retries = 2
 # ROS 发布者（全局）
 goal_pub = None
 img_pub = None
-cmd_vel_pub = None
+cmd_vel_pub = None        # 手动/PCA/停车速度 -> /cmd_vel/stop_manual（隔离）
 result_pub = None
 event_pub = None          # /stop/mission_event 私有集成事件
 cancel_pub = None         # /move_base/cancel 取消遗留目标
+motion_mode_pub = None    # /stop/motion_mode 给 stop_velocity_mux 的模式
+current_motion_mode = None
 gate = None               # MissionGate 任务身份/去重/终态缓存
 
 # ==============================================================================
@@ -233,6 +235,7 @@ def vector_to_angle(nx, ny):
 def rotate_speed(angle_degrees, speed):
     if math.isclose(angle_degrees, 0.0, abs_tol=1e-3):
         return
+    _set_mode("MANUAL")
     angle_rad = math.radians(angle_degrees)
     duration = abs(angle_rad) / abs(speed)
     angular = abs(speed) * (1 if angle_degrees > 0 else -1)
@@ -259,6 +262,7 @@ def find_item_rotate():
 # ==============================================================================
 
 def go_point(x, y, qz, qw):
+    _set_mode("NAVIGATION")
     goal = PoseStamped()
     goal.header.frame_id = "map"
     goal.header.stamp = rospy.Time.now()
@@ -315,6 +319,7 @@ def handle_phase_exhausted():
     else:
         rospy.logerr("[Phase 2] Sim workshop not found, mission failed")
         is_searching_item = False
+        _set_mode("IDLE")
         result_pub.publish(String(data="failed:not_found"))
         event_pub.publish(String(data="failed:not_found"))
         if gate is not None and gate.active_task_id is not None:
@@ -353,6 +358,7 @@ def switch_to_phase2():
     rospy.loginfo("[Phase 2] Start searching: %s", sim_keyword)
 
     # ---- 先倒退离开墙面，避免全局规划失败 ----
+    _set_mode("MANUAL")
     rospy.loginfo("[Phase 2] Backing up 0.5m to clear wall...")
     cmd = Twist()
     cmd.linear.x = -0.12
@@ -394,6 +400,7 @@ def mission_done():
 
     search_item_stage = 6
     is_searching_item = False
+    _set_mode("IDLE")
     cmd_vel_pub.publish(Twist())
 
     if current_phase == "real":
@@ -531,6 +538,7 @@ def boxes_callback(msg):
         elif search_item_stage == 4:
             rospy.loginfo("[Stage 4] Y lateral: camera_deg=%.2f", camera_deg)
             if abs(camera_deg) >= y_align_tolerance:
+                _set_mode("MANUAL")
                 cmd = Twist()
                 cmd.linear.y = 0.3 if camera_deg > 0 else -0.3
                 cmd_vel_pub.publish(cmd)
@@ -614,6 +622,7 @@ def LidarCallback(msg):
 
     # ==== Stage 2: cmd_vel 慢速逼近（不用 move_base，避免全局规划失败）====
     if stage2_creeping:
+        _set_mode("MANUAL")
         n = len(msg.ranges)
         c = n // 2
         front_dists = [msg.ranges[i] for i in range(c - 1, c + 2)
@@ -635,6 +644,7 @@ def LidarCallback(msg):
 
     # ==== Stage 5: X 轴直行微调 ====
     if search_item_stage == 5:
+        _set_mode("MANUAL")
         n = len(msg.ranges)
         c = n // 2
         front_dists = [msg.ranges[i] for i in range(c - 1, c + 2)
@@ -727,6 +737,18 @@ def _keyword_for_workshop(workshop):
     return workshop
 
 
+def _set_mode(mode):
+    """发布 stop mux 运动模式（只在实际切换时发布；初始为 IDLE）。"""
+    global current_motion_mode
+    if mode == current_motion_mode:
+        return
+    current_motion_mode = mode
+    try:
+        motion_mode_pub.publish(String(data=mode))
+    except Exception as exc:
+        rospy.logwarn("[mission] Mode publish failed: %s", exc)
+
+
 def activate(physical, simulation=None):
     """注入经校验的实物/仿真目标后启动 Phase 1（替代原自动启动）。"""
     global real_keyword, real_cargo, real_warehouse
@@ -747,6 +769,7 @@ def cancel_mission():
     if mission_done_called:
         return
     is_searching_item = False
+    _set_mode("IDLE")
     cmd_vel_pub.publish(Twist())
     try:
         cancel_pub.publish(GoalID())
@@ -873,10 +896,13 @@ if __name__ == "__main__":
     # ---- 发布者 ----
     goal_pub = rospy.Publisher('/move_base_simple/goal', PoseStamped, queue_size=1)
     img_pub = rospy.Publisher('/perception/detect_image', Image, queue_size=1)
-    cmd_vel_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=1)
+    # 手动/PCA/停车速度只发往隔离 topic；最终 /cmd_vel 由全局仲裁器发布。
+    cmd_vel_pub = rospy.Publisher('/cmd_vel/stop_manual', Twist, queue_size=1)
     result_pub = rospy.Publisher('/mission/result', String, queue_size=1)
     event_pub = rospy.Publisher('/stop/mission_event', String, queue_size=10)
     cancel_pub = rospy.Publisher('/move_base/cancel', GoalID, queue_size=1)
+    motion_mode_pub = rospy.Publisher(
+        '/stop/motion_mode', String, queue_size=1, latch=True)
 
     # ---- 订阅者 ----
     rospy.Subscriber('/usb_cam/image_raw', Image, img_callback, queue_size=1)
@@ -888,6 +914,9 @@ if __name__ == "__main__":
     gate = MissionGate()
     rospy.Subscriber('/task/stop_mission_goal', String, _on_mission_goal, queue_size=1)
     rospy.Subscriber('/task/cancel', String, _on_cancel, queue_size=1)
+
+    # ---- 初始 IDLE（stop mux 在收到模式前不允许任何运动）----
+    _set_mode("IDLE")
 
     # ---- 自动设置初始位姿 ----
     from geometry_msgs.msg import PoseWithCovarianceStamped

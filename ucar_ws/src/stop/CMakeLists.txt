@@ -40,6 +40,7 @@ install(PROGRAMS
   scripts/precision_park.py
   scripts/ocr_native_node.py
   scripts/mission_orchestrator.py
+  scripts/stop_velocity_mux_node.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
@@ -55,3 +56,7 @@ install(DIRECTORY
   wav
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )
+
+if(CATKIN_ENABLE_TESTING)
+  catkin_add_nosetests(test)
+endif()
