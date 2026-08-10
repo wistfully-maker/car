@@ -1,0 +1,44 @@
+<launch>
+  <!--
+    precision_park.launch —— 激光雷达 PCA 精准停车
+
+    不依赖地图和 move_base，纯 LiDAR + /cmd_vel 闭环控制。
+
+    流程:
+      Stage 1: PCA 粗对准 → 旋转车头朝向板子
+      Stage 2: 直行靠近 → LiDAR 实时反馈距离
+      Stage 3: PCA 精对准 → 慢速旋转正对板面
+      Stage 4: X 微调   → LiDAR 测距前进到目标距离
+
+    使用方式:
+      roslaunch stop precision_park.launch
+      roslaunch stop precision_park.launch board_angle_left:=-20 board_angle_right:=20
+
+    依赖:
+      - 激光雷达 (/scan)
+      - 底盘驱动 (接受 /cmd_vel)
+  -->
+
+  <arg name="board_angle_left"   default="-15" />
+  <arg name="board_angle_right"  default="15" />
+  <arg name="target_distance"    default="0.20" />
+  <arg name="distance_tolerance" default="0.03" />
+  <arg name="yaw_tolerance"      default="1.0" />
+  <arg name="auto_start_delay"   default="1.0" />
+  <arg name="rotate_speed_fast"  default="0.8" />
+  <arg name="rotate_speed_fine"  default="0.25" />
+  <arg name="linear_speed"       default="0.15" />
+
+  <node name="precision_park" pkg="stop" type="precision_park.py" output="screen">
+    <param name="board_angle_left"   value="$(arg board_angle_left)" />
+    <param name="board_angle_right"  value="$(arg board_angle_right)" />
+    <param name="target_distance"    value="$(arg target_distance)" />
+    <param name="distance_tolerance" value="$(arg distance_tolerance)" />
+    <param name="yaw_tolerance"      value="$(arg yaw_tolerance)" />
+    <param name="auto_start_delay"   value="$(arg auto_start_delay)" />
+    <param name="rotate_speed_fast"  value="$(arg rotate_speed_fast)" />
+    <param name="rotate_speed_fine"  value="$(arg rotate_speed_fine)" />
+    <param name="linear_speed"       value="$(arg linear_speed)" />
+  </node>
+
+</launch>

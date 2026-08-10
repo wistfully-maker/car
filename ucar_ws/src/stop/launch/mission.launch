@@ -1,0 +1,86 @@
+<launch>
+  <!--
+    mission.launch —— 全流程一键启动（stop 包集成版）
+
+    输入格式: "食品，苹果；电子，手机"
+      Phase 1 (real): 找"食品" → PCA停车 → 播报 "已将苹果放入食品加工车间"
+      Phase 2 (sim):  找"电子" → PCA停车 → 播报 "仿真任务已完成，已将手机放入电子产品生产车间"
+
+    流程:
+      Phase 1: move_base → 航点1 → 旋转OCR → 航点2 → ... → 找到 → PCA停车 → 播报
+      Phase 2: 双指针跳转 → move_base → ... → 找到 → PCA停车 → 播报 → 完成
+
+    避障: move_base + TEB 局部规划器（动态避障）
+    定位: AMCL + map_server
+    OCR:  RKNN PP-OCR (ocr_native_node)
+    TTS:  speech_command/scripts/tts_http.py
+
+    使用方式:
+      roslaunch stop mission.launch task_input:="食品，苹果；电子，手机"
+      roslaunch stop mission.launch task_input:="日用，牙刷；电子，手机"
+  -->
+
+  <!-- ====== 用户输入 ====== -->
+  <arg name="task_input" default="食品，苹果；电子，手机" />
+
+  <!-- ====== 机器人初始位姿（map 坐标系） ====== -->
+  <arg name="initial_pose_x"   default="-0.813" />
+  <arg name="initial_pose_y"   default="-2.442" />
+  <arg name="initial_pose_yaw" default="0.0" />
+
+  <!-- ====== 硬件驱动 ====== -->
+  <include file="$(find ucar_controller)/launch/base_driver.launch" />
+  <include file="$(find ydlidar)/launch/ydlidar.launch" />
+  <include file="$(find usb_cam)/launch/usb_cam-test.launch" />
+
+  <!-- ====== 定位 ====== -->
+  <node name="map_server" pkg="map_server" type="map_server"
+        args="$(find ucar_nav)/maps/map.yaml" output="screen">
+    <param name="frame_id" value="map" />
+  </node>
+  <include file="$(find ucar_nav)/launch/config/amcl/amcl_omni.launch" />
+
+  <!-- ====== move_base + TEB 动态避障 ====== -->
+  <node pkg="move_base" type="move_base" respawn="false" name="move_base" output="screen">
+    <param name="base_global_planner" value="global_planner/GlobalPlanner"/>
+    <param name="base_local_planner" value="teb_local_planner/TebLocalPlannerROS"/>
+
+    <rosparam file="$(find ucar_nav)/launch/config/move_base/move_base_params.yaml" command="load" />
+    <rosparam file="$(find ucar_nav)/launch/config/move_base/costmap_common_params.yaml" command="load" ns="global_costmap" />
+    <rosparam file="$(find ucar_nav)/launch/config/move_base/costmap_common_params.yaml" command="load" ns="local_costmap" />
+    <rosparam file="$(find ucar_nav)/launch/config/move_base/global_planner_params.yaml" command="load" />
+    <rosparam file="$(find ucar_nav)/launch/config/move_base/teb_local_planner_params.yaml" command="load" />
+    <rosparam file="$(find ucar_nav)/launch/config/move_base/local_costmap_params.yaml" command="load" />
+    <rosparam file="$(find ucar_nav)/launch/config/move_base/global_costmap_params.yaml" command="load" />
+  </node>
+
+  <!-- ====== OCR 节点 (RKNN NPU) ====== -->
+  <node name="ocr_native_node" pkg="stop" type="ocr_native_node.py" output="screen" />
+
+  <!-- ====== 任务编排节点 ====== -->
+  <node name="mission_orchestrator" pkg="stop" type="mission_orchestrator.py" output="screen">
+    <!-- 任务参数 -->
+    <param name="task_input"         value="$(arg task_input)" />
+
+    <!-- 自动初始位姿（设为机器人实际起始位置，就不用 RViz 手动了） -->
+    <param name="initial_pose_x"     value="$(arg initial_pose_x)" />
+    <param name="initial_pose_y"     value="$(arg initial_pose_y)" />
+    <param name="initial_pose_yaw"   value="$(arg initial_pose_yaw)" />
+
+    <!-- OCR 扫描参数 -->
+    <param name="rotate_angle"       value="72" />
+    <param name="rotate_speed"       value="1.5" />
+    <param name="max_rotations"      value="6" />
+
+    <!-- LiDAR PCA 精停参数 -->
+    <param name="board_angle_left"   value="-15" />
+    <param name="board_angle_right"  value="15" />
+    <param name="target_distance"    value="0.20" />
+    <param name="x_align_tolerance"  value="0.50" />
+    <param name="y_align_tolerance"  value="12" />
+
+    <!-- 启动延迟 -->
+    <param name="auto_start_delay"   value="3.0" />
+  </node>
+
+</launch>

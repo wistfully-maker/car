@@ -1,0 +1,61 @@
+<launch>
+  <!--
+    scan_and_park.launch —— 旋转扫描 OCR + LiDAR PCA 精准停车（一体化）
+
+    完整流程:
+      Phase 1: 旋转 72°→拍照→OCR→没找到→再转→... 直到找到板子
+      Phase 2: 根据 OCR 偏角对准 → LiDAR PCA → 直行靠近 → 精对正 → 微调
+
+    依赖（需提前启动）:
+      roslaunch ydlidar ydlidar.launch              # 激光雷达
+      roslaunch ucar_controller base_driver.launch   # 底盘驱动
+      roslaunch usb_cam usb_cam_node.launch          # 摄像头
+
+    使用方式:
+      roslaunch stop scan_and_park.launch
+      roslaunch stop scan_and_park.launch target_keyword:="电子"
+  -->
+
+  <!-- ====== 硬件驱动（无需单独启动） ====== -->
+  <include file="$(find ydlidar)/launch/ydlidar.launch" />
+  <include file="$(find ucar_controller)/launch/base_driver.launch" />
+  <include file="$(find usb_cam)/launch/usb_cam_node.launch" />
+
+  <!-- ====== Phase 1: OCR 扫描参数 ====== -->
+  <arg name="target_keyword"   default="食品" />
+  <arg name="rotate_angle"     default="72" />
+  <arg name="rotate_speed"     default="1.5" />
+  <arg name="max_rotations"    default="5" />
+  <arg name="ocr_timeout"      default="3.0" />
+
+  <!-- ====== Phase 2: LiDAR 精停参数 ====== -->
+  <arg name="board_angle_left"  default="-15" />
+  <arg name="board_angle_right" default="15" />
+  <arg name="target_distance"   default="0.20" />
+  <arg name="distance_tolerance" default="0.03" />
+  <arg name="yaw_tolerance"     default="1.0" />
+  <arg name="linear_speed"      default="0.15" />
+  <arg name="rotate_speed_fine" default="0.25" />
+  <arg name="auto_start_delay"  default="2.0" />
+
+  <!-- PP-OCR 文字识别节点 (RKNN NPU) -->
+  <node name="ocr_native_node" pkg="stop" type="ocr_native_node.py" output="screen" />
+
+  <!-- 一体化扫描+停车节点 -->
+  <node name="scan_and_park" pkg="stop" type="scan_and_park.py" output="screen">
+    <param name="target_keyword"     value="$(arg target_keyword)" />
+    <param name="rotate_angle"       value="$(arg rotate_angle)" />
+    <param name="rotate_speed"       value="$(arg rotate_speed)" />
+    <param name="max_rotations"      value="$(arg max_rotations)" />
+    <param name="ocr_timeout"        value="$(arg ocr_timeout)" />
+    <param name="board_angle_left"   value="$(arg board_angle_left)" />
+    <param name="board_angle_right"  value="$(arg board_angle_right)" />
+    <param name="target_distance"    value="$(arg target_distance)" />
+    <param name="distance_tolerance" value="$(arg distance_tolerance)" />
+    <param name="yaw_tolerance"      value="$(arg yaw_tolerance)" />
+    <param name="linear_speed"       value="$(arg linear_speed)" />
+    <param name="rotate_speed_fine"  value="$(arg rotate_speed_fine)" />
+    <param name="auto_start_delay"   value="$(arg auto_start_delay)" />
+  </node>
+
+</launch>
