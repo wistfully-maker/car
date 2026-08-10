@@ -49,3 +49,37 @@ velocity_arbiter:
   check_period: 0.05
   max_linear_abs: 1.0
   max_angular_abs: 2.0
+
+# 导航栈交接：有界重试、近零验证与总时限（由 NavigationHandoff 校验）。
+navigation_handoff:
+  cancel_retries: 3
+  cancel_timeout: 3.0
+  stop_stable_duration: 0.75
+  linear_stop_threshold: 0.02
+  angular_stop_threshold: 0.05
+  odom_max_age: 0.5
+  legacy_exit_retries: 5
+  legacy_exit_timeout: 10.0
+  readiness_retries: 30
+  readiness_poll_period: 1.0
+  total_timeout: 90.0
+
+# 交接 supervisor 专用配置：仅管理它自己启动并持有句柄的导航 launch。
+navigation_handoff_supervisor:
+  legacy_nav_launch: ""
+  stop_integration_launch: ""
+  legacy_nodes: [/lidar_loc, /move_base, /map_server]
+  initial_pose_frame: map
+  initial_pose_x: 0.0
+  initial_pose_y: 0.0
+  initial_pose_yaw: 0.0
+  initial_pose_covariance: 0.1
+  readiness_max_age: 3.0
+  readiness_action_wait_timeout: 0.05
+  readiness_tf_timeout: 0.05
+  amcl_node: /amcl
+  ocr_node: /ocr_native_node
+  image_topic: /usb_cam/image_raw
+  odom_frame: odom
+  base_frame: base_link
+  laser_frame: laser_frame
