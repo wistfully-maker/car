@@ -4,6 +4,7 @@
 import json
 import math
 import threading
+import time
 
 import actionlib
 import rospy
@@ -31,6 +32,11 @@ def quaternion_from_euler(roll, pitch, yaw):
 
 class FastNavAdapter:
     def __init__(self):
+        deadline = time.monotonic() + 30.0
+        while not rospy.has_param("/ucar_fast_nav/pickup_goal"):
+            if rospy.is_shutdown() or time.monotonic() >= deadline:
+                raise RuntimeError("timed out waiting for pickup_goal parameter")
+            rospy.sleep(0.1)
         waypoint = validate_waypoint(
             rospy.get_param("/ucar_fast_nav/pickup_goal")
         )

@@ -71,12 +71,19 @@ def install_fake_ros():
         warnings=[],
         errors=[],
         requested_params=[],
+        sleep_calls=0,
     )
     rospy = types.ModuleType("rospy")
     def get_param(name, default=None):
         state.requested_params.append(name)
         return state.params.get(name, default)
     rospy.get_param = get_param
+    rospy.has_param = lambda name: name in state.params
+    def sleep(_duration):
+        state.sleep_calls += 1
+        state.now += 0.1
+    rospy.sleep = sleep
+    rospy.is_shutdown = lambda: False
     rospy.get_time = lambda: state.now
     rospy.Publisher = lambda *args, **kwargs: state.publisher
     rospy.Subscriber = lambda *args, **kwargs: Obj()
@@ -178,6 +185,20 @@ class FastNavAdapterNodeTests(unittest.TestCase):
         self.assertEqual("map", sent.target_pose.header.frame_id)
         self.assertEqual(1.0, sent.target_pose.pose.position.x)
         self.assertEqual(2.0, sent.target_pose.pose.position.y)
+
+    def test_waits_for_waypoint_loaded_by_navigation_launch(self):
+        module, state = install_fake_ros()
+        waypoint = state.params.pop("/ucar_fast_nav/pickup_goal")
+        checks = [False, False, True]
+        def has_param(_name):
+            available = checks.pop(0)
+            if available:
+                state.params["/ucar_fast_nav/pickup_goal"] = waypoint
+            return available
+        module.rospy.has_param = has_param
+        node = module.FastNavAdapter()
+        self.assertIsNotNone(node)
+        self.assertEqual(2, state.sleep_calls)
 
     def test_duplicate_replace_and_stale_done(self):
         self.node._on_goal(goal())
