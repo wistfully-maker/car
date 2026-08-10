@@ -16,8 +16,7 @@ TIMEOUTS = {
     "llm_classification": 60.0,
     "speech": 60.0,
     "delivery_navigation": 300.0,
-    "sim_delivery": 300.0,
-    "sim_wait": 600.0,
+    "simulation_navigation": 300.0,
     "cancel_ack": 15.0,
 }
 
@@ -33,8 +32,8 @@ class Harness:
                 "llm-1",
                 "speech-1",
                 "delivery-1",
-                "sim-trigger-1",
-                "sim-speech-1",
+                "simulation-1",
+                "unused-7",
             ]
         )
         self.orch = TaskOrchestrator(
@@ -144,6 +143,17 @@ class Harness:
                 "protocol_version": 1,
                 "task_id": "task-1",
                 "goal_id": "delivery-1",
+                "status": status,
+                "message": "" if status == "arrived" else "navigation failed",
+            }
+        )
+
+    def simulation_arrived(self, goal_id="simulation-1", status="arrived"):
+        self.orch.on_simulation_arrived(
+            {
+                "protocol_version": 1,
+                "task_id": "task-1",
+                "goal_id": goal_id,
                 "status": status,
                 "message": "" if status == "arrived" else "navigation failed",
             }
@@ -379,102 +389,117 @@ class OrchestratorSafetyTests(unittest.TestCase):
         self.assertEqual("task-2", h.orch.task["task_id"])
 
 
-class OrchestratorSimulationPhaseTests(unittest.TestCase):
+class OrchestratorDualWorkshopTests(unittest.TestCase):
+    """Lock the correlated dual-workshop arrival contract."""
+
     def test_simulation_disabled_goes_directly_to_complete(self):
         h = Harness(simulation_phase_enabled=False)
         h.reach("DELIVERY_HANDED_OFF")
         h.delivery_arrived()
         self.assertEqual("COMPLETE", h.orch.state)
-        self.assertEqual([], h.actions("publish_sim_trigger"))
+        self.assertEqual([], h.actions("publish_simulation_navigation_goal"))
         self.assertEqual(
             "complete",
             h.actions("publish_status")[-1]["status"],
         )
 
-    def test_simulation_enabled_waits_for_sim_complete_then_speaks(self):
+    def test_matching_physical_arrival_publishes_simulation_goal(self):
         h = Harness(simulation_phase_enabled=True)
         h.reach("DELIVERY_HANDED_OFF")
-        h.delivery_arrived()
-        self.assertEqual("WAITING_SIM", h.orch.state)
-
-        trigger = h.actions("publish_sim_trigger")[0]
-        self.assertEqual("task-1", trigger["task_id"])
-        self.assertEqual("sim-trigger-1", trigger["trigger_id"])
-        self.assertEqual("毛巾", trigger["selected_item"])
-        self.assertEqual("日用品加工车间", trigger["target_workshop"])
-
-        h.orch.on_sim_complete(
-            {
-                "protocol_version": 1,
-                "task_id": "task-1",
-                "status": "success",
-                "message": "",
-            }
+        h.delivery_arrived(status="arrived")
+        self.assertEqual("NAVIGATING_TO_SIM_WORKSHOP", h.orch.state)
+        goal = h.actions("publish_simulation_navigation_goal")[-1]
+        self.assertEqual(1, goal["protocol_version"])
+        self.assertEqual(h.orch.task["task_id"], goal["task_id"])
+        self.assertEqual("日用品加工车间", goal["target_workshop"])
+        self.assertEqual("毛巾", goal["selected_item"])
+        self.assertEqual(
+            {"protocol_version", "task_id", "goal_id",
+             "target_workshop", "selected_item"},
+            set(goal),
         )
+        h.simulation_arrived(goal_id=goal["goal_id"], status="arrived")
         self.assertEqual("COMPLETE", h.orch.state)
         self.assertEqual(
-            "仿真任务已完成，已将毛巾放入日用品加工车间",
-            h.actions("publish_speech")[-1]["text"],
+            "complete",
+            h.actions("publish_status")[-1]["status"],
         )
+        # 终态重复结果只重发缓存状态，不重复运动。
+        h.simulation_arrived(goal_id=goal["goal_id"], status="arrived")
+        self.assertEqual(1, len(h.actions("publish_simulation_navigation_goal")))
+
+    def test_physical_failure_never_publishes_simulation_goal(self):
+        h = Harness(simulation_phase_enabled=True)
+        h.reach("DELIVERY_HANDED_OFF")
+        h.delivery_arrived(status="failed")
+        self.assertEqual("ERROR", h.orch.state)
+        self.assertEqual([], h.actions("publish_simulation_navigation_goal"))
+
+    def test_simulation_arrival_failure_enters_error_without_complete(self):
+        h = Harness(simulation_phase_enabled=True)
+        h.reach("DELIVERY_HANDED_OFF")
+        h.delivery_arrived()
+        h.simulation_arrived(status="failed")
+        self.assertEqual("ERROR", h.orch.state)
         self.assertEqual(
+            "navigation failed",
+            h.actions("publish_status")[-1]["message"],
+        )
+
+    def test_first_arrival_never_publishes_complete(self):
+        h = Harness(simulation_phase_enabled=True)
+        h.reach("DELIVERY_HANDED_OFF")
+        h.delivery_arrived()
+        self.assertEqual("NAVIGATING_TO_SIM_WORKSHOP", h.orch.state)
+        self.assertNotEqual(
             "complete",
             h.actions("publish_status")[-1]["status"],
         )
 
-    def test_sim_complete_failure_enters_error_without_speech(self):
+    def test_stale_simulation_results_never_advance(self):
         h = Harness(simulation_phase_enabled=True)
         h.reach("DELIVERY_HANDED_OFF")
         h.delivery_arrived()
-        h.orch.on_sim_complete(
-            {
-                "protocol_version": 1,
-                "task_id": "task-1",
-                "status": "failed",
-                "message": "simulation crashed",
-            }
-        )
-        self.assertEqual("ERROR", h.orch.state)
-        self.assertEqual(
-            "simulation crashed",
-            h.actions("publish_status")[-1]["message"],
-        )
-        self.assertEqual(1, len(h.actions("publish_speech")))
+        for label, message in (
+            (
+                "wrong_task",
+                {"protocol_version": 1, "task_id": "task-2",
+                 "goal_id": "simulation-1", "status": "arrived", "message": ""},
+            ),
+            (
+                "wrong_goal",
+                {"protocol_version": 1, "task_id": "task-1",
+                 "goal_id": "stale-goal", "status": "arrived", "message": ""},
+            ),
+        ):
+            with self.subTest(label=label):
+                output_count = len(h.outputs)
+                h.orch.on_simulation_arrived(message)
+                self.assertEqual("NAVIGATING_TO_SIM_WORKSHOP", h.orch.state)
+                self.assertEqual(output_count, len(h.outputs))
 
-    def test_stale_sim_complete_is_ignored(self):
+    def test_simulation_navigation_has_own_timeout(self):
         h = Harness(simulation_phase_enabled=True)
         h.reach("DELIVERY_HANDED_OFF")
         h.delivery_arrived()
-        output_count = len(h.outputs)
-        h.orch.on_sim_complete(
-            {
-                "protocol_version": 1,
-                "task_id": "stale-task",
-                "status": "success",
-                "message": "",
-            }
-        )
-        self.assertEqual("WAITING_SIM", h.orch.state)
-        self.assertEqual(output_count, len(h.outputs))
-
-    def test_sim_stages_have_timeouts(self):
-        h = Harness(simulation_phase_enabled=True)
-        h.reach("DELIVERY_HANDED_OFF")
-        h.delivery_arrived()
-        self.assertEqual("WAITING_SIM", h.orch.state)
+        self.assertIsNotNone(h.orch.deadline)
         h.now[0] = h.orch.deadline + 0.01
         h.orch.tick()
         self.assertEqual("ERROR", h.orch.state)
-        self.assertIn("WAITING_SIM", h.actions("publish_status")[-1]["message"])
+        self.assertIn(
+            "NAVIGATING_TO_SIM_WORKSHOP",
+            h.actions("publish_status")[-1]["message"],
+        )
 
-    def test_cancel_works_in_simulation_stages(self):
+    def test_cancel_works_in_simulation_navigation(self):
         h = Harness(simulation_phase_enabled=True)
         h.reach("DELIVERY_HANDED_OFF")
         h.delivery_arrived()
-        self.assertEqual("WAITING_SIM", h.orch.state)
         h.orch.on_cancel(
             {"task_id": "task-1", "reason": "operator_cancel"}
         )
         self.assertEqual("CANCELLED", h.orch.state)
+        self.assertEqual("IDLE", h.actions("publish_motion_mode")[-1])
 
 
 class OrchestratorDeliveryHandoffTests(unittest.TestCase):

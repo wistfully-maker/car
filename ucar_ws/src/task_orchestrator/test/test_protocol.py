@@ -15,7 +15,6 @@ from task_orchestrator.protocol import (
     parse_dependencies_ready,
     parse_llm_result,
     parse_qr_result,
-    parse_sim_complete,
     parse_speak_request,
     parse_speech_done,
     parse_task_request,
@@ -341,42 +340,6 @@ class ProtocolTests(unittest.TestCase):
             },
             "message": "",
         }
-
-
-class SimCompleteProtocolTests(unittest.TestCase):
-    def test_parses_success_without_message(self):
-        message = {
-            "protocol_version": 1,
-            "task_id": "task-001",
-            "status": "success",
-        }
-        result = parse_sim_complete(encode(message), "task-001")
-        self.assertEqual("success", result["status"])
-        self.assertEqual("", result["message"])
-
-    def test_rejects_wrong_task_or_unsupported_status(self):
-        message = {
-            "protocol_version": 1,
-            "task_id": "task-001",
-            "status": "success",
-        }
-        with self.assertRaises(ProtocolError):
-            parse_sim_complete(encode(message), "stale-task")
-        message["status"] = "running"
-        with self.assertRaises(ProtocolError):
-            parse_sim_complete(encode(message), "task-001")
-
-    def test_failed_requires_failure_message(self):
-        message = {
-            "protocol_version": 1,
-            "task_id": "task-001",
-            "status": "failed",
-        }
-        with self.assertRaises(ProtocolError):
-            parse_sim_complete(encode(message), "task-001")
-        message["message"] = "simulation crashed"
-        result = parse_sim_complete(encode(message), "task-001")
-        self.assertEqual("simulation crashed", result["message"])
 
 
 if __name__ == "__main__":

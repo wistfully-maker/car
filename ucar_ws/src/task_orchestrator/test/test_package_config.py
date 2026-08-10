@@ -69,8 +69,8 @@ class PackageConfigTests(unittest.TestCase):
                 "/llm/classify/request",
                 "/voice/speak",
                 "/task/delivery_navigation_goal",
+                "/task/simulation_navigation_goal",
                 "/task/motion_mode",
-                "/task/sim_trigger",
             },
             publisher_topics,
         )
@@ -84,7 +84,7 @@ class PackageConfigTests(unittest.TestCase):
                 "/voice/speak_done",
                 "/task/delivery_arrived",
                 "/task/cancel",
-                "/task/sim_complete",
+                "/task/simulation_arrived",
             },
             subscriber_topics,
         )

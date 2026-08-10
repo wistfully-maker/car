@@ -17,7 +17,6 @@ from task_orchestrator.protocol import (
     parse_dependencies_ready,
     parse_llm_result,
     parse_qr_result,
-    parse_sim_complete,
     parse_speech_done,
     parse_task_request,
 )
@@ -30,8 +29,7 @@ DEFAULT_TIMEOUTS = {
     "llm_classification": 120.0,
     "speech": 60.0,
     "delivery_navigation": 300.0,
-    "sim_delivery": 300.0,
-    "sim_wait": 600.0,
+    "simulation_navigation": 300.0,
     "cancel_ack": 15.0,
 }
 
@@ -62,8 +60,8 @@ def _make_publishers():
         "publish_delivery_goal": rospy.Publisher(
             "/task/delivery_navigation_goal", String, queue_size=10
         ),
-        "publish_sim_trigger": rospy.Publisher(
-            "/task/sim_trigger", String, queue_size=10
+        "publish_simulation_navigation_goal": rospy.Publisher(
+            "/task/simulation_navigation_goal", String, queue_size=10
         ),
     }
 
@@ -275,19 +273,20 @@ def _subscribe(orchestrator, outputs, publishers, callback_lock):
         ),
     )
     rospy.Subscriber(
-        "/task/sim_complete",
+        "/task/simulation_arrived",
         String,
         _callback(
             orchestrator,
             outputs,
             publishers,
-            lambda raw: parse_sim_complete(
+            lambda raw: parse_arrival(
                 raw,
                 orchestrator.task["task_id"],
+                orchestrator.task["simulation_goal_id"],
             ),
-            orchestrator.on_sim_complete,
+            orchestrator.on_simulation_arrived,
             callback_lock,
-            TaskOrchestrator.WAITING_SIM,
+            TaskOrchestrator.NAVIGATING_TO_SIM_WORKSHOP,
         ),
     )
     rospy.Subscriber(
@@ -309,6 +308,7 @@ def _subscribe(orchestrator, outputs, publishers, callback_lock):
                 TaskOrchestrator.WAITING_QR,
                 TaskOrchestrator.WAITING_LLM,
                 TaskOrchestrator.WAITING_SPEECH,
+                TaskOrchestrator.NAVIGATING_TO_SIM_WORKSHOP,
             ),
         ),
     )
