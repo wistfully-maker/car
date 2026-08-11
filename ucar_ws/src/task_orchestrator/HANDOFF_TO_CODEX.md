@@ -284,6 +284,69 @@ task_orchestrator 播报，匹配回执后进入 COMPLETE。
 
 ### 14.5 测试与部署状态
 
-本地 TDD 任务 1～8 已完成（每任务 RED→GREEN→单独提交），任务 9 全量回归待执行。
+本地 TDD 任务 1～9 全部完成（每任务 RED→GREEN→单独提交，最终证据见 14.6）。
 **尚未部署、未 catkin 编译、未实车验收**；车端下一步顺序：审查 diff → 备份车端包 →
 部署到 `/home/ucar/ucar_ws/src` → catkin build → 无运动 topic 模拟 → 分级看护实车验收。
+
+### 14.6 最终验证证据（任务 9，2026-08-11）
+
+分支：`codex/phase3-line-follow-integration`
+最终 HEAD：`37ae6724965c84eca6ef8e9ceb196a4a1758af9e`
+起点：`5c7d82c`（交接说明），基线祖先 `7b61069` 已校验。
+
+提交序列（7b61069..HEAD 共 8 个实施提交）：
+
+```text
+c3dc1ae feat(phase3): add line-follow package configuration
+4bd6c63 feat(phase3): add line-camera transform
+23f6faf feat(phase3): define line-follow protocol and runtime
+69ec0b4 feat(phase3): supervise navigation and proven line routes
+804a48c feat(orchestrator): sequence phase3 navigation and line follow
+d2db4bc feat(orchestrator): isolate line-follow velocity ownership
+ab80a47 feat(bringup): include safe phase3 line-follow stack
+37ae672 docs(phase3): add tuning and staged vehicle acceptance
+```
+
+测试命令与结果（本机 Python 3.13.2）：
+
+```text
+python -m unittest discover -s ucar_ws/src/line_follow_integration/test -p "test_*.py"   -> 50 tests OK
+python -m unittest discover -s ucar_ws/src/task_orchestrator/test -p "test_*.py"          -> 319 tests OK
+python -m unittest discover -s ucar_ws/src/stop/test -p "test_*.py"                       -> 113 tests（见下方环境说明）
+python -m unittest discover -s ucar_ws/src/llm_spark/test -p "test_*.py"                  -> 11 tests OK
+python -m compileall -q ucar_ws/src/line_follow_integration ucar_ws/src/task_orchestrator ucar_ws/src/stop  -> 0
+XML 解析（phase3/task_orchestrator/competition_full launch）                                -> 0
+YAML 解析（phase3.yaml）                                                                    -> 0
+四个导入脚本 SHA-256 逐一核对                                                               -> 匹配
+git diff --check                                                                           -> 0
+```
+
+源文件与模型 SHA-256：
+
+```text
+follow_left_v4.py   8a9471e5917b93bdddd1f0b191e8ace48fe4d6baa8269f68204d4fba23fbbfb3
+follow_right_v4.py  92fd5098be423bab61c3eb5deb5c202c12adbc6c45bc4638a1af7bf5931a5d73
+follow_mid_v4.py    736d0666475f25f48f1e11e888a6c40864af95496754ff37f6311fbba3d0b07e
+yolo_server.py      9d7010328a636742c1c60012cd6c4f0c78ae3cfc2ab4cf57c815ec88de4e9a51
+best.pt              cb1c5db5da5db75fe40000410295970f2d7fb6a59d9600f82a22d836829e1cdd
+```
+
+环境说明（必须告知 Codex）：本仓库 `core.autocrlf=true`，Windows 检出会把 LF 冻结
+快照文件污染为 CRLF，导致工作树中 stop 的 `test_frozen_snapshot_files_match_vehicle_manifest`
+5 项失败（stop 自 `7b61069` 无任何改动，已用 `git diff 7b61069 HEAD -- ucar_ws/src/stop`
+验证为空）。已用 `git -c core.autocrlf=false archive` 提取 LF 版本验证：**stop 113 项
+全部通过**，且五个快照 blob 哈希与 `VEHICLE_SNAPSHOT.sha256` 逐一一致。部署/CI 在
+Linux（LF）上不受影响。
+
+未验证的实车风险：
+
+- 中心裁剪（960x720→640x480）对真实巡线输入的影响未实测；
+- YOLO 在实车相机曝光下的 `red_light/straight/left_turn/right_turn` 置信度未实测；
+- 相机适配器 15 FPS 限流、图像健康门控与速度链在真实频率下的行为未实测；
+- `start_competition.sh` 的 YOLO 模型预检在车端路径（`/home/ucar/...`）未实测；
+- 三个 V4 巡线脚本的 PID/旋转/停车参数在实车场地未复测。
+
+部署顺序（下一步，Codex 执行）：代码审查 → 全量回归 → 车端备份 →
+部署到 `/home/ucar/ucar_ws/src` → catkin build → 无运动 topic 模拟 →
+分级看护实车验收（导航起点 → 图像验证 → 方向锁定 → 单放 `/cmd_vel/line_follow`
+→ 最终停车线 → 全流程）。
