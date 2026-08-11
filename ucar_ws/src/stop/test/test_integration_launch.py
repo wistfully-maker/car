@@ -120,11 +120,16 @@ class RootCompositionTests(unittest.TestCase):
 
     def test_root_owns_shared_hardware_in_handoff_mode(self):
         root = ET.parse(COMPETITION).getroot()
+        handoff = next(
+            group for group in root.findall("group")
+            if group.attrib.get("if") == "$(arg start_navigation_handoff)"
+        )
         hardware = [
-            g for g in root.findall("group")
-            if g.attrib.get("if", "").startswith("$(eval")
-            and ("start_base" in g.attrib.get("if", "")
-                 or "start_lidar" in g.attrib.get("if", ""))
+            group for group in handoff.findall("group")
+            if group.attrib.get("if") in (
+                "$(arg start_base)",
+                "$(arg start_lidar)",
+            )
         ]
         self.assertEqual(2, len(hardware))
         files = {
