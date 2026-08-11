@@ -300,7 +300,6 @@ def go_to_find_point():
             dist = math.hypot(x - rx, y - ry)
             if dist < 0.3:
                 rospy.loginfo("  Already at waypoint (dist=%.2f < 0.3), skip nav", dist)
-                current_point_index += 1
                 isNavPointReached = True
                 return
         except Exception:
@@ -570,6 +569,7 @@ def boxes_callback(msg):
                 isBoxesCallbackFinished = True
             else:
                 rospy.loginfo("  Exhausted, next waypoint")
+                current_point_index += 1
                 go_to_find_point()
                 rotate_num = 0
 
@@ -586,8 +586,6 @@ def goal_callback(msg):
         return
 
     if msg.status.status == 3:                    # SUCCEEDED
-        if search_item_stage != 2:
-            current_point_index += 1
         # 清除代价地图
         try:
             rospy.wait_for_service('/move_base/clear_costmaps', 1.0)
@@ -1025,4 +1023,3 @@ if __name__ == "__main__":
 
     rospy.loginfo("[mission] Waiting for /task/stop_mission_goal (no auto motion)")
     rospy.spin()
-

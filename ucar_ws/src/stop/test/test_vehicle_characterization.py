@@ -173,6 +173,35 @@ class VehicleCharacterizationTests(unittest.TestCase):
     def test_go_to_find_point_skips_close_waypoints(self):
         self.assertIn("dist < 0.3", MISSION_SOURCE)
 
+    def test_waypoint_index_advances_only_after_scan_exhaustion(self):
+        go_source = ast.get_source_segment(
+            MISSION_SOURCE, function(MISSION_TREE, "go_to_find_point")
+        )
+        goal_source = ast.get_source_segment(
+            MISSION_SOURCE, function(MISSION_TREE, "goal_callback")
+        )
+        boxes_source = ast.get_source_segment(
+            MISSION_SOURCE, function(MISSION_TREE, "boxes_callback")
+        )
+
+        self.assertNotIn("current_point_index += 1", go_source)
+        self.assertNotIn("current_point_index += 1", goal_source)
+
+        exhausted_source = boxes_source[
+            boxes_source.index('rospy.loginfo("  Exhausted, next waypoint")'):
+        ]
+        self.assertIn("current_point_index += 1", exhausted_source)
+        self.assertLess(
+            exhausted_source.index("current_point_index += 1"),
+            exhausted_source.index("go_to_find_point()"),
+        )
+
+    def test_sim_workshop_records_the_active_scan_waypoint(self):
+        boxes_source = ast.get_source_segment(
+            MISSION_SOURCE, function(MISSION_TREE, "boxes_callback")
+        )
+        self.assertIn("sim_point_index = current_point_index", boxes_source)
+
     def test_frozen_snapshot_files_match_vehicle_manifest(self):
         expected = {}
         for line in MANIFEST.read_text(encoding="utf-8").splitlines():
