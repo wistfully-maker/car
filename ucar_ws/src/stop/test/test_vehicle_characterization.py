@@ -51,6 +51,22 @@ def function(tree, name):
     return None
 
 
+def function_source(source, tree, name):
+    """Return one top-level function body on vehicle Python 3.7."""
+    node = function(tree, name)
+    if node is None:
+        return None
+    lines = source.splitlines(True)
+    following = [
+        candidate.lineno
+        for candidate in tree.body
+        if isinstance(candidate, (ast.FunctionDef, ast.ClassDef))
+        and candidate.lineno > node.lineno
+    ]
+    end = min(following) - 1 if following else len(lines)
+    return "".join(lines[node.lineno - 1:end])
+
+
 def assigned_literal(tree, target_name):
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign):
@@ -174,14 +190,14 @@ class VehicleCharacterizationTests(unittest.TestCase):
         self.assertIn("dist < 0.3", MISSION_SOURCE)
 
     def test_waypoint_index_advances_only_after_scan_exhaustion(self):
-        go_source = ast.get_source_segment(
-            MISSION_SOURCE, function(MISSION_TREE, "go_to_find_point")
+        go_source = function_source(
+            MISSION_SOURCE, MISSION_TREE, "go_to_find_point"
         )
-        goal_source = ast.get_source_segment(
-            MISSION_SOURCE, function(MISSION_TREE, "goal_callback")
+        goal_source = function_source(
+            MISSION_SOURCE, MISSION_TREE, "goal_callback"
         )
-        boxes_source = ast.get_source_segment(
-            MISSION_SOURCE, function(MISSION_TREE, "boxes_callback")
+        boxes_source = function_source(
+            MISSION_SOURCE, MISSION_TREE, "boxes_callback"
         )
 
         self.assertNotIn("current_point_index += 1", go_source)
@@ -197,8 +213,8 @@ class VehicleCharacterizationTests(unittest.TestCase):
         )
 
     def test_sim_workshop_records_the_active_scan_waypoint(self):
-        boxes_source = ast.get_source_segment(
-            MISSION_SOURCE, function(MISSION_TREE, "boxes_callback")
+        boxes_source = function_source(
+            MISSION_SOURCE, MISSION_TREE, "boxes_callback"
         )
         self.assertIn("sim_point_index = current_point_index", boxes_source)
 

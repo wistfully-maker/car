@@ -110,6 +110,7 @@ class FakeRosEnvironment:
         )
         self._write_fake(
             "rospack",
+            'echo "rospack:$*" >> "$CALL_LOG"\n'
             'if [[ "$1 $2" == "find stop" ]]; then\n'
             '  echo "%s"\n  exit 0\nfi\nexit 1' % str(self.stop_root),
         )
@@ -755,10 +756,13 @@ class CompetitionStartScriptTests(unittest.TestCase):
                 self.assertIn(word, result.stderr.lower())
 
     def test_rejects_amcl_when_lidar_loc_is_internal_or_external(self):
-        for arg in ("start_fast_nav:=true",
-                    "start_fast_nav:=false start_navigation_handoff:=false"):
-            with self.subTest(arg=arg):
-                _, result = self.run_fake(arg, nodes="/amcl", live_nodes={"/amcl"})
+        for args in (("start_fast_nav:=true",),
+                     ("start_fast_nav:=false",
+                      "start_navigation_handoff:=false")):
+            with self.subTest(args=args):
+                _, result = self.run_fake(
+                    *args, nodes="/amcl", live_nodes={"/amcl"}
+                )
                 self.assertNotEqual(0, result.returncode)
                 self.assertIn("/amcl", result.stderr)
 
