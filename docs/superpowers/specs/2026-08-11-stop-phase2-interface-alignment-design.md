@@ -63,9 +63,8 @@ yaw = 0.053792653589793
 定位所有权归 `navigation_handoff_supervisor`：
 
 - stop 的集成 launch 将内部自动 `/initialpose` 默认关闭；
-- supervisor 不再在刚启动 roslaunch、AMCL 订阅者尚未就绪时发布；
-- stop readiness 成功后、`/task/stop_mission_goal` 放行前，由 supervisor 发布一次上述领取区位姿；
-- 然后授权 `STOP_NAVIGATION` 并放行任务。
+- supervisor 的 `/initialpose` 发布器使用 latch，在 stop 栈启动后立即发布上述领取区位姿，确保稍后启动的 AMCL 也能收到；
+- stop readiness 成功后才授权 `STOP_NAVIGATION` 并放行 `/task/stop_mission_goal`。
 
 这样车辆的 TF 会反映二维码区实际位置，到第一个车间航点约 1.91 米，不会触发 `dist < 0.3` 的误跳过分支。
 
@@ -92,7 +91,7 @@ PCA 逼近期间的 move_base 结果不改变搜索航点索引。
 1. 编排器测试两次停车分别进入两个语音等待状态，匹配 speak_done 后才继续；
 2. 测试 TTS 失败、超时、重复和过期 identity 均 fail closed 或被忽略；
 3. 场景测试完整顺序为初始播报、第一次停车播报、第二次停车播报，共三次 TTS；
-4. supervisor 测试 `/initialpose` 只在 readiness 成功后、任务放行前发布，且坐标为领取区观察点；
+4. supervisor 测试 `/initialpose` 只由 supervisor 发布、坐标为领取区观察点，且任务必须在 readiness 成功后才放行；
 5. launch/XML 测试 stop 集成 launch 不再发布航点1初始位姿；
 6. stop 特征测试到达航点不递增，扫描耗尽才递增，双指针记录当前航点；
 7. handoff 测试状态 topic 上的所有消息都能通过 `task_orchestrator.protocol.parse_navigation_handoff_status`；
