@@ -98,9 +98,12 @@ line_follow_integration
 
 ```text
 巡线脚本 /cmd_vel
-  --ROS remap--> /cmd_vel/line_follow
+  --ROS remap--> /line_follow/cmd_vel_candidate
+  --phase3_supervisor 图像健康门控--> /cmd_vel/line_follow
   --velocity_arbiter, mode=LINE_FOLLOW--> /cmd_vel
 ```
+
+候选速度是包内接口。监管器只有在派生巡线图像新鲜时才转发；图像变旧时立即阻断候选速度并发布零速度，避免脚本与监管器在同一 topic 上竞争。
 
 全局速度仲裁器新增 `LINE_FOLLOW` 模式和 `line_follow` 输入源。只有全局状态为 `LINE_FOLLOWING` 时放行该源。模式切换、错误、超时、节点退出和关闭时都先发布零速度。
 
@@ -127,9 +130,10 @@ WAITING_SIMULATION_SPEECH
 4. `red_light` 保持等待且不发送巡线速度。
 5. 收到 `left_turn`、`right_turn` 或 `straight` 后锁定本次路线；后续识别变化不得中途改路线。
 6. 30 秒没有方向结果时按用户确认的规则选择 `straight`。
-7. `LINE_FOLLOWING`：启动对应 V4 子程序，并放行 `/cmd_vel/line_follow`。
-8. 只有最终停车线检测产生本次新鲜的完成标记，且车辆已经发送零速度，才算巡线成功。
-9. 成功后 `task_orchestrator` 请求一次“任务完成”TTS；只有匹配的成功回执进入 `COMPLETE`。
+7. 锁定方向后结束本次监管器拥有的 YOLO 子进程，释放推理资源。
+8. `LINE_FOLLOWING`：启动对应 V4 子程序，并放行 `/cmd_vel/line_follow`。
+9. 只有最终停车线检测产生本次新鲜的完成标记，且车辆已经发送零速度，才算巡线成功。
+10. 成功后 `task_orchestrator` 请求一次“任务完成”TTS；只有匹配的成功回执进入 `COMPLETE`。
 
 不得由 `auto_drive_v3.py` 或巡线脚本直接调用 TTS。
 
@@ -156,7 +160,7 @@ WAITING_SIMULATION_SPEECH
 }
 ```
 
-导航目标额外包含 `frame_id` 与 `pose`。导航返回包含 `status=success|failure` 和失败 `reason`。巡线状态使用以下枚举：
+导航目标额外包含 `frame_id` 与 `pose`。为与现有 `task_orchestrator` arrival 接口一致，导航返回包含 `status=arrived|failed` 和失败 `message`。巡线状态使用以下枚举：
 
 ```text
 waiting_signal
@@ -211,12 +215,15 @@ camera:
 timeouts:
   navigation: 300.0
   image_ready: 5.0
+  image_max_age: 0.5
   image_recovery_grace: 3.0
   direction: 30.0
   line_follow: 120.0
 ```
 
 现场调整第三阶段起点只修改此 YAML 并重启根 launch，不修改 Python。第二阶段三个车间扫描航点在本任务中暂不迁移，避免扩大改动范围。
+
+`task_orchestrator` 的外层状态超时使用 `line_navigation=310.0`、`line_direction=35.0`、`line_follow=125.0`，分别严格大于第三阶段节点内部的 300、30、120 秒，避免边界时刻由外层先行超时。
 
 ## 9. 子进程与故障处理
 
@@ -226,7 +233,7 @@ timeouts:
 
 - 导航拒绝、失败或 300 秒超时：零速度并进入全局 `ERROR`。
 - 图像初始 5 秒未就绪：零速度并失败。
-- 巡线过程中图像中断：立即阻断巡线速度；允许 3 秒恢复窗口，仍未恢复才进入 `ERROR`。
+- 巡线图像超过 0.5 秒未更新：监管器立即阻断候选速度并发布零速度；允许 3 秒恢复窗口，恢复后继续转发，仍未恢复才进入 `ERROR`。
 - 方向识别 30 秒无结果：选择 `straight`，不是错误。
 - 巡线子进程提前退出：失败，不得伪造成功。
 - 巡线 120 秒未检测最终停车线：零速度、结束所拥有的子进程并失败。
