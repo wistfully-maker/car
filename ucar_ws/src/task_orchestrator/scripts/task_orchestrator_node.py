@@ -21,6 +21,7 @@ from task_orchestrator.protocol import (
     parse_cancel,
     parse_dependencies_ready,
     parse_llm_result,
+    parse_line_status,
     parse_navigation_handoff_status,
     parse_qr_result,
     parse_speech_done,
@@ -36,6 +37,9 @@ DEFAULT_TIMEOUTS = {
     "speech": 60.0,
     "delivery_navigation": 300.0,
     "simulation_navigation": 300.0,
+    "line_navigation": 310.0,
+    "line_direction": 35.0,
+    "line_follow": 125.0,
     "cancel_ack": 15.0,
 }
 
@@ -68,6 +72,12 @@ def _make_publishers():
         ),
         "publish_simulation_navigation_goal": rospy.Publisher(
             "/task/simulation_navigation_goal", String, queue_size=10
+        ),
+        "publish_line_navigation_goal": rospy.Publisher(
+            "/task/line_navigation_goal", String, queue_size=10
+        ),
+        "publish_line_follow_start": rospy.Publisher(
+            "/task/line_follow/start", String, queue_size=10
         ),
     }
 
@@ -318,6 +328,43 @@ def _subscribe(orchestrator, outputs, publishers, callback_lock):
         ),
     )
     rospy.Subscriber(
+        "/task/line_navigation_arrived",
+        String,
+        _callback(
+            orchestrator,
+            outputs,
+            publishers,
+            lambda raw: parse_arrival(
+                raw,
+                orchestrator.task["task_id"],
+                orchestrator.task["line_navigation_goal_id"],
+            ),
+            orchestrator.on_line_navigation_arrived,
+            callback_lock,
+            TaskOrchestrator.NAVIGATING_LINE_START,
+        ),
+    )
+    rospy.Subscriber(
+        "/task/line_follow/status",
+        String,
+        _callback(
+            orchestrator,
+            outputs,
+            publishers,
+            lambda raw: parse_line_status(
+                raw,
+                orchestrator.task["task_id"],
+                orchestrator.task["line_follow_goal_id"],
+            ),
+            orchestrator.on_line_status,
+            callback_lock,
+            (
+                TaskOrchestrator.WAITING_LINE_DIRECTION,
+                TaskOrchestrator.LINE_FOLLOWING,
+            ),
+        ),
+    )
+    rospy.Subscriber(
         "/task/cancel",
         String,
         _callback(
@@ -341,6 +388,10 @@ def _subscribe(orchestrator, outputs, publishers, callback_lock):
                 TaskOrchestrator.DELIVERY_HANDED_OFF,
                 TaskOrchestrator.NAVIGATING_TO_WORKSHOP,
                 TaskOrchestrator.NAVIGATING_TO_SIM_WORKSHOP,
+                TaskOrchestrator.NAVIGATING_LINE_START,
+                TaskOrchestrator.WAITING_LINE_DIRECTION,
+                TaskOrchestrator.LINE_FOLLOWING,
+                TaskOrchestrator.WAITING_FINAL_SPEECH,
             ),
         ),
     )
@@ -354,12 +405,14 @@ def main():
     simulation_phase_enabled = bool(
         rospy.get_param("~simulation_phase_enabled", False)
     )
+    line_start_goal = rospy.get_param("~line_start_goal", None)
     orchestrator = TaskOrchestrator(
         outputs,
         rospy.get_time,
         lambda: uuid.uuid4().hex,
         timeouts,
         simulation_phase_enabled=simulation_phase_enabled,
+        line_start_goal=line_start_goal,
     )
     publishers = _make_publishers()
     with callback_lock:

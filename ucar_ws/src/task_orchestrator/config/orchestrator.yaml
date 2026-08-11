@@ -6,6 +6,10 @@ timeouts:
   speech: 60.0
   delivery_navigation: 300.0
   simulation_navigation: 300.0
+  # 第三阶段外层超时严格大于 line_follow_integration 内部 300/30/120 秒。
+  line_navigation: 310.0
+  line_direction: 35.0
+  line_follow: 125.0
   cancel_ack: 15.0
 
 # 仿真阶段开关：false 时实物配送完成即 complete（第一部分验收状态）；

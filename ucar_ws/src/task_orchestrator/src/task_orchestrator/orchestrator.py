@@ -1,5 +1,7 @@
 """ROS-independent state machine for one complete U-CAR task."""
 
+import math
+
 from task_orchestrator.categories import (
     format_delivery_speech,
     format_result_speech,
@@ -20,6 +22,10 @@ class TaskOrchestrator:
     DELIVERY_HANDED_OFF = "DELIVERY_HANDED_OFF"
     NAVIGATING_TO_WORKSHOP = "NAVIGATING_TO_WORKSHOP"
     NAVIGATING_TO_SIM_WORKSHOP = "NAVIGATING_TO_SIM_WORKSHOP"
+    NAVIGATING_LINE_START = "NAVIGATING_LINE_START"
+    WAITING_LINE_DIRECTION = "WAITING_LINE_DIRECTION"
+    LINE_FOLLOWING = "LINE_FOLLOWING"
+    WAITING_FINAL_SPEECH = "WAITING_FINAL_SPEECH"
     COMPLETE = "COMPLETE"
     ERROR = "ERROR"
     CANCELLED = "CANCELLED"
@@ -36,6 +42,10 @@ class TaskOrchestrator:
             DELIVERY_HANDED_OFF,
             NAVIGATING_TO_WORKSHOP,
             NAVIGATING_TO_SIM_WORKSHOP,
+            NAVIGATING_LINE_START,
+            WAITING_LINE_DIRECTION,
+            LINE_FOLLOWING,
+            WAITING_FINAL_SPEECH,
         )
     )
     _TERMINAL_STATES = frozenset(
@@ -52,20 +62,48 @@ class TaskOrchestrator:
         DELIVERY_HANDED_OFF: "delivery_navigation",
         NAVIGATING_TO_WORKSHOP: "delivery_navigation",
         NAVIGATING_TO_SIM_WORKSHOP: "simulation_navigation",
+        NAVIGATING_LINE_START: "line_navigation",
+        WAITING_LINE_DIRECTION: "line_direction",
+        LINE_FOLLOWING: "line_follow",
+        WAITING_FINAL_SPEECH: "speech",
     }
 
     def __init__(self, outputs, clock, id_factory, timeouts,
-                 simulation_phase_enabled=False):
+                 simulation_phase_enabled=False, line_start_goal=None):
         self._outputs = outputs
         self._clock = clock
         self._id_factory = id_factory
         self._timeouts = dict(timeouts)
         self.simulation_phase_enabled = bool(simulation_phase_enabled)
+        self._line_start_goal = self._validate_line_start_goal(line_start_goal)
         self.state = self.IDLE
         self.task = None
         self.deadline = None
         self.last_status = None
         self._emit("publish_motion_mode", motion_mode_for_state(self.state))
+
+    @staticmethod
+    def _validate_line_start_goal(line_start_goal):
+        if line_start_goal is None:
+            raise ValueError("line_start_goal is required for Phase 3")
+        try:
+            pose = dict(line_start_goal)
+        except (TypeError, ValueError):
+            raise ValueError("line_start_goal must be an object")
+        for field in ("frame_id", "x", "y", "qz", "qw"):
+            if field not in pose:
+                raise ValueError("line_start_goal requires %s" % field)
+        for field in ("x", "y", "qz", "qw"):
+            value = pose[field]
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+            ):
+                raise ValueError("line_start_goal %s must be finite" % field)
+        if not isinstance(pose["frame_id"], str) or not pose["frame_id"].strip():
+            raise ValueError("line_start_goal frame_id must be non-blank text")
+        return pose
 
     def _emit(self, action, payload):
         self._outputs.append((action, payload))
@@ -275,6 +313,7 @@ class TaskOrchestrator:
             self.WAITING_SPEECH,
             self.WAITING_DELIVERY_SPEECH,
             self.WAITING_SIMULATION_SPEECH,
+            self.WAITING_FINAL_SPEECH,
         ):
             if self._matches(message, "speech_id", "speech_id"):
                 self._republish_status()
@@ -292,6 +331,10 @@ class TaskOrchestrator:
                 self._complete()
             return
         if self.state == self.WAITING_SIMULATION_SPEECH:
+            # 第二阶段仿真播报成功后进入第三阶段，不再直接完成。
+            self._publish_line_navigation_goal()
+            return
+        if self.state == self.WAITING_FINAL_SPEECH:
             self._complete()
             return
 
@@ -344,6 +387,63 @@ class TaskOrchestrator:
                 "text": text,
             },
         )
+
+    def _publish_line_navigation_goal(self):
+        goal_id = self._id_factory()
+        self.task["line_navigation_goal_id"] = goal_id
+        self._transition(self.NAVIGATING_LINE_START)
+        self._publish_status("running")
+        self._emit(
+            "publish_line_navigation_goal",
+            {
+                "protocol_version": 1,
+                "task_id": self.task["task_id"],
+                "goal_id": goal_id,
+                "pose": dict(self._line_start_goal),
+            },
+        )
+
+    def on_line_navigation_arrived(self, message):
+        if self.state != self.NAVIGATING_LINE_START:
+            if self._matches(message, "goal_id", "line_navigation_goal_id"):
+                self._republish_status()
+            return
+        if not self._matches(message, "goal_id", "line_navigation_goal_id"):
+            return
+        if message["status"] == "failed":
+            self._fail(message["message"])
+            return
+
+        goal_id = self._id_factory()
+        self.task["line_follow_goal_id"] = goal_id
+        self._transition(self.WAITING_LINE_DIRECTION)
+        self._publish_status("running")
+        self._emit(
+            "publish_line_follow_start",
+            {
+                "protocol_version": 1,
+                "task_id": self.task["task_id"],
+                "goal_id": goal_id,
+            },
+        )
+
+    def on_line_status(self, message):
+        if self.state not in (self.WAITING_LINE_DIRECTION, self.LINE_FOLLOWING):
+            if self._matches(message, "goal_id", "line_follow_goal_id"):
+                self._republish_status()
+            return
+        if not self._matches(message, "goal_id", "line_follow_goal_id"):
+            return
+        if self.state == self.WAITING_LINE_DIRECTION:
+            # 只有 direction_selected 才进入巡线；红灯等待与过早的成功/失败不推进。
+            if message["status"] == "direction_selected":
+                self._transition(self.LINE_FOLLOWING)
+                self._publish_status("running")
+            return
+        if message["status"] == "success":
+            self._start_speech(self.WAITING_FINAL_SPEECH, "任务完成")
+        elif message["status"] == "failure":
+            self._fail(message.get("reason") or "line follow failed")
 
     def _publish_simulation_goal(self):
         goal_id = self._id_factory()

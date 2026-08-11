@@ -82,6 +82,9 @@ ORCHESTRATOR_TIMEOUTS = {
     "speech": 60.0,
     "delivery_navigation": 300.0,
     "simulation_navigation": 300.0,
+    "line_navigation": 310.0,
+    "line_direction": 35.0,
+    "line_follow": 125.0,
     "cancel_ack": 15.0,
 }
 
@@ -248,7 +251,8 @@ class Scenario:
         self.ids = iter(
             ["pickup-1", "search-1", "llm-1", "speech-1",
              "delivery-1", "delivery-speech-1", "simulation-1",
-             "simulation-speech-1", "unused-9"]
+             "simulation-speech-1", "line-nav-1", "line-follow-1",
+             "final-speech-1", "unused-12"]
         )
         self.outputs = []
         self.task_id = "task-1"
@@ -258,6 +262,13 @@ class Scenario:
             lambda: next(self.ids),
             dict(ORCHESTRATOR_TIMEOUTS),
             simulation_phase_enabled=True,
+            line_start_goal={
+                "frame_id": "map",
+                "x": 0.5167081260031493,
+                "y": -3.125171302690142,
+                "qz": -0.7044294777312331,
+                "qw": 0.7097739857893512,
+            },
         )
         self.actions = FakeActions(lambda: self.now[0])
         config = dict(HANDOFF_CONFIG)
@@ -369,6 +380,21 @@ class Scenario:
         self.adapter.on_simulation_goal(sim_goal)
         self.adapter.mission.phase2_arrived()
         self.complete_current_speech()
+        self.orch.on_line_navigation_arrived(
+            {"protocol_version": 1, "task_id": self.task_id,
+             "goal_id": "line-nav-1", "status": "arrived", "message": ""}
+        )
+        self.orch.on_line_status(
+            {"protocol_version": 1, "task_id": self.task_id,
+             "goal_id": "line-follow-1", "status": "direction_selected",
+             "direction": "left_turn"}
+        )
+        self.orch.on_line_status(
+            {"protocol_version": 1, "task_id": self.task_id,
+             "goal_id": "line-follow-1", "status": "success",
+             "direction": "left_turn"}
+        )
+        self.complete_current_speech()
 
     # ---------- 安全断言 ----------
 
@@ -418,16 +444,19 @@ class HappyPathScenarioTests(unittest.TestCase):
         self.assertEqual(1, len(s.actions.released))
         self.assertEqual("IDLE", s.motion_modes()[-1])
         speeches = s.actions_("publish_speech")
-        self.assertEqual(3, len(speeches))
+        self.assertEqual(4, len(speeches))
         self.assertEqual(
             [
                 "取得苹果属于食品大类应放置在食品加工车间，"
                 "仿真环境中取得毛巾属于日用品大类应放置在日用品加工车间",
                 "已将苹果放入食品加工车间",
                 "仿真任务已完成，已将毛巾放入日用品加工车间",
+                "任务完成",
             ],
             [speech["text"] for speech in speeches],
         )
+        self.assertEqual(1, len(s.actions_("publish_line_navigation_goal")))
+        self.assertEqual(1, len(s.actions_("publish_line_follow_start")))
 
     def test_each_parking_speech_gates_the_next_phase(self):
         s = Scenario()
@@ -445,7 +474,25 @@ class HappyPathScenarioTests(unittest.TestCase):
         self.assertEqual("WAITING_SIMULATION_SPEECH", s.orch.state)
 
         s.complete_current_speech()
-        self.assertEqual("COMPLETE", s.orch.state)
+        self.assertEqual("NAVIGATING_LINE_START", s.orch.state)
+        self.assertNotEqual("COMPLETE", s.orch.state)
+
+    def _complete_phase3(self, s):
+        s.orch.on_line_navigation_arrived(
+            {"protocol_version": 1, "task_id": s.task_id,
+             "goal_id": "line-nav-1", "status": "arrived", "message": ""}
+        )
+        s.orch.on_line_status(
+            {"protocol_version": 1, "task_id": s.task_id,
+             "goal_id": "line-follow-1", "status": "direction_selected",
+             "direction": "left_turn"}
+        )
+        s.orch.on_line_status(
+            {"protocol_version": 1, "task_id": s.task_id,
+             "goal_id": "line-follow-1", "status": "success",
+             "direction": "left_turn"}
+        )
+        s.complete_current_speech()
 
     def test_transient_cancel_retry_then_success(self):
         s = Scenario()
@@ -469,6 +516,8 @@ class HappyPathScenarioTests(unittest.TestCase):
         s.adapter.on_simulation_goal(sim_goal)
         s.adapter.mission.phase2_arrived()
         s.complete_current_speech()
+        self.assertEqual("NAVIGATING_LINE_START", s.orch.state)
+        self._complete_phase3(s)
         self.assertEqual("COMPLETE", s.orch.state)
         self.assertEqual(2, len(s.success_arrivals()))
 
@@ -492,6 +541,8 @@ class HappyPathScenarioTests(unittest.TestCase):
         s.adapter.on_simulation_goal(sim_goal)
         s.adapter.mission.phase2_arrived()
         s.complete_current_speech()
+        self.assertEqual("NAVIGATING_LINE_START", s.orch.state)
+        self._complete_phase3(s)
         self.assertEqual("COMPLETE", s.orch.state)
 
 
@@ -635,6 +686,10 @@ class CancelScenarioTests(unittest.TestCase):
             "WAITING_DELIVERY_SPEECH",
             "NAVIGATING_TO_SIM_WORKSHOP",
             "WAITING_SIMULATION_SPEECH",
+            "NAVIGATING_LINE_START",
+            "WAITING_LINE_DIRECTION",
+            "LINE_FOLLOWING",
+            "WAITING_FINAL_SPEECH",
         ):
             with self.subTest(state=state):
                 s = Scenario()
@@ -711,6 +766,29 @@ class CancelScenarioTests(unittest.TestCase):
         sim_goal = s.actions_("publish_simulation_navigation_goal")[-1]
         s.adapter.on_simulation_goal(sim_goal)
         s.adapter.mission.phase2_arrived()
+        if state == "WAITING_SIMULATION_SPEECH":
+            return
+        s.complete_current_speech()
+        if state == "NAVIGATING_LINE_START":
+            return
+        s.orch.on_line_navigation_arrived(
+            {"protocol_version": 1, "task_id": s.task_id,
+             "goal_id": "line-nav-1", "status": "arrived", "message": ""}
+        )
+        if state == "WAITING_LINE_DIRECTION":
+            return
+        s.orch.on_line_status(
+            {"protocol_version": 1, "task_id": s.task_id,
+             "goal_id": "line-follow-1", "status": "direction_selected",
+             "direction": "left_turn"}
+        )
+        if state == "LINE_FOLLOWING":
+            return
+        s.orch.on_line_status(
+            {"protocol_version": 1, "task_id": s.task_id,
+             "goal_id": "line-follow-1", "status": "success",
+             "direction": "left_turn"}
+        )
 
     def test_cancel_during_physical_phase_fails_closed(self):
         # DELIVERY_HANDED_OFF 是终态：取消由 stop 任务侧处理并报失败。

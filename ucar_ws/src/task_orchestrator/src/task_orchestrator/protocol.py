@@ -296,6 +296,50 @@ def parse_speech_done(
     return message
 
 
+def parse_line_status(raw_json, expected_task_id, expected_goal_id):
+    message = load_object(raw_json)
+    _require_identity(message, "task_id", expected_task_id)
+    _require_identity(message, "goal_id", expected_goal_id)
+    status = require_text(message.get("status"), "status")
+    allowed_statuses = (
+        "waiting_signal",
+        "direction_selected",
+        "following",
+        "success",
+        "failure",
+    )
+    if status not in allowed_statuses:
+        raise ProtocolError("unsupported line status: %s" % status)
+    raw_direction = message.get("direction")
+    if raw_direction is not None:
+        clean_direction = require_text(raw_direction, "direction")
+        if raw_direction != clean_direction:
+            raise ProtocolError(
+                "direction must not contain surrounding whitespace"
+            )
+        if clean_direction not in ("left_turn", "right_turn", "straight"):
+            raise ProtocolError("unsupported direction: %s" % clean_direction)
+        message["direction"] = clean_direction
+    if status in ("direction_selected", "following", "success"):
+        if message.get("direction") is None:
+            raise ProtocolError("%s status requires direction" % status)
+    raw_reason = message.get("reason")
+    if status == "failure":
+        message["reason"] = _require_failure_message_reason(raw_reason)
+    else:
+        if raw_reason is not None:
+            raise ProtocolError("non-failure status cannot have reason")
+        message["reason"] = ""
+    return message
+
+
+def _require_failure_message_reason(raw_reason):
+    clean_reason = require_text(raw_reason, "reason")
+    if raw_reason != clean_reason:
+        raise ProtocolError("reason must not contain surrounding whitespace")
+    return clean_reason
+
+
 def parse_cancel(raw_json, expected_task_id):
     message = load_object(raw_json)
     _require_identity(message, "task_id", expected_task_id)

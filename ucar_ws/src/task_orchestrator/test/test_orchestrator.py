@@ -17,7 +17,18 @@ TIMEOUTS = {
     "speech": 60.0,
     "delivery_navigation": 300.0,
     "simulation_navigation": 300.0,
+    "line_navigation": 310.0,
+    "line_direction": 35.0,
+    "line_follow": 125.0,
     "cancel_ack": 15.0,
+}
+
+LINE_START_GOAL = {
+    "frame_id": "map",
+    "x": 0.5167081260031493,
+    "y": -3.125171302690142,
+    "qz": -0.7044294777312331,
+    "qw": 0.7097739857893512,
 }
 
 
@@ -35,7 +46,10 @@ class Harness:
                 "delivery-speech-1",
                 "simulation-1",
                 "simulation-speech-1",
-                "unused-9",
+                "line-nav-1",
+                "line-follow-1",
+                "final-speech-1",
+                "unused-12",
             ]
         )
         self.orch = TaskOrchestrator(
@@ -44,6 +58,7 @@ class Harness:
             lambda: next(self.ids),
             dict(TIMEOUTS),
             simulation_phase_enabled=simulation_phase_enabled,
+            line_start_goal=dict(LINE_START_GOAL),
         )
 
     def task_request(self, task_id="task-1"):
@@ -174,6 +189,33 @@ class Harness:
             }
         )
 
+    def line_navigation_arrived(self, goal_id="line-nav-1", status="arrived"):
+        self.orch.on_line_navigation_arrived(
+            {
+                "protocol_version": 1,
+                "task_id": "task-1",
+                "goal_id": goal_id,
+                "status": status,
+                "message": "" if status == "arrived" else "navigation failed",
+            }
+        )
+
+    def line_status(
+        self, goal_id="line-follow-1", status="waiting_signal",
+        direction=None, reason="",
+    ):
+        message = {
+            "protocol_version": 1,
+            "task_id": "task-1",
+            "goal_id": goal_id,
+            "status": status,
+        }
+        if direction is not None:
+            message["direction"] = direction
+        if reason:
+            message["reason"] = reason
+        self.orch.on_line_status(message)
+
     def reach(self, state):
         self.task_request()
         if state == "CHECKING_DEPENDENCIES":
@@ -204,6 +246,18 @@ class Harness:
             return
         self.simulation_arrived()
         if state == "WAITING_SIMULATION_SPEECH":
+            return
+        self.speech_done()
+        if state == "NAVIGATING_LINE_START":
+            return
+        self.line_navigation_arrived()
+        if state == "WAITING_LINE_DIRECTION":
+            return
+        self.line_status(status="direction_selected", direction="left_turn")
+        if state == "LINE_FOLLOWING":
+            return
+        self.line_status(status="success", direction="left_turn")
+        if state == "WAITING_FINAL_SPEECH":
             return
         self.speech_done()
 
@@ -300,12 +354,20 @@ class OrchestratorFailureTests(unittest.TestCase):
             "WAITING_SPEECH",
             "WAITING_DELIVERY_SPEECH",
             "WAITING_SIMULATION_SPEECH",
+            "NAVIGATING_LINE_START",
+            "WAITING_LINE_DIRECTION",
+            "LINE_FOLLOWING",
+            "WAITING_FINAL_SPEECH",
         ):
             with self.subTest(state=state):
                 h = Harness(simulation_phase_enabled=(
                     state in (
                         "WAITING_DELIVERY_SPEECH",
                         "WAITING_SIMULATION_SPEECH",
+                        "NAVIGATING_LINE_START",
+                        "WAITING_LINE_DIRECTION",
+                        "LINE_FOLLOWING",
+                        "WAITING_FINAL_SPEECH",
                     )
                 ))
                 h.reach(state)
@@ -391,12 +453,20 @@ class OrchestratorSafetyTests(unittest.TestCase):
             "WAITING_SPEECH",
             "WAITING_DELIVERY_SPEECH",
             "WAITING_SIMULATION_SPEECH",
+            "NAVIGATING_LINE_START",
+            "WAITING_LINE_DIRECTION",
+            "LINE_FOLLOWING",
+            "WAITING_FINAL_SPEECH",
         ):
             with self.subTest(state=state):
                 h = Harness(simulation_phase_enabled=(
                     state in (
                         "WAITING_DELIVERY_SPEECH",
                         "WAITING_SIMULATION_SPEECH",
+                        "NAVIGATING_LINE_START",
+                        "WAITING_LINE_DIRECTION",
+                        "LINE_FOLLOWING",
+                        "WAITING_FINAL_SPEECH",
                     )
                 ))
                 h.reach(state)
@@ -477,8 +547,8 @@ class OrchestratorDualWorkshopTests(unittest.TestCase):
             final_speech["text"],
         )
         h.speech_done()
-        self.assertEqual("COMPLETE", h.orch.state)
-        self.assertEqual(
+        self.assertEqual("NAVIGATING_LINE_START", h.orch.state)
+        self.assertNotEqual(
             "complete",
             h.actions("publish_status")[-1]["status"],
         )
@@ -599,6 +669,197 @@ class OrchestratorDualWorkshopTests(unittest.TestCase):
         goal_count = len(h.actions("publish_simulation_navigation_goal"))
         h.speech_done(speech_id="delivery-speech-1")
         self.assertEqual(goal_count, len(h.actions("publish_simulation_navigation_goal")))
+
+
+class Phase3LineFollowTests(unittest.TestCase):
+    """Lock the Phase 3 state sequence and correlated identity contract."""
+
+    def test_full_phase3_sequence_reaches_complete(self):
+        h = Harness(simulation_phase_enabled=True)
+        h.reach("WAITING_SIMULATION_SPEECH")
+        h.speech_done()
+        self.assertEqual("NAVIGATING_LINE_START", h.orch.state)
+        nav_goal = h.actions("publish_line_navigation_goal")[-1]
+        self.assertEqual({"frame_id", "x", "y", "qz", "qw"}, set(nav_goal["pose"]))
+
+        h.line_navigation_arrived(nav_goal["goal_id"], "arrived")
+        self.assertEqual("WAITING_LINE_DIRECTION", h.orch.state)
+        line_start = h.actions("publish_line_follow_start")[-1]
+
+        h.line_status(line_start["goal_id"], "direction_selected", direction="left_turn")
+        self.assertEqual("LINE_FOLLOWING", h.orch.state)
+        h.line_status(line_start["goal_id"], "success", direction="left_turn")
+        self.assertEqual("WAITING_FINAL_SPEECH", h.orch.state)
+        self.assertEqual("任务完成", h.actions("publish_speech")[-1]["text"])
+        h.speech_done()
+        self.assertEqual("COMPLETE", h.orch.state)
+        self.assertEqual(
+            "complete",
+            h.actions("publish_status")[-1]["status"],
+        )
+
+    def test_simulation_speech_done_publishes_exactly_one_line_goal(self):
+        h = Harness(simulation_phase_enabled=True)
+        h.reach("WAITING_SIMULATION_SPEECH")
+        self.assertEqual([], h.actions("publish_line_navigation_goal"))
+        h.speech_done()
+        goals = h.actions("publish_line_navigation_goal")
+        self.assertEqual(1, len(goals))
+        goal = goals[0]
+        self.assertEqual(1, goal["protocol_version"])
+        self.assertEqual("task-1", goal["task_id"])
+        self.assertEqual("line-nav-1", goal["goal_id"])
+        self.assertEqual(dict(LINE_START_GOAL), goal["pose"])
+
+    def test_line_navigation_failure_enters_error(self):
+        h = Harness(simulation_phase_enabled=True)
+        h.reach("NAVIGATING_LINE_START")
+        h.line_navigation_arrived(status="failed")
+        self.assertEqual("ERROR", h.orch.state)
+        self.assertEqual("IDLE", h.actions("publish_motion_mode")[-1])
+        self.assertEqual(
+            "navigation failed",
+            h.actions("publish_status")[-1]["message"],
+        )
+
+    def test_line_navigation_timeout_enters_error(self):
+        h = Harness(simulation_phase_enabled=True)
+        h.reach("NAVIGATING_LINE_START")
+        h.now[0] = h.orch.deadline + 0.01
+        h.orch.tick()
+        self.assertEqual("ERROR", h.orch.state)
+        self.assertIn(
+            "NAVIGATING_LINE_START",
+            h.actions("publish_status")[-1]["message"],
+        )
+
+    def test_line_failure_enters_error(self):
+        h = Harness(simulation_phase_enabled=True)
+        h.reach("LINE_FOLLOWING")
+        h.line_status(status="failure", reason="stale image")
+        self.assertEqual("ERROR", h.orch.state)
+        self.assertEqual("IDLE", h.actions("publish_motion_mode")[-1])
+        self.assertEqual(
+            "stale image",
+            h.actions("publish_status")[-1]["message"],
+        )
+
+    def test_line_follow_timeout_enters_error(self):
+        h = Harness(simulation_phase_enabled=True)
+        h.reach("LINE_FOLLOWING")
+        h.now[0] = h.orch.deadline + 0.01
+        h.orch.tick()
+        self.assertEqual("ERROR", h.orch.state)
+        self.assertIn("LINE_FOLLOWING", h.actions("publish_status")[-1]["message"])
+
+    def test_success_before_direction_selection_does_not_advance(self):
+        h = Harness(simulation_phase_enabled=True)
+        h.reach("WAITING_LINE_DIRECTION")
+        output_count = len(h.outputs)
+        h.line_status(status="success", direction="left_turn")
+        self.assertEqual("WAITING_LINE_DIRECTION", h.orch.state)
+        self.assertEqual(output_count, len(h.outputs))
+
+    def test_final_tts_failure_and_timeout_prevent_complete(self):
+        for event in ("error", "timeout"):
+            with self.subTest(event=event):
+                h = Harness(simulation_phase_enabled=True)
+                h.reach("WAITING_FINAL_SPEECH")
+                if event == "error":
+                    h.speech_done(status="error")
+                else:
+                    h.now[0] = h.orch.deadline + 0.01
+                    h.orch.tick()
+                self.assertEqual("ERROR", h.orch.state)
+                self.assertNotEqual(
+                    "complete",
+                    h.actions("publish_status")[-1]["status"],
+                )
+
+    def test_no_complete_before_matching_final_tts_response(self):
+        h = Harness(simulation_phase_enabled=True)
+        h.reach("WAITING_FINAL_SPEECH")
+        output_count = len(h.outputs)
+        h.speech_done(speech_id="stale-speech")
+        self.assertEqual("WAITING_FINAL_SPEECH", h.orch.state)
+        self.assertEqual(output_count, len(h.outputs))
+        # 匹配身份的成功状态只重发缓存状态，不推进、不完成。
+        h.line_status(status="success", direction="left_turn")
+        self.assertEqual("WAITING_FINAL_SPEECH", h.orch.state)
+        self.assertEqual(
+            "running",
+            h.actions("publish_status")[-1]["status"],
+        )
+        self.assertNotEqual(
+            "complete",
+            h.actions("publish_status")[-1]["status"],
+        )
+
+    def test_stale_and_wrong_identities_are_ignored(self):
+        cases = (
+            (
+                "NAVIGATING_LINE_START",
+                lambda h: h.orch.on_line_navigation_arrived(
+                    {
+                        "protocol_version": 1,
+                        "task_id": "task-2",
+                        "goal_id": "line-nav-1",
+                        "status": "arrived",
+                        "message": "",
+                    }
+                ),
+            ),
+            (
+                "NAVIGATING_LINE_START",
+                lambda h: h.line_navigation_arrived(
+                    goal_id="stale-goal", status="arrived"
+                ),
+            ),
+            (
+                "WAITING_LINE_DIRECTION",
+                lambda h: h.line_status(
+                    goal_id="stale-goal", status="direction_selected",
+                    direction="left_turn",
+                ),
+            ),
+            (
+                "LINE_FOLLOWING",
+                lambda h: h.line_status(
+                    goal_id="stale-goal", status="success",
+                    direction="left_turn",
+                ),
+            ),
+        )
+        for state, event in cases:
+            with self.subTest(state=state, event=event):
+                h = Harness(simulation_phase_enabled=True)
+                h.reach(state)
+                output_count = len(h.outputs)
+                event(h)
+                self.assertEqual(state, h.orch.state)
+                self.assertEqual(output_count, len(h.outputs))
+
+    def test_duplicate_results_do_not_repeat_actions(self):
+        h = Harness(simulation_phase_enabled=True)
+        h.reach("WAITING_LINE_DIRECTION")
+        h.line_status(status="direction_selected", direction="left_turn")
+        self.assertEqual("LINE_FOLLOWING", h.orch.state)
+        line_count = len(h.actions("publish_line_follow_start"))
+        h.line_status(status="direction_selected", direction="left_turn")
+        self.assertEqual(line_count, len(h.actions("publish_line_follow_start")))
+        speech_count = len(h.actions("publish_speech"))
+        h.line_status(status="success", direction="left_turn")
+        self.assertEqual(speech_count + 1, len(h.actions("publish_speech")))
+        h.line_status(status="success", direction="left_turn")
+        self.assertEqual(speech_count + 1, len(h.actions("publish_speech")))
+
+    def test_outer_timeouts_are_strictly_greater_than_node_limits(self):
+        self.assertEqual(310.0, TIMEOUTS["line_navigation"])
+        self.assertEqual(35.0, TIMEOUTS["line_direction"])
+        self.assertEqual(125.0, TIMEOUTS["line_follow"])
+        self.assertGreater(TIMEOUTS["line_navigation"], 300.0)
+        self.assertGreater(TIMEOUTS["line_direction"], 30.0)
+        self.assertGreater(TIMEOUTS["line_follow"], 120.0)
 
 
 class OrchestratorNavigationHandoffTests(unittest.TestCase):

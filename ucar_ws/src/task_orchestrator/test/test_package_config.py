@@ -70,6 +70,8 @@ class PackageConfigTests(unittest.TestCase):
                 "/voice/speak",
                 "/task/delivery_navigation_goal",
                 "/task/simulation_navigation_goal",
+                "/task/line_navigation_goal",
+                "/task/line_follow/start",
                 "/task/motion_mode",
             },
             publisher_topics,
@@ -86,6 +88,8 @@ class PackageConfigTests(unittest.TestCase):
                 "/task/delivery_arrived",
                 "/task/cancel",
                 "/task/simulation_arrived",
+                "/task/line_navigation_arrived",
+                "/task/line_follow/status",
             },
             subscriber_topics,
         )
@@ -115,6 +119,7 @@ class PackageConfigTests(unittest.TestCase):
             "parse_llm_result",
             "parse_speech_done",
             "parse_cancel",
+            "parse_line_status",
         ):
             self.assertIn(parser, source)
         self.assertNotIn("orch._transition", source)
@@ -409,6 +414,54 @@ class PackageConfigTests(unittest.TestCase):
             handoff = handoff_path.read_text(encoding="utf-8")
             for stable in ("5b628bb", "任务 8", "任务 17", "Bash", "任务 5", "待部署"):
                 self.assertIn(stable, handoff)
+
+
+    def test_phase3_outer_timeouts_strictly_exceed_node_limits(self):
+        config = yaml.safe_load(
+            (ROOT / "config/orchestrator.yaml").read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            {
+                "line_navigation": 310.0,
+                "line_direction": 35.0,
+                "line_follow": 125.0,
+            },
+            {
+                key: config["timeouts"][key]
+                for key in ("line_navigation", "line_direction", "line_follow")
+            },
+        )
+        adapter = (ROOT / "scripts/task_orchestrator_node.py").read_text(
+            encoding="utf-8"
+        )
+        for key, value in (
+            ("line_navigation", 310.0),
+            ("line_direction", 35.0),
+            ("line_follow", 125.0),
+        ):
+            self.assertIn('"%s": %s' % (key, value), adapter)
+        self.assertGreater(310.0, 300.0)
+        self.assertGreater(35.0, 30.0)
+        self.assertGreater(125.0, 120.0)
+
+    def test_orchestrator_launch_forwards_phase3_pose_and_timeouts(self):
+        launch = ET.parse(
+            ROOT / "launch/task_orchestrator.launch"
+        ).getroot()
+        launch_args = {node.attrib["name"]: node for node in launch.findall("arg")}
+        for name in ("timeout_line_navigation", "timeout_line_direction",
+                     "timeout_line_follow"):
+            self.assertIn(name, launch_args)
+        node = next(
+            node for node in launch.findall("node")
+            if node.attrib["name"] == "task_orchestrator"
+        )
+        text = ET.tostring(node, encoding="unicode")
+        self.assertIn("phase3.yaml", text)
+        adapter = (ROOT / "scripts/task_orchestrator_node.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('"~line_start_goal"', adapter)
 
 
 if __name__ == "__main__":
