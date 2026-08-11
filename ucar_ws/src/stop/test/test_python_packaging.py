@@ -21,6 +21,13 @@ def setup_keyword(name):
 
 
 class PythonPackagingTests(unittest.TestCase):
+    def test_catkin_devel_space_exposes_stop_integration_modules(self):
+        packages = setup_keyword("packages")
+        package_dir = setup_keyword("package_dir")
+
+        self.assertIn("stop_integration", packages)
+        self.assertEqual("src/stop_integration", package_dir["stop_integration"])
+
     def test_catkin_devel_space_exposes_native_ocr_modules(self):
         packages = setup_keyword("packages")
         package_dir = setup_keyword("package_dir")
