@@ -1,4 +1,5 @@
 import unittest
+import subprocess
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -15,6 +16,19 @@ class PackageConfigTests(unittest.TestCase):
             "src/line_follow_integration/__init__.py",
         ):
             self.assertTrue((ROOT / relative).is_file(), relative)
+
+    def test_rosrun_entrypoints_are_executable(self):
+        for script in (ROOT / "scripts").glob("*.py"):
+            with self.subTest(script=script.name):
+                mode = subprocess.check_output(
+                    ["git", "-C", str(ROOT), "ls-files", "-s", "--",
+                     str(script)],
+                    text=True,
+                ).split()[0]
+                self.assertEqual(
+                    "100755", mode,
+                    "%s must be executable in the Git archive" % script.name,
+                )
 
     def test_phase3_defaults_are_exact(self):
         config = yaml.safe_load(

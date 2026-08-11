@@ -711,6 +711,17 @@ class CompetitionBringupTests(unittest.TestCase):
         cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
         self.assertIn("scripts/start_competition.sh", cmake)
 
+    def test_start_script_retains_posix_executable_bit(self):
+        mode = subprocess.check_output(
+            ["git", "-C", str(ROOT), "ls-files", "-s", "--",
+             str(START_SCRIPT)],
+            text=True,
+        ).split()[0]
+        self.assertEqual(
+            "100755", mode,
+            "start_competition.sh must be executable in the Git archive",
+        )
+
     def test_production_device_paths_are_fixed_and_probe_is_fail_closed(self):
         source = START_SCRIPT.read_text(encoding="utf-8")
         for assignment in (
