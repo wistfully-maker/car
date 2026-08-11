@@ -48,6 +48,15 @@ def parse_identity_json(raw):
     return value
 
 
+def parse_cancel(raw):
+    value = _load_object(raw)
+    if value.get("protocol_version") != PROTOCOL_VERSION:
+        raise ProtocolError("unsupported protocol_version")
+    value["task_id"] = _text(value.get("task_id"), "task_id")
+    value["reason"] = _text(value.get("reason"), "reason")
+    return value
+
+
 def parse_navigation_goal(raw):
     value = parse_identity_json(raw)
     pose = value.get("pose")

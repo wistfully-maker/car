@@ -21,7 +21,7 @@ from std_msgs.msg import String
 from line_follow_integration.protocol import (
     ProtocolError,
     build_arrival,
-    parse_identity_json,
+    parse_cancel,
     parse_navigation_goal,
 )
 
@@ -125,15 +125,10 @@ class SettledOdomDetector:
 
 
 def _parse_cancel(raw, expected_task_id):
-    message = parse_identity_json(raw)
+    message = parse_cancel(raw)
     if message["task_id"] != expected_task_id:
         raise ProtocolError("task_id mismatch")
-    reason = message.get("reason")
-    if not isinstance(reason, str) or not reason.strip():
-        raise ProtocolError("cancel requires reason")
-    if reason != reason.strip():
-        raise ProtocolError("reason must not contain surrounding whitespace")
-    return reason.strip()
+    return message["reason"]
 
 
 class LineNavigationAdapter:

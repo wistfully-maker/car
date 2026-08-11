@@ -7,7 +7,12 @@ from pathlib import Path
 SOURCE_ROOT = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SOURCE_ROOT))
 
-from line_follow_integration.runtime import ImageHealthGate, LineFollowSession
+from line_follow_integration.runtime import (
+    ImageHealthGate,
+    LineFollowSession,
+    any_process_running,
+    spawn_process,
+)
 
 
 class FakeClock:
@@ -77,6 +82,36 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual("stop", gate.poll())
         clock.value = 23.6
         self.assertEqual("failure", gate.poll())
+
+    def test_image_gate_reset_forgets_previous_task_frame(self):
+        clock = FakeClock(30.0)
+        gate = ImageHealthGate(clock, max_age=0.5, recovery_grace=3.0)
+        gate.observe_frame(30.0)
+        self.assertTrue(gate.allows_motion())
+        gate.reset()
+        self.assertIsNone(gate.last_frame)
+        self.assertFalse(gate.allows_motion())
+
+    def test_exited_owned_process_is_not_running(self):
+        class Process:
+            def __init__(self, result):
+                self.result = result
+
+            def poll(self):
+                return self.result
+
+        self.assertFalse(any_process_running([Process(1)]))
+        self.assertTrue(any_process_running([Process(None), Process(1)]))
+
+    def test_process_spawn_failure_is_data_not_uncaught_exception(self):
+        def failing_popen(_command):
+            raise OSError("rosrun unavailable")
+
+        process, reason = spawn_process(
+            failing_popen, ["rosrun", "pkg", "node"]
+        )
+        self.assertIsNone(process)
+        self.assertIn("rosrun unavailable", reason)
 
 
 if __name__ == "__main__":

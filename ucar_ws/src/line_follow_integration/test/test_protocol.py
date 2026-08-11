@@ -10,9 +10,30 @@ from line_follow_integration.protocol import (
     ProtocolError,
     build_arrival,
     build_line_status,
+    parse_cancel,
     parse_identity_json,
     parse_navigation_goal,
 )
+
+
+class CancelTests(unittest.TestCase):
+    def test_cancel_uses_existing_task_protocol_without_goal_id(self):
+        parsed = parse_cancel(
+            '{"protocol_version": 1, "task_id": "task-1", '
+            '"reason": "operator_cancel"}'
+        )
+        self.assertEqual("task-1", parsed["task_id"])
+        self.assertEqual("operator_cancel", parsed["reason"])
+        self.assertNotIn("goal_id", parsed)
+
+    def test_cancel_rejects_blank_or_padded_reason(self):
+        for reason in ("", "  ", " operator_cancel "):
+            raw = (
+                '{"protocol_version": 1, "task_id": "task-1", '
+                '"reason": %r}' % reason
+            ).replace("'", '"')
+            with self.subTest(reason=reason), self.assertRaises(ProtocolError):
+                parse_cancel(raw)
 
 
 class IdentityJsonTests(unittest.TestCase):

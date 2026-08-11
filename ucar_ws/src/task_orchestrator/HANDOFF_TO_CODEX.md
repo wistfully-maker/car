@@ -350,3 +350,20 @@ Linux（LF）上不受影响。
 部署到 `/home/ucar/ucar_ws/src` → catkin build → 无运动 topic 模拟 →
 分级看护实车验收（导航起点 → 图像验证 → 方向锁定 → 单放 `/cmd_vel/line_follow`
 → 最终停车线 → 全流程）。
+
+### 14.7 Codex 验收修正（2026-08-11）
+
+Codex 在 `a2d43379e050a817a42a66262c65815746302d0f` 上复核后发现并修正：
+
+- Phase 3 两个节点把 `/task/cancel` 错当成必须含 `goal_id` 的消息，导致合法取消被忽略；
+- supervisor 以子进程字典非空代替 `poll()` 活性判断，子进程提前退出后可能等待到外层超时；
+- 新任务未清空上次图像门禁，且派生图像不新鲜时仍可能启动巡线；
+- YOLO/巡线 `Popen` 启动异常未转换为关联失败；方向等待期间 YOLO 退出未立即失败；
+- `WAITING_LINE_DIRECTION` 未立即处理关联 `failure`；
+- 一键启动预检未拒绝遗留的 Phase 3 常驻节点、YOLO 和匿名巡线子进程；
+- Windows `core.autocrlf=true` 会改变五个 stop 冻结快照的工作树字节，已用包内
+  `.gitattributes` 固定这些文件为 LF，不修改车端快照内容或清单。
+
+修正后全量本地回归：`line_follow_integration 61`、`task_orchestrator 322`
+（其中 31 项动态 Bash 测试因本机无可用 Bash 跳过）、`stop 113`、`llm_spark 11`。
+仍未执行车端 catkin 编译、ROS 运行时 topic 模拟或实车运动验收。

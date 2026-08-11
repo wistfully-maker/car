@@ -83,6 +83,10 @@ class NavigationAdapterContractTests(unittest.TestCase):
     def test_publishes_arrival(self):
         self.assertIn("/task/line_navigation_arrived", self.source)
 
+    def test_cancel_uses_task_cancel_protocol_without_goal_id(self):
+        self.assertIn("parse_cancel", self.source)
+        self.assertNotIn("message = parse_identity_json(raw)", self.source)
+
 
 class SupervisorContractTests(unittest.TestCase):
     def setUp(self):
@@ -130,6 +134,26 @@ class SupervisorContractTests(unittest.TestCase):
             text = _read_script(name)
             for forbidden in ("pkill", "killall", "rosnode kill"):
                 self.assertNotIn(forbidden, text, name)
+
+    def test_resets_both_image_gates_for_each_new_goal(self):
+        self.assertIn("self._raw_gate.reset()", self.source)
+        self.assertIn("self._gate.reset()", self.source)
+
+    def test_cancel_uses_task_cancel_protocol_without_goal_id(self):
+        self.assertIn("parse_cancel", self.source)
+
+    def test_route_waits_for_a_fresh_derived_frame(self):
+        self.assertIn("self._gate.allows_motion()", self.source)
+        self.assertIn("self._derived_wait_started", self.source)
+
+    def test_stale_raw_frames_block_direction_and_route_start(self):
+        self.assertGreaterEqual(
+            self.source.count('if raw_status != "healthy":'), 2
+        )
+
+    def test_process_liveness_uses_poll_not_container_truthiness(self):
+        self.assertIn("any_process_running", self.source)
+        self.assertNotIn("child_running = bool(self._children)", self.source)
         for name in (
             "line_camera_adapter_node.py",
             "line_navigation_adapter_node.py",

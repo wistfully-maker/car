@@ -435,8 +435,10 @@ class TaskOrchestrator:
         if not self._matches(message, "goal_id", "line_follow_goal_id"):
             return
         if self.state == self.WAITING_LINE_DIRECTION:
-            # 只有 direction_selected 才进入巡线；红灯等待与过早的成功/失败不推进。
-            if message["status"] == "direction_selected":
+            # 红灯等待和过早的成功不推进；关联失败必须立即终止任务。
+            if message["status"] == "failure":
+                self._fail(message.get("reason") or "line follow failed")
+            elif message["status"] == "direction_selected":
                 self._transition(self.LINE_FOLLOWING)
                 self._publish_status("running")
             return

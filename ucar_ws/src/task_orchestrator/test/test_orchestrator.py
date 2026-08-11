@@ -744,6 +744,17 @@ class Phase3LineFollowTests(unittest.TestCase):
             h.actions("publish_status")[-1]["message"],
         )
 
+    def test_line_failure_while_waiting_for_direction_enters_error(self):
+        h = Harness(simulation_phase_enabled=True)
+        h.reach("WAITING_LINE_DIRECTION")
+        h.line_status(status="failure", reason="yolo process exited")
+        self.assertEqual("ERROR", h.orch.state)
+        self.assertEqual("IDLE", h.actions("publish_motion_mode")[-1])
+        self.assertEqual(
+            "yolo process exited",
+            h.actions("publish_status")[-1]["message"],
+        )
+
     def test_line_follow_timeout_enters_error(self):
         h = Harness(simulation_phase_enabled=True)
         h.reach("LINE_FOLLOWING")

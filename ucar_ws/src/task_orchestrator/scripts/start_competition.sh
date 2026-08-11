@@ -224,6 +224,15 @@ if [[ "$master_available" == true ]]; then
   [[ "${flags[start_readiness_gate]}" == true ]] && conflicts+=(/readiness_gate)
   [[ "${flags[start_velocity_arbiter]}" == true ]] && conflicts+=(/velocity_arbiter)
   [[ "${flags[start_navigation_handoff]}" == true ]] && conflicts+=(/navigation_handoff_supervisor)
+  if [[ "${flags[start_line_follow]}" == true ]]; then
+    conflicts+=(/line_camera_adapter /line_navigation_adapter /line_follow_supervisor /phase3_yolo_server)
+    # Frozen route scripts use anonymous=True, so rospy appends a suffix.
+    while IFS= read -r node; do
+      case "$node" in
+        /phase3_line_follower|/phase3_line_follower_*) conflicts+=("$node") ;;
+      esac
+    done <<<"$node_list"
+  fi
   if [[ "${flags[start_fast_nav]}" == true ||
         "${flags[start_navigation_handoff]}" == true ]]; then
     # Vendor runtime_check.sh contract; navigation_full.launch owns the includes.

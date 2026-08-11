@@ -112,11 +112,15 @@ failure            失败（带 reason）
 ```text
 yolo model missing or sha256 mismatch      模型缺失或哈希不一致（启动前校验）
 raw image not ready within 5 seconds       原始图像未就绪
+raw image stale beyond recovery grace      原始图像中断超过恢复窗口
+yolo process exited before direction selection  YOLO 在锁定方向前退出
+failed to start yolo                       YOLO 子进程无法启动
 derived line image never became ready      派生图像从未就绪
 derived line image stale beyond recovery grace  图像超过 3 秒未恢复
+failed to start line follower              巡线子进程无法启动
 line follower exited before final stop     巡线子进程提前退出
 line follow timed out                      120 秒未检测到最终停车线
-cancelled                                  取消
+cancelled: <reason>                        收到关联任务的取消消息
 ROS shutdown                               节点关闭
 ```
 

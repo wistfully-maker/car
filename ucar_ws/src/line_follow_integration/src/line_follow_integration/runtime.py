@@ -1,5 +1,6 @@
 import math
 import os
+import subprocess
 
 
 ROUTE_SCRIPTS = {
@@ -16,6 +17,9 @@ class ImageHealthGate:
         self.recovery_grace = float(recovery_grace)
         if self.max_age <= 0 or self.recovery_grace <= 0:
             raise ValueError("image timing must be positive")
+        self.reset()
+
+    def reset(self):
         self.last_frame = None
         self.unhealthy_since = None
         self.stop_emitted = False
@@ -46,6 +50,23 @@ class ImageHealthGate:
             self.stop_emitted = True
             return "stop"
         return "blocked"
+
+
+def any_process_running(processes):
+    for process in processes:
+        try:
+            if process.poll() is None:
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def spawn_process(popen, command):
+    try:
+        return (popen(command), "")
+    except (OSError, subprocess.SubprocessError, ValueError) as exc:
+        return (None, str(exc))
 
 
 class LineFollowSession:

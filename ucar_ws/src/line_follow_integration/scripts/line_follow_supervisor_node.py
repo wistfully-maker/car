@@ -24,12 +24,15 @@ from std_msgs.msg import String
 from line_follow_integration.protocol import (
     ProtocolError,
     build_line_status,
+    parse_cancel,
     parse_identity_json,
 )
 from line_follow_integration.runtime import (
     ImageHealthGate,
     LineFollowSession,
     ROUTE_SCRIPTS,
+    any_process_running,
+    spawn_process,
 )
 
 
@@ -90,9 +93,12 @@ class LineFollowSupervisor:
         self._gate = ImageHealthGate(
             rospy.get_time, self._image_max_age, self._image_recovery_grace
         )
+        self._raw_gate = ImageHealthGate(
+            rospy.get_time, self._image_max_age, self._image_recovery_grace
+        )
         self._children = {}
         self._phase = "idle"
-        self._raw_seen_at = None
+        self._derived_wait_started = None
 
         self._velocity_publisher = rospy.Publisher(
             "/cmd_vel/line_follow", Twist, queue_size=1
@@ -143,11 +149,15 @@ class LineFollowSupervisor:
 
     def _start_child(self, command):
         with self._lock:
-            process = subprocess.Popen(command)
+            process, reason = spawn_process(subprocess.Popen, command)
+            if process is None:
+                rospy.logerr("failed to start owned child command=%s: %s",
+                             command, reason)
+                return (None, reason)
             self._children[process.pid] = process
             rospy.loginfo("started owned child pid=%s command=%s",
                           process.pid, command)
-            return process
+            return (process, "")
 
     def _terminate_children(self):
         with self._lock:
@@ -201,7 +211,9 @@ class LineFollowSupervisor:
                 )
                 return
             self._session.start(parsed["task_id"], parsed["goal_id"])
-            self._raw_seen_at = None
+            self._raw_gate.reset()
+            self._gate.reset()
+            self._derived_wait_started = None
         if not self._verify_model():
             self._fail("yolo model missing or sha256 mismatch")
             return
@@ -223,7 +235,7 @@ class LineFollowSupervisor:
 
     def _on_cancel(self, message):
         try:
-            parsed = parse_identity_json(message.data)
+            parsed = parse_cancel(message.data)
         except ProtocolError as exc:
             rospy.logwarn("ignored invalid line follow cancel: %s", exc)
             return
@@ -234,17 +246,19 @@ class LineFollowSupervisor:
                 return
             if self._phase == "idle":
                 return
-        self._fail("cancelled")
+        self._fail("cancelled: %s" % parsed["reason"])
 
     def _on_raw_image(self, _message):
         with self._lock:
             if self._phase == "idle":
                 return
-            if self._raw_seen_at is None:
-                self._raw_seen_at = rospy.get_time()
+            self._raw_gate.observe_frame(rospy.get_time())
 
     def _on_derived_image(self, _message):
-        self._gate.observe_frame(rospy.get_time())
+        with self._lock:
+            if self._phase == "idle":
+                return
+            self._gate.observe_frame(rospy.get_time())
 
     def _on_candidate(self, message):
         with self._lock:
@@ -274,9 +288,12 @@ class LineFollowSupervisor:
                 self._phase = "idle"
 
     def _poll_starting_yolo(self):
-        if self._raw_seen_at is not None:
+        if self._raw_gate.allows_motion():
+            process, reason = self._start_child(yolo_command())
+            if process is None:
+                self._fail("failed to start yolo: %s" % reason)
+                return
             self._phase = "waiting_direction"
-            self._start_child(yolo_command())
             return
         if rospy.get_time() - self._session.activation_time >= self._image_ready:
             self._publish_zero()
@@ -290,28 +307,53 @@ class LineFollowSupervisor:
             self._phase = "idle"
 
     def _poll_waiting_direction(self):
+        raw_status = self._raw_gate.poll()
+        if raw_status == "failure":
+            self._fail("raw image stale beyond recovery grace")
+            return
+        if raw_status == "stop":
+            self._publish_zero()
+        if raw_status != "healthy":
+            return
         status, direction = self._session.poll_direction()
         if status == "waiting_signal":
+            if not any_process_running(self._children.values()):
+                self._fail("yolo process exited before direction selection")
             return
         self._terminate_children()
         self._publish_status("direction_selected", direction=direction)
-        if self._gate.last_frame is None:
+        self._derived_wait_started = rospy.get_time()
+        if self._gate.allows_motion():
+            self._start_route(direction)
+        else:
             self._phase = "waiting_derived"
-            return
-        self._start_route(direction)
 
     def _start_route(self, direction):
-        self._start_child(route_command(direction))
+        process, reason = self._start_child(route_command(direction))
+        if process is None:
+            self._fail("failed to start line follower: %s" % reason)
+            return
         self._publish_status("following", direction=direction)
         self._phase = "following"
 
     def _poll_waiting_derived(self):
-        gate_status = self._gate.poll()
-        if gate_status == "failure":
-            self._fail("derived line image never became ready")
+        raw_status = self._raw_gate.poll()
+        if raw_status == "failure":
+            self._fail("raw image stale beyond recovery grace")
             return
-        if self._gate.last_frame is not None:
+        if raw_status == "stop":
+            self._publish_zero()
+        if raw_status != "healthy":
+            return
+        if self._gate.allows_motion():
             self._start_route(self._session.direction)
+            return
+        if (
+            self._derived_wait_started is not None
+            and rospy.get_time() - self._derived_wait_started
+            >= self._image_ready
+        ):
+            self._fail("derived line image never became ready")
 
     def _poll_following(self):
         gate_status = self._gate.poll()
@@ -321,7 +363,7 @@ class LineFollowSupervisor:
         if gate_status == "stop":
             self._publish_zero()
         direction = self._session.direction
-        child_running = bool(self._children)
+        child_running = any_process_running(self._children.values())
         status, terminal = self._session.poll_follow(child_running)
         if status == "following":
             return

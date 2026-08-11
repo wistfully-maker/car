@@ -686,6 +686,15 @@ class CompetitionBringupTests(unittest.TestCase):
         self.assertNotIn("/vision_node", source)
         self.assertNotIn("/racecar_control", source)
 
+    def test_start_script_rejects_all_phase3_owned_nodes(self):
+        source = START_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn(
+            "conflicts+=(/line_camera_adapter /line_navigation_adapter "
+            "/line_follow_supervisor /phase3_yolo_server)",
+            source,
+        )
+        self.assertIn("/phase3_line_follower_*", source)
+
     def test_start_script_static_safety_contract(self):
         source = START_SCRIPT.read_text(encoding="utf-8")
         for required in (
@@ -864,6 +873,21 @@ class CompetitionStartScriptTests(unittest.TestCase):
                 )
                 self.assertNotEqual(0, result.returncode)
                 self.assertIn(word, result.stderr.lower())
+
+    def test_phase3_owned_and_anonymous_child_nodes_are_conflicts(self):
+        for node in (
+            "/line_camera_adapter",
+            "/line_navigation_adapter",
+            "/line_follow_supervisor",
+            "/phase3_yolo_server",
+            "/phase3_line_follower_123_456",
+        ):
+            with self.subTest(node=node):
+                _, result = self.run_fake(
+                    nodes=node, live_nodes={node},
+                )
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn("live node conflict", result.stderr.lower())
 
     def test_rejects_amcl_when_lidar_loc_is_internal_or_external(self):
         for args in (("start_fast_nav:=true",),
