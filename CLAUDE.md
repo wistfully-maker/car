@@ -1,216 +1,240 @@
-# Stop 第二阶段联调：DeepSeek V4 Flash 执行约束
+# 第三阶段红绿灯识别与巡线联调：DeepSeek 实施说明
 
 ## 1. 当前唯一任务
 
-在不重写车端 `stop` 已跑通算法的前提下，将它接入已验收的第一部分，实现：
+在已验证的二维码与两阶段动态避障导航、车间识别和两次停车流程之后，实现第三阶段：
 
 ```text
-TTS 后安全切换导航栈
- -> 实物车间识别 + 动态避障导航 + 停车
- -> 仿真目标车间识别 + 动态避障导航 + 停车
- -> COMPLETE
+仿真车间播报成功
+ -> 导航到 YAML 配置的巡线起点
+ -> 停车等待红绿灯/方向识别
+ -> 选择 left_turn/right_turn/straight
+ -> 巡线并检测最终停车线
+ -> task_orchestrator 播报“任务完成”
+ -> 匹配 speak_done success 后 COMPLETE
 ```
 
-设计权威文档：
+严格按实施计划逐任务执行：
 
 ```text
-docs/superpowers/specs/2026-08-10-stop-phase2-integration-design.md
+docs/superpowers/plans/2026-08-11-phase3-line-follow-integration.md
 ```
 
-设计与本文冲突时，以本文的安全限制为准；用户后续明确指令优先。
-
-## 2. 权威工作位置
-
-只允许在：
+设计依据：
 
 ```text
-D:\program_sec\智能车\.worktrees\stop-phase2-integration
-branch: codex/stop-phase2-integration
-required baseline ancestor: 77e853a767152d7e877b736af6390605c841e6d2
+docs/superpowers/specs/2026-08-11-phase3-line-follow-integration-design.md
 ```
 
-开始前必须运行：
+计划与本文件冲突时，以本文件的工作位置和安全约束为准；业务设计以已确认的 spec 为准。仓库中描述旧第一阶段或第二阶段任务的说明属于历史资料，不得据此切换到旧工作树。
+
+## 2. 唯一允许的工作位置
+
+```text
+D:\program_sec\智能车\.worktrees\phase3-line-follow-integration
+branch: codex/phase3-line-follow-integration
+required starting HEAD: a58ba48
+required baseline ancestor: 7b61069
+```
+
+开始前必须执行：
 
 ```powershell
 git branch --show-current
 git rev-parse HEAD
-git merge-base --is-ancestor 77e853a HEAD
+git merge-base --is-ancestor 7b61069 HEAD
 git status --short
-git log -8 --oneline
+git log -6 --oneline
 ```
 
-路径不存在、分支不符、基线不是祖先或存在无法识别的脏文件时，立即停止并报告 Codex。不得自行创建、切换分支或 worktree。
+分支不符、基线不是祖先、存在无法识别的脏文件或 HEAD 已被其他人推进时，立即停止并报告 Codex。不得创建、切换、合并、rebase 或删除分支/worktree。
 
-## 3. 车端 Stop 来源
+## 3. 已同步的实车基线
 
-权威原始包在小车：
+第二阶段第三个车间扫描航点已从小车同步并提交为 `7b61069`：
 
-```text
-ucar@192.168.1.109:/home/ucar/ucar_ws/src/stop
+```python
+(2.2843, -2.43094, 0.0, 1.0)
 ```
 
-DeepSeek **禁止 SSH/SCP**。只能使用 Codex 事先导入本工作树、附带清单和哈希的 stop 快照。如果本地还没有该快照，停止并报告，不得用 `ucar_avoid`、`ucar_delivery` 或自写代码冒充。
+对应 stop 包 113 项回归已通过。第三阶段不得再次修改 `stop` 算法、车间扫描航点、OCR/PCA/停车逻辑或其测试契约。
 
-## 4. 不可改变的 Stop 行为
+第三阶段巡线起点是另一个目标：
 
-保留：
+```yaml
+frame_id: map
+x: 0.5167081260031493
+y: -3.125171302690142
+qz: -0.7044294777312331
+qw: 0.7097739857893512
+```
 
-- `FIND_POINTS_LIST` 航点和原有遍历顺序；
-- AMCL + TEB + move_base 配置；
-- OCR 节点、车间关键字映射和已验证模型；
-- Stage 0-6 的 OCR/PCA/白框停车顺序；
-- Phase 1 完成后的倒车、掉头、清理代价地图和 Phase 2 连续流程；
-- 车端已跑通的参数默认值。
-
-不得“顺手优化”、重写、换算法或引入 `ucar_delivery` 代替上述逻辑。必须先用 characterization tests 冻结已有行为。
-
-## 5. 允许的最小改造
-
-仅允许为集成所必需的改造：
-
-1. 节点启动后等待结构化任务，不自动运动。
-2. 注入实物和仿真的车间/货品目标。
-3. 将 stop 的导航和手动/PCA 速度输出重映射到隔离 topic。
-4. 将 `phase1_done/done/failed:*` 转换为 protocol v1 JSON。
-5. 取消 stop 内部的 TTS 副作用，交给全局编排器。
-6. 增加取消、超时、异常和 shutdown 零速度。
-7. 新增不拥有公共硬件的 stop integration launch。
-8. 新增 navigation handoff supervisor、readiness 和 preflight。
-
-如果必须修改原始算法才能继续，停止并报告 Codex，不得自行扩大范围。
-
-## 6. 全局状态和消息
-
-实现目标顺序：
+它必须写入并从以下文件读取，不得硬编码进 Python：
 
 ```text
-DELIVERY_HANDED_OFF
- -> SWITCHING_TO_STOP_STACK
- -> NAVIGATING_TO_WORKSHOP
- -> PHYSICAL_PARKED
- -> NAVIGATING_TO_SIM_WORKSHOP
- -> SIMULATION_PARKED
+ucar_ws/src/line_follow_integration/config/phase3.yaml
+```
+
+## 4. 权威巡线来源
+
+本地已跑通来源：
+
+```text
+E:\follow_v1\follow_v1\follow_left_v4.py
+E:\follow_v1\follow_v1\follow_right_v4.py
+E:\follow_v1\follow_v1\follow_mid_v4.py
+E:\follow_v1\follow_v1\auto_drive_v3.py
+E:\follow_v1\follow_v1\start_all_yolo.launch
+E:\follow_v1\follow_v1\README_V4.md
+```
+
+权威 SHA-256：
+
+```text
+follow_left_v4.py  8a9471e5917b93bdddd1f0b191e8ace48fe4d6baa8269f68204d4fba23fbbfb3
+follow_right_v4.py 92fd5098be423bab61c3eb5deb5c202c12adbc6c45bc4638a1af7bf5931a5d73
+follow_mid_v4.py   736d0666475f25f48f1e11e888a6c40864af95496754ff37f6311fbba3d0b07e
+auto_drive_v3.py   31353702cf6146bcb021bb0586c8a9f2bdc9ccc7ff2ab46f327b919fa15ef07e
+```
+
+只导入三个 V4 路线脚本。不要导入 `auto_drive_v3.py`，其方向选择由新 supervisor 取代，内部 TTS 与假成功行为不能进入集成。不要启动或导入 `start_all_yolo.launch`，它会重复启动底盘和相机。
+
+车端 YOLO 源：
+
+```text
+ucar@192.168.1.109:/home/ucar/ucar_ws/src/car_server/yolo_server.py
+sha256: 9d7010328a636742c1c60012cd6c4f0c78ae3cfc2ab4cf57c815ec88de4e9a51
+```
+
+仅允许为取得该单个源文件执行只读 SSH/标准输出读取和 SHA-256 核对。禁止 SCP 写入小车、修改车端文件、远程编译、启动/停止 ROS、发布 topic 或控制底盘。若无法只读取得文件，停止并报告 Codex。
+
+YOLO 模型不提交到 Git：
+
+```text
+/home/ucar/ucar_ws/src/yolo_turn/best.pt
+sha256: cb1c5db5da5db75fe40000410295970f2d7fb6a59d9600f82a22d836829e1cdd
+```
+
+## 5. 相机与速度所有权
+
+物理相机保持唯一且维持二维码已调好的 1020x720 配置：
+
+```text
+/usb_cam/image_raw 1020x720
+  -> QR 使用原始图像
+  -> YOLO 使用原始图像
+  -> line_camera_adapter 中心裁剪 960x720，再缩放 640x480@15 FPS
+  -> /line_follow/image_raw
+```
+
+不得启动第二个 `usb_cam`，不得修改、重启或动态重配物理相机。
+
+速度路径固定为：
+
+```text
+V4 script /cmd_vel
+ -> remap /line_follow/cmd_vel_candidate
+ -> phase3 supervisor 图像健康门控
+ -> /cmd_vel/line_follow
+ -> global velocity_arbiter mode=LINE_FOLLOW
+ -> /cmd_vel
+```
+
+V4 脚本不得直接发布最终 `/cmd_vel` 或公共 `/cmd_vel/line_follow`。只有 supervisor 可发布 `/cmd_vel/line_follow`，只有全局 velocity arbiter 可发布最终 `/cmd_vel`。
+
+## 6. 状态与接口
+
+全局状态：
+
+```text
+WAITING_SIMULATION_SPEECH
+ -> NAVIGATING_LINE_START
+ -> WAITING_LINE_DIRECTION
+ -> LINE_FOLLOWING
+ -> WAITING_FINAL_SPEECH
  -> COMPLETE
 ```
 
-协议：
+公共接口以 task_orchestrator 为准：
 
 ```text
-/task/delivery_navigation_goal -> /task/delivery_arrived
-/task/simulation_navigation_goal -> /task/simulation_arrived
+/task/line_navigation_goal
+/task/line_navigation_arrived
+/task/line_follow/start
+/task/line_follow/status
+/task/motion_mode
+/cmd_vel/line_follow
 ```
 
-每个输入/输出都必须携带 `protocol_version=1`、`task_id`、`goal_id`。重复终态任务只允许重发缓存结果，不得重复运动。过期、错误 phase 或错误身份的事件必须忽略。
-
-第一次停车只发布 `/task/delivery_arrived`，不得提前 `COMPLETE`。第二次停车稳定确认后才发布 `/task/simulation_arrived`。
-
-## 7. 导航栈交接安全合同
-
-handoff supervisor 是唯一的导航栈生命周期 owner。必须实现：
+所有 JSON 使用 `protocol_version=1` 并按 `task_id/goal_id` 关联、去重和拒绝过期事件。导航结果使用现有 arrival 语义 `arrived|failed`；巡线状态固定为：
 
 ```text
-保持 IDLE
- -> cancel 遗留 action goal
- -> 新鲜 odom 连续近零
- -> 停止旧 move_base/lidar_loc/map 进程组
- -> 确认旧 owner 退出
- -> 启动 stop AMCL/TEB/move_base/OCR
- -> 发布初始位姿
- -> 等待 map/AMCL/TF/action/OCR/camera/scan 就绪
- -> 放行 stop 任务
+waiting_signal
+direction_selected
+following
+success
+failure
 ```
 
-不得使用 `pkill ros`、`rosnode kill -a`、删除串口锁或通过节点名模糊 kill。只能管理由 supervisor 明确启动并持有句柄的导航进程组。
+红灯只等待。30 秒无方向结果选择 `straight`。锁定方向后关闭本次拥有的 YOLO 子进程。只有本次新鲜的最终停车标记才成功；子进程提前退出和 120 秒超时必须失败。最终“任务完成”只由 task_orchestrator 播报。
 
-故障政策不是“一次就 ERROR”：
+## 7. 故障与进程约束
 
-- 取消、退出、ROS 注册更新、TF/AMCL/move_base/OCR readiness 有界重试；
-- 每个重试有单次上限和阶段总超时；
-- 重试期间保持零速度并发布可诊断状态；
-- 旧栈未停止时可留在交接前重试；
-- 旧栈已停止而新栈无法就绪时，零速度并进入带诊断原因的 `ERROR`，等待人工处理或重新启动本次任务；
-- 不自动带着不确定定位继续比赛，不自动切回后立即运动。
+- 图像超过 0.5 秒未更新，立即阻断候选速度并发零速度；允许 3 秒恢复，仍未恢复才失败。
+- 导航、方向、巡线和 TTS 外层状态超时必须严格大于内部超时，按计划默认值执行。
+- 只能终止 supervisor 自己通过 `subprocess.Popen` 创建并记录的 PID。
+- 禁止 `pkill`、`killall`、`rosnode kill -a` 或按模糊节点名清理。
+- cancel、异常、超时和 shutdown 必须先零速度，再结束所拥有的子进程。
+- 不得伪造 arrival、line success、speak_done 或实车验收结果。
 
-## 8. 速度所有权
+## 8. TDD、提交和允许修改范围
 
-目标连接：
+严格执行计划中的 9 个任务。每项必须：
 
 ```text
-/cmd_vel/stop_navigation --\
-/cmd_vel/stop_manual -------> stop_velocity_mux -> /cmd_vel/stop
-
-/cmd_vel/navigation --------\
-/cmd_vel/qr -----------------> competition_velocity_arbiter -> /cmd_vel
-/cmd_vel/stop ---------------/
+先写失败测试 -> 运行确认 RED -> 最小实现 -> 运行确认 GREEN -> 回归 -> 单独提交
 ```
 
-只有 `competition_velocity_arbiter` 可发布最终 `/cmd_vel`。每次模式切换必须先发零速度；新模式对应源的新鲜消息到达前不允许运动。输入超时、非法数值、未知模式、时间回退、异常和 shutdown 都 fail closed。
+只修改计划逐项列出的文件。每次显式 `git add -- <files>`，禁止 `git add .` 和 `git add -A`。
 
-## 9. 必须 TDD
+禁止：
 
-每项先写失败测试，确认 RED，再做最小 GREEN，然后回归和单独提交。建议拆分：
+- push、merge、rebase、reset、clean、checkout 覆盖文件；
+- 修改根工作区、其他 worktree、stop 算法或外部包；
+- 提交模型、密钥、日志、图片、缓存、构建目录或临时文件；
+- 部署、远程编译、远程 ROS 操作或实车运动；
+- 为通过测试改写 protocol v1、放宽速度隔离或伪造成功。
 
-1. `test(orchestrator): lock dual workshop navigation contract`
-2. `test(handoff): lock bounded navigation stack transition`
-3. `chore(stop): import verified vehicle package snapshot`
-4. `feat(stop): gate mission on protocol task input`
-5. `feat(stop): isolate navigation and manual velocity outputs`
-6. `feat(stop): report correlated dual parking results`
-7. `feat(bringup): compose controlled stop stack handoff`
-8. `docs(integration): document checkpointed phase two acceptance`
+若计划必须发生结构性变化才能继续，停止并写清证据交给 Codex，不得自行扩大范围。
 
-原始 stop 快照必须作为独立提交，包含来源、导入时间、文件清单和 SHA-256，不得与改造混在同一提交。
+## 9. 最终本地验证
 
-## 10. 禁止
-
-- 修改其他 worktree 或根工作区；
-- SSH、SCP、远程编译、启停小车节点或控制底盘；
-- push、merge、rebase、reset、clean、`git add .`、`git add -A`；
-- 重写 stop 已验证算法或用 `ucar_delivery` 替换 stop；
-- 同时启动 lidar_loc 和 AMCL；
-- 同时启动两个 move_base、map server、相机、雷达或底盘 driver；
-- 让 stop、move_base 或其他节点直接发布最终 `/cmd_vel`；
-- 伪造 `/task/delivery_arrived`、`/task/simulation_arrived` 或实车验收结果；
-- 为通过测试修改 protocol v1 身份语义；
-- 提交密钥、日志、录包、原始相机图像、模型缓存或构建目录。
-
-## 11. 本地验证
-
-最终至少运行：
+至少执行：
 
 ```powershell
+python -m unittest discover -s ucar_ws/src/line_follow_integration/test -p "test_*.py" -v
 python -m unittest discover -s ucar_ws/src/task_orchestrator/test -p "test_*.py" -v
 python -m unittest discover -s ucar_ws/src/stop/test -p "test_*.py" -v
-python -m compileall -q ucar_ws/src/task_orchestrator ucar_ws/src/stop
+python -m unittest discover -s ucar_ws/src/llm_spark/test -p "test_*.py" -v
+python -m compileall -q ucar_ws/src/line_follow_integration ucar_ws/src/task_orchestrator ucar_ws/src/stop
 git diff --check
 git status --short
 ```
 
-必须用 `xml.etree.ElementTree` 解析所有新增或修改 launch。必须有 fake ROS/process tests 验证交接顺序、有界重试、不误停公共硬件、不重复 owner 和全路径零速度。
+用 `xml.etree.ElementTree` 解析所有新增/修改 launch，用 YAML 解析器验证 `phase3.yaml`，校验四个导入脚本 SHA-256。
 
-## 12. 文档和交接
+## 10. 交接给 Codex
 
-必须新建/更新：
+完成后停止，不部署。报告：
 
-```text
-ucar_ws/src/stop/README_INTEGRATION.md
-HANDOFF_TO_CODEX.md
-```
+1. 分支和最终 HEAD；
+2. 每个提交及目的；
+3. 修改/新增文件清单；
+4. 每条测试命令、测试数量和结果；
+5. source/model SHA-256；
+6. 完整 topic/remap/状态/超时表；
+7. YAML 本地绝对路径；
+8. 未验证的实车风险；
+9. 所有未提交/未跟踪文件。
 
-handoff 记录：分支和 HEAD、每个提交、修改文件、测试数量与完整摘要、stop 快照来源与哈希、导航栈交接顺序、全部 topic/remap、参数表、已知假设、未完成的车端验收。
-
-完成本地实现后停止。Codex 后续按以下检查点验收，每关单独授权：
-
-```text
-代码审查
- -> 本地全量回归
- -> 无运动启动
- -> 第一导航栈安全退出
- -> stop 导航栈只启动不发目标
- -> AMCL/TF/readiness
- -> 单独实物导航停车
- -> 单独仿真目标导航停车
- -> 连续两阶段
-```
-
-不得声称 DeepSeek 的本地测试证明已经部署、已经实车通过或已经完成全比赛。
+Codex 后续只负责：代码审查、全量回归、缺陷修复、车端备份部署、编译和分级实车验收。
