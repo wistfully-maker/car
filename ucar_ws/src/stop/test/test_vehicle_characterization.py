@@ -204,7 +204,7 @@ class VehicleCharacterizationTests(unittest.TestCase):
             "navigation_failed_count < max_navigation_retries",
             aborted_source,
         )
-        self.assertGreaterEqual(aborted_source.count("go_to_find_point()"), 2)
+        self.assertEqual(1, aborted_source.count("go_to_find_point()"))
         self.assertIn("advance_to_next_waypoint()", aborted_source)
         self.assertNotIn("current_point_index += 1", aborted_source)
 
@@ -283,6 +283,18 @@ class VehicleCharacterizationTests(unittest.TestCase):
         self.assertIn("physical_point_index = None", start_source)
         self.assertIn("phase2_route = []", start_source)
         self.assertIn("phase2_route_cursor = 0", start_source)
+
+    def test_physical_parking_completion_records_its_waypoint(self):
+        done_source = function_source(
+            MISSION_SOURCE, MISSION_TREE, "mission_done"
+        )
+        real_branch = done_source[
+            done_source.index('if current_phase == "real"'):
+            done_source.index("else:")
+        ]
+        self.assertIn(
+            "physical_point_index = current_point_index", real_branch
+        )
 
     def test_phase2_restarts_fresh_perception_and_parking(self):
         switch_source = function_source(

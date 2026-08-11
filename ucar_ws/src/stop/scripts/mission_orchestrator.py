@@ -47,6 +47,7 @@ from std_msgs.msg import String
 from std_srvs.srv import Empty
 from stop.msg import BoundingBoxes
 from stop_integration.mission_gate import MissionGate
+from stop_integration.waypoint_memory import WaypointMemory, build_phase2_route
 
 # ==============================================================================
 # 全局变量（同 item_finder.py 风格）
@@ -60,7 +61,6 @@ isBoxesCallbackFinished = False
 
 # 双阶段
 current_phase = "real"                        # "real" | "sim"
-sim_point_index = -1                          # 双指针优化：Phase 1 中记录仿真车间所在索引
 
 # 任务输入
 real_keyword = "食品"                         # OCR 匹配关键字
@@ -100,6 +100,10 @@ FIND_POINTS_LIST = [
     (0.771455, -2.44196, 0.0, 1.0),
     (1.7843, -2.43094, 0.0, 1.0),
 ]
+waypoint_memory = WaypointMemory(len(FIND_POINTS_LIST))
+physical_point_index = None
+phase2_route = []
+phase2_route_cursor = 0
 
 # 摄像头内参
 camera_matrix = np.array([
@@ -193,6 +197,38 @@ def match_relaxed(ocr_texts):
         if any(c in t for c in "生产车间加工车间"):
             return t
     return ""
+
+
+def record_workshop_observations(ocr_texts):
+    """Record every canonical workshop observed while Phase 1 scans."""
+    if current_phase != "real":
+        return
+    for text in ocr_texts:
+        for keyword, canonical_workshop in WAREHOUSE_MAP.items():
+            if keyword in text:
+                waypoint_memory.record(canonical_workshop, current_point_index)
+
+
+def reset_scan_state():
+    """Clear perception and parking progress before scanning another waypoint."""
+    global search_item_stage, rotate_num, isNavPointReached
+    global isBoxesCallbackFinished, camera_angle_rad, camera_deg
+    global camera_deg_left, camera_deg_right, lidar_processing_flag
+    global is_x_aligned, is_y_aligned, dist_forward_item, stage2_creeping
+
+    search_item_stage = 0
+    rotate_num = 0
+    isNavPointReached = False
+    isBoxesCallbackFinished = False
+    camera_angle_rad = 0.0
+    camera_deg = 0.0
+    camera_deg_left = 0.0
+    camera_deg_right = 0.0
+    lidar_processing_flag = False
+    is_x_aligned = False
+    is_y_aligned = False
+    dist_forward_item = 0.7
+    stage2_creeping = False
 
 
 # ==============================================================================
@@ -311,6 +347,22 @@ def go_to_find_point():
         handle_phase_exhausted()
 
 
+def advance_to_next_waypoint():
+    """Advance using the Phase 1 sequence or the planned Phase 2 route."""
+    global current_point_index, phase2_route_cursor
+
+    reset_scan_state()
+    if current_phase == "real":
+        current_point_index += 1
+    else:
+        phase2_route_cursor += 1
+        if phase2_route_cursor < len(phase2_route):
+            current_point_index = phase2_route[phase2_route_cursor]
+        else:
+            current_point_index = len(FIND_POINTS_LIST)
+    go_to_find_point()
+
+
 def handle_phase_exhausted():
     """当前阶段所有航点遍历完毕"""
     global current_phase, is_searching_item
@@ -335,26 +387,40 @@ def handle_phase_exhausted():
 
 def switch_to_phase2():
     """Phase 1 → Phase 2 切换（同 item_finder.py play_real_item_sound）"""
-    global current_phase, current_point_index, sim_point_index
-    global search_item_stage, rotate_num, is_x_aligned, is_y_aligned
-    global is_searching_item, mission_done_called, stage2_creeping
+    global current_phase, current_point_index
+    global phase2_route, phase2_route_cursor
+    global is_searching_item, mission_done_called
 
     mission_done_called = False
-    stage2_creeping = False
     current_phase = "sim"
 
-    # 双指针优化
-    if sim_point_index >= 0:
-        rospy.loginfo("[双指针] 仿真车间已在索引 %d 记录，直接跳转", sim_point_index)
-        current_point_index = sim_point_index
-    else:
-        rospy.loginfo("[双指针] 仿真车间未记录，从当前位置继续")
+    if physical_point_index is None:
+        rospy.logerr("[Phase 2] Physical parking waypoint is unknown")
+        is_searching_item = False
+        _set_mode("IDLE")
+        result_pub.publish(String(data="failed:not_found"))
+        event_pub.publish(String(data="failed:not_found"))
+        return
 
-    # 重置状态
-    search_item_stage = 0
-    rotate_num = 0
-    is_x_aligned = False
-    is_y_aligned = False
+    preferred_waypoint = waypoint_memory.unique_waypoint(sim_warehouse)
+    phase2_route = build_phase2_route(
+        physical_point_index, preferred_waypoint, len(FIND_POINTS_LIST)
+    )
+    phase2_route_cursor = 0
+    current_point_index = phase2_route[0]
+    if preferred_waypoint is not None and preferred_waypoint != physical_point_index:
+        rospy.loginfo(
+            "[Waypoint memory] Prefer remembered simulation workshop waypoint %d",
+            preferred_waypoint + 1,
+        )
+    else:
+        rospy.loginfo(
+            "[Waypoint memory] No unique simulation waypoint; fallback route=%s",
+            [index + 1 for index in phase2_route],
+        )
+
+    # 只复用航点位置；视觉、LiDAR、PCA 与停车过程全部从 Stage 0 重跑。
+    reset_scan_state()
     is_searching_item = True
     rospy.loginfo("[Phase 2] Start searching: %s", sim_keyword)
 
@@ -393,7 +459,7 @@ def switch_to_phase2():
 def mission_done():
     """当前阶段完成（防重入）"""
     global search_item_stage, is_searching_item, current_phase
-    global mission_done_called, phase2_pending
+    global mission_done_called, phase2_pending, physical_point_index
 
     if mission_done_called:
         return
@@ -405,6 +471,7 @@ def mission_done():
     cmd_vel_pub.publish(Twist())
 
     if current_phase == "real":
+        physical_point_index = current_point_index
         # Phase 1 完成 → 发内部事件（TTS 交给全局编排器），
         # 停在原地等待全局编排器的仿真目标放行，不自动进入 Phase 2。
         text = "已将{}放入{}".format(real_cargo, real_warehouse)
@@ -452,7 +519,7 @@ def boxes_callback(msg):
     global camera_deg_left, camera_deg_right, lidar_processing_flag
     global is_y_aligned, isBoxesCallbackFinished, search_item_stage
     global is_searching_item, y_align_tolerance
-    global current_point_index, current_phase, sim_point_index
+    global current_point_index, current_phase
     global stage2_creeping
 
     if search_item_stage == 6:
@@ -468,13 +535,13 @@ def boxes_callback(msg):
         slist_tool.append(box.Class.strip())
         slist_rect.append([box.xmin, box.ymin, box.xmax, box.ymax])
 
+    record_workshop_observations(slist_tool)
+
     # ---- 确定当前阶段的目标关键字 ----
     if current_phase == "real":
         cur_kw = real_keyword
-        sim_kw = sim_keyword
     else:
         cur_kw = sim_keyword
-        sim_kw = None
 
     # ---- 匹配 ----
     target_class = match_keyword(slist_tool, cur_kw)
@@ -483,14 +550,6 @@ def boxes_callback(msg):
 
     rospy.loginfo("[boxes_cb][%s] OCR=%s, matched=%s, stage=%d",
                   current_phase, slist_tool, target_class, search_item_stage)
-
-    # ---- 双指针优化：Phase 1 时间步检查仿真车间 ----
-    if current_phase == "real" and sim_point_index < 0 and sim_kw:
-        sim_match = match_keyword(slist_tool, sim_kw)
-        if sim_match:
-            sim_point_index = current_point_index
-            rospy.loginfo("[双指针] Phase 1 在航点 %d 发现仿真车间: %s",
-                          sim_point_index, sim_match)
 
     # ---- 找到目标 → 计算几何信息 ----
     if target_class != "":
@@ -530,6 +589,7 @@ def boxes_callback(msg):
         # ==== Stage 1: 二次确认 → 启用 LiDAR ====
         elif search_item_stage == 1:
             rospy.loginfo("[Stage 1] Second confirm, enable LiDAR")
+            waypoint_memory.mark_scanned(current_point_index)
             lidar_processing_flag = True
             search_item_stage = 2
             return
@@ -569,9 +629,8 @@ def boxes_callback(msg):
                 isBoxesCallbackFinished = True
             else:
                 rospy.loginfo("  Exhausted, next waypoint")
-                current_point_index += 1
-                go_to_find_point()
-                rotate_num = 0
+                waypoint_memory.mark_scanned(current_point_index)
+                advance_to_next_waypoint()
 
 
 # ==============================================================================
@@ -621,8 +680,7 @@ def goal_callback(msg):
 
         rospy.logwarn("  Waypoint unreachable, continue to next waypoint")
         navigation_failed_count = 0
-        current_point_index += 1
-        go_to_find_point()
+        advance_to_next_waypoint()
     elif msg.status.status == 5:                  # REJECTED
         rospy.logwarn("  Nav REJECTED")
         go_to_find_point()
@@ -915,20 +973,19 @@ def _on_phase2_ack(message):
 
 def start_mission():
     """重置状态，启动 Phase 1"""
-    global is_searching_item, current_phase, current_point_index, sim_point_index
-    global rotate_num, search_item_stage, navigation_failed_count
-    global is_x_aligned, is_y_aligned, mission_done_called, stage2_creeping
+    global is_searching_item, current_phase, current_point_index
+    global navigation_failed_count, mission_done_called
+    global physical_point_index, phase2_route, phase2_route_cursor
 
     current_phase = "real"
     current_point_index = 0
-    sim_point_index = -1
-    rotate_num = 0
-    search_item_stage = 0
+    physical_point_index = None
+    phase2_route = []
+    phase2_route_cursor = 0
+    waypoint_memory.reset()
+    reset_scan_state()
     navigation_failed_count = 0
-    is_x_aligned = False
-    is_y_aligned = False
     mission_done_called = False
-    stage2_creeping = False
     is_searching_item = True
 
     rospy.loginfo("=" * 50)
