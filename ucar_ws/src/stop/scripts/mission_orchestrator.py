@@ -586,6 +586,7 @@ def goal_callback(msg):
         return
 
     if msg.status.status == 3:                    # SUCCEEDED
+        navigation_failed_count = 0
         # 清除代价地图
         try:
             rospy.wait_for_service('/move_base/clear_costmaps', 1.0)
@@ -600,11 +601,28 @@ def goal_callback(msg):
         isNavPointReached = True
 
     elif msg.status.status == 4:                  # ABORTED
-        rospy.logwarn("  Nav ABORTED")
         navigation_failed_count += 1
-        if navigation_failed_count >= max_navigation_retries:
-            navigation_failed_count = 0
+        rospy.logwarn(
+            "  Nav ABORTED (%d/%d)",
+            navigation_failed_count,
+            max_navigation_retries,
+        )
+        try:
+            rospy.wait_for_service('/move_base/clear_costmaps', 1.0)
+            rospy.ServiceProxy('/move_base/clear_costmaps', Empty)()
+            rospy.loginfo("  Costmap cleared after navigation failure")
+        except Exception as exc:
+            rospy.logwarn("  Failed to clear costmap: %s", exc)
+
+        if navigation_failed_count < max_navigation_retries:
+            rospy.loginfo("  Retrying current waypoint")
             go_to_find_point()
+            return
+
+        rospy.logwarn("  Waypoint unreachable, continue to next waypoint")
+        navigation_failed_count = 0
+        current_point_index += 1
+        go_to_find_point()
     elif msg.status.status == 5:                  # REJECTED
         rospy.logwarn("  Nav REJECTED")
         go_to_find_point()

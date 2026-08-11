@@ -65,11 +65,12 @@ class ManagedProcessGroup:
     def __init__(self, command, log=None):
         self._command = list(command)
         self._log = log
+        child_env = os.environ.copy()
+        child_env.pop("SPARK_API_PASSWORD", None)
         self._proc = subprocess.Popen(
             self._command,
             stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            env=child_env,
             start_new_session=True,
         )
 

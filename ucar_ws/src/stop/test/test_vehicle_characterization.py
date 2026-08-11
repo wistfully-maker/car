@@ -182,6 +182,37 @@ class VehicleCharacterizationTests(unittest.TestCase):
         self.assertIn("navigation_failed_count", MISSION_SOURCE)
         self.assertIn("max_navigation_retries", MISSION_SOURCE)
 
+    def test_aborted_navigation_retries_immediately_then_skips_the_blocked_waypoint(self):
+        goal_source = function_source(
+            MISSION_SOURCE, MISSION_TREE, "goal_callback"
+        )
+        aborted_source = goal_source[
+            goal_source.index("elif msg.status.status == 4"):
+            goal_source.index("elif msg.status.status == 5")
+        ]
+
+        self.assertIn("/move_base/clear_costmaps", aborted_source)
+        self.assertIn(
+            "navigation_failed_count < max_navigation_retries",
+            aborted_source,
+        )
+        self.assertGreaterEqual(aborted_source.count("go_to_find_point()"), 2)
+        self.assertIn("current_point_index += 1", aborted_source)
+        self.assertLess(
+            aborted_source.index("current_point_index += 1"),
+            aborted_source.rindex("go_to_find_point()"),
+        )
+
+    def test_success_resets_navigation_failure_budget(self):
+        goal_source = function_source(
+            MISSION_SOURCE, MISSION_TREE, "goal_callback"
+        )
+        succeeded_source = goal_source[
+            goal_source.index("if msg.status.status == 3"):
+            goal_source.index("elif msg.status.status == 4")
+        ]
+        self.assertIn("navigation_failed_count = 0", succeeded_source)
+
     def test_mission_result_strings_are_unchanged(self):
         for marker in ("phase1_done", '"done"', "failed:not_found"):
             self.assertIn(marker, MISSION_SOURCE)
@@ -189,7 +220,7 @@ class VehicleCharacterizationTests(unittest.TestCase):
     def test_go_to_find_point_skips_close_waypoints(self):
         self.assertIn("dist < 0.3", MISSION_SOURCE)
 
-    def test_waypoint_index_advances_only_after_scan_exhaustion(self):
+    def test_normal_waypoint_index_advances_only_after_scan_exhaustion(self):
         go_source = function_source(
             MISSION_SOURCE, MISSION_TREE, "go_to_find_point"
         )
@@ -201,7 +232,11 @@ class VehicleCharacterizationTests(unittest.TestCase):
         )
 
         self.assertNotIn("current_point_index += 1", go_source)
-        self.assertNotIn("current_point_index += 1", goal_source)
+        succeeded_source = goal_source[
+            goal_source.index("if msg.status.status == 3"):
+            goal_source.index("elif msg.status.status == 4")
+        ]
+        self.assertNotIn("current_point_index += 1", succeeded_source)
 
         exhausted_source = boxes_source[
             boxes_source.index('rospy.loginfo("  Exhausted, next waypoint")'):

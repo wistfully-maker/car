@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 import sys
 import types
 import unittest
@@ -216,6 +217,54 @@ def drive_happy_path(module, fake, config=None, clock=None):
     driver.poll()  # legacy absence probe
     driver.poll()  # stop readiness probe
     return driver
+
+
+class ManagedProcessGroupTests(unittest.TestCase):
+    def test_child_roslaunch_inherits_parent_terminal_output(self):
+        module = load_module()
+        calls = []
+
+        class Proc:
+            def poll(self):
+                return None
+
+        def fake_popen(command, **kwargs):
+            calls.append((command, kwargs))
+            return Proc()
+
+        module.subprocess.Popen = fake_popen
+        module.ManagedProcessGroup(["roslaunch", "/tmp/stop.launch"])
+
+        self.assertEqual(1, len(calls))
+        _command, kwargs = calls[0]
+        self.assertNotIn("stdout", kwargs)
+        self.assertNotIn("stderr", kwargs)
+        self.assertIs(module.subprocess.DEVNULL, kwargs["stdin"])
+        self.assertTrue(kwargs["start_new_session"])
+
+    def test_navigation_children_do_not_inherit_llm_secret(self):
+        module = load_module()
+        calls = []
+
+        class Proc:
+            def poll(self):
+                return None
+
+        module.subprocess.Popen = lambda command, **kwargs: (
+            calls.append((command, kwargs)) or Proc()
+        )
+        previous = os.environ.get("SPARK_API_PASSWORD")
+        os.environ["SPARK_API_PASSWORD"] = "must-not-reach-navigation-child"
+        try:
+            module.ManagedProcessGroup(["roslaunch", "/tmp/stop.launch"])
+            child_env = calls[0][1].get("env", dict(os.environ))
+        finally:
+            if previous is None:
+                os.environ.pop("SPARK_API_PASSWORD", None)
+            else:
+                os.environ["SPARK_API_PASSWORD"] = previous
+
+        self.assertNotIn("SPARK_API_PASSWORD", child_env)
 
 
 class HandoffDriverHappyPathTests(unittest.TestCase):
