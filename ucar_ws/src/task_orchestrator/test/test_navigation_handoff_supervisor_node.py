@@ -245,7 +245,12 @@ class RosHandoffStatusTests(unittest.TestCase):
         actions._status_pub = types.SimpleNamespace(
             publish=lambda message: published.append(json.loads(message.data))
         )
-        actions._release_pub = types.SimpleNamespace(publish=lambda _message: None)
+        actions.released_messages = []
+        actions._release_pub = types.SimpleNamespace(
+            publish=lambda message: actions.released_messages.append(
+                json.loads(message.data)
+            )
+        )
         module.String = lambda data: types.SimpleNamespace(data=data)
         return actions, published
 
@@ -256,6 +261,22 @@ class RosHandoffStatusTests(unittest.TestCase):
         self.assertEqual("ready", published[-1]["status"])
         self.assertEqual("task-1", published[-1]["task_id"])
         self.assertEqual("delivery-1", published[-1]["goal_id"])
+
+    def test_release_payload_satisfies_stop_mission_gate_contract(self):
+        module = load_module()
+        actions, _published = self._actions(module)
+        actions.release_task(dict(GOAL), dict(GOAL))
+
+        self.assertEqual(1, len(actions.released_messages))
+        release = actions.released_messages[0]
+        self.assertEqual("delivery-1", release["physical_goal_id"])
+        self.assertEqual(
+            {
+                "target_workshop": GOAL["target_workshop"],
+                "selected_item": GOAL["selected_item"],
+            },
+            release["physical"],
+        )
 
     def test_failure_reports_correlated_failed(self):
         module = load_module()

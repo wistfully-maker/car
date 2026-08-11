@@ -446,6 +446,11 @@ class _RosHandoffActions:
             "goal_id": payload["goal_id"],
             "target_workshop": goal["target_workshop"],
             "selected_item": goal["selected_item"],
+            "physical_goal_id": payload["goal_id"],
+            "physical": {
+                "target_workshop": goal["target_workshop"],
+                "selected_item": goal["selected_item"],
+            },
         }
         try:
             self._publish_handoff_status(payload, "ready", "")
