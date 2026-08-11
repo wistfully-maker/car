@@ -1,4 +1,7 @@
-# HANDOFF_TO_CODEX：第一阶段全流程一键启动完成交接
+# HANDOFF_TO_CODEX：第一阶段历史交接与第二阶段接口修复
+
+> 第 1～12 节保留 2026-08-09 第一阶段交接记录，便于追溯；其中“第二阶段未实现”等结论已被
+> 第 13 节取代。当前第二阶段修改尚未部署到小车，不能把本地测试通过表述为实车验收通过。
 
 > 交接人：OpenCode / DeepSeek V4 Flash
 > 日期：2026-08-09
@@ -175,3 +178,57 @@ M  ucar_ws/src/task_orchestrator/README.md      # 任务前差异见下；本阶
 代码审查 → 本地全量回归（车端 Linux）→ 与 915aa37 QR 及车端外部包核对 launch 参数 →
 车端备份 → 部署编译 → 无运动 topic 模拟 → 人工看护下实车运行到 TTS 与 delivery goal →
 再交给后续避障导航开发。
+
+## 13. 2026-08-11 第二阶段接口修复（当前权威交接）
+
+工作位置：
+
+```text
+worktree: D:\program_sec\智能车\.worktrees\stop-phase2-integration
+branch:   codex/stop-phase2-integration
+```
+
+本轮实现提交（文档提交前）：
+
+| 提交 | 目的 |
+|---|---|
+| `149be7c` | 两次停车各增加独立 TTS 等待状态；匹配成功回执后才继续/完成 |
+| `efe1ec6` | supervisor 单一、latched 发布二维码领取区初始位姿；状态 topic 只保留 `ready/failed` |
+| `379888f` | 航点索引延迟到当前航点 OCR 扫描耗尽后递增，消除 OCR/航点 off-by-one |
+
+权威流程：
+
+```text
+首次比赛播报成功 -> delivery goal -> 安全切换 stop 栈
+ -> 实物车间导航/OCR/停车 -> delivery_arrived
+ -> 播报“已将{实物}放入{实物车间}”并等待匹配 speak_done success
+ -> simulation goal -> 仿真车间导航/OCR/停车 -> simulation_arrived
+ -> 播报“仿真任务已完成，已将{仿真物品}放入{仿真车间}”
+ -> 等待匹配 speak_done success -> COMPLETE
+```
+
+所有外部业务接口以 `task_orchestrator` protocol v1 为准：
+`/task/delivery_navigation_goal`、`/task/stop_mission_goal`、`/task/delivery_arrived`、
+`/task/simulation_navigation_goal`、`/task/simulation_arrived`、`/voice/speak`、
+`/voice/speak_done`、`/task/navigation_handoff_status`。`/stop/mission_event` 和
+`/stop/mission_ack` 只是 stop 内部适配缝。
+
+定位与航点：
+
+```text
+二维码领取区 /initialpose: x=-1.40219, y=-0.627908, yaw=0.053792653589793
+车间航点1: (-0.812845, -2.44196)
+车间航点2: ( 0.771455, -2.44196)
+车间航点3: ( 1.784300, -2.43094)
+```
+
+`/initialpose` 只有 supervisor 一个 owner；其发布器为 latched。stop 集成 launch 的
+`initial_pose_x/y/yaw=0/0/0` 仅用于关闭旧的重复发布路径。三个航点和 OCR/TEB/PCA 算法均未改。
+
+本地验证结果：task_orchestrator 276 项通过、24 项因 Windows 无 Bash 跳过；stop 95 项全部
+通过；llm_spark 11 项全部通过；task_orchestrator 与 stop 的 `compileall` 成功；
+`competition_full.launch`、`task_orchestrator.launch`、`mission_integration.launch` 三个 XML
+解析成功；`git diff --check` 通过。
+
+未执行：小车部署、Catkin 车端编译、ROS 无运动注入、真实语音、真实导航、OCR/停车和底盘运动。
+下一步必须先按用户指定位置备份并部署，再在人工看护和急停可用条件下分段验收。

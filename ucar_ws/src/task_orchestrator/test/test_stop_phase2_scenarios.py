@@ -247,7 +247,8 @@ class Scenario:
         self.now = [0.0]
         self.ids = iter(
             ["pickup-1", "search-1", "llm-1", "speech-1",
-             "delivery-1", "simulation-1", "unused-7"]
+             "delivery-1", "delivery-speech-1", "simulation-1",
+             "simulation-speech-1", "unused-9"]
         )
         self.outputs = []
         self.task_id = "task-1"
@@ -347,13 +348,27 @@ class Scenario:
             )
         self.sync_modes()
 
+    def complete_current_speech(self, status="success"):
+        self.orch.on_speech_done(
+            {
+                "protocol_version": 1,
+                "task_id": self.task_id,
+                "speech_id": self.orch.task["speech_id"],
+                "status": status,
+                "message": "" if status == "success" else "speech failed",
+            }
+        )
+        self.sync_modes()
+
     def run_to_complete(self):
         self.reach_delivery_handoff()
         self.handoff_to_release()
         self.adapter.mission.phase1_arrived()
+        self.complete_current_speech()
         sim_goal = self.actions_("publish_simulation_navigation_goal")[-1]
         self.adapter.on_simulation_goal(sim_goal)
         self.adapter.mission.phase2_arrived()
+        self.complete_current_speech()
 
     # ---------- 安全断言 ----------
 
@@ -402,6 +417,35 @@ class HappyPathScenarioTests(unittest.TestCase):
         self.assertEqual(["STOP_NAVIGATION"], s.actions.modes)
         self.assertEqual(1, len(s.actions.released))
         self.assertEqual("IDLE", s.motion_modes()[-1])
+        speeches = s.actions_("publish_speech")
+        self.assertEqual(3, len(speeches))
+        self.assertEqual(
+            [
+                "取得苹果属于食品大类应放置在食品加工车间，"
+                "仿真环境中取得毛巾属于日用品大类应放置在日用品加工车间",
+                "已将苹果放入食品加工车间",
+                "仿真任务已完成，已将毛巾放入日用品加工车间",
+            ],
+            [speech["text"] for speech in speeches],
+        )
+
+    def test_each_parking_speech_gates_the_next_phase(self):
+        s = Scenario()
+        s.reach_delivery_handoff()
+        s.handoff_to_release()
+        s.adapter.mission.phase1_arrived()
+        self.assertEqual("WAITING_DELIVERY_SPEECH", s.orch.state)
+        self.assertEqual([], s.actions_("publish_simulation_navigation_goal"))
+
+        s.complete_current_speech()
+        self.assertEqual("NAVIGATING_TO_SIM_WORKSHOP", s.orch.state)
+        sim_goal = s.actions_("publish_simulation_navigation_goal")[-1]
+        s.adapter.on_simulation_goal(sim_goal)
+        s.adapter.mission.phase2_arrived()
+        self.assertEqual("WAITING_SIMULATION_SPEECH", s.orch.state)
+
+        s.complete_current_speech()
+        self.assertEqual("COMPLETE", s.orch.state)
 
     def test_transient_cancel_retry_then_success(self):
         s = Scenario()
@@ -420,9 +464,11 @@ class HappyPathScenarioTests(unittest.TestCase):
              "goal_id": "delivery-1", "status": "ready", "message": ""}
         )
         s.adapter.mission.phase1_arrived()
+        s.complete_current_speech()
         sim_goal = s.actions_("publish_simulation_navigation_goal")[-1]
         s.adapter.on_simulation_goal(sim_goal)
         s.adapter.mission.phase2_arrived()
+        s.complete_current_speech()
         self.assertEqual("COMPLETE", s.orch.state)
         self.assertEqual(2, len(s.success_arrivals()))
 
@@ -441,9 +487,11 @@ class HappyPathScenarioTests(unittest.TestCase):
              "goal_id": "delivery-1", "status": "ready", "message": ""}
         )
         s.adapter.mission.phase1_arrived()
+        s.complete_current_speech()
         sim_goal = s.actions_("publish_simulation_navigation_goal")[-1]
         s.adapter.on_simulation_goal(sim_goal)
         s.adapter.mission.phase2_arrived()
+        s.complete_current_speech()
         self.assertEqual("COMPLETE", s.orch.state)
 
 
@@ -535,6 +583,7 @@ class MissionFailureScenarioTests(unittest.TestCase):
         s.reach_delivery_handoff()
         s.handoff_to_release()
         s.adapter.mission.phase1_arrived()
+        s.complete_current_speech()
         self.assertEqual("NAVIGATING_TO_SIM_WORKSHOP", s.orch.state)
         s.now[0] = s.orch.deadline + 0.01
         s.orch.tick()
@@ -550,6 +599,7 @@ class MissionFailureScenarioTests(unittest.TestCase):
         s.reach_delivery_handoff()
         s.handoff_to_release()
         s.adapter.mission.phase1_arrived()
+        s.complete_current_speech()
         sim_goal = s.actions_("publish_simulation_navigation_goal")[-1]
         s.adapter.on_simulation_goal(sim_goal)
         s.adapter.mission.fail("not_found")
@@ -563,6 +613,7 @@ class MissionFailureScenarioTests(unittest.TestCase):
         s.reach_delivery_handoff()
         s.handoff_to_release()
         s.adapter.mission.phase1_arrived()
+        s.complete_current_speech()
         sim_goal = s.actions_("publish_simulation_navigation_goal")[-1]
         s.adapter.on_simulation_goal(sim_goal)
         s.adapter.mission.fail("cancelled")
@@ -579,20 +630,20 @@ class CancelScenarioTests(unittest.TestCase):
             "WAITING_QR",
             "WAITING_LLM",
             "WAITING_SPEECH",
+            "DELIVERY_HANDED_OFF",
+            "NAVIGATING_TO_WORKSHOP",
+            "WAITING_DELIVERY_SPEECH",
             "NAVIGATING_TO_SIM_WORKSHOP",
+            "WAITING_SIMULATION_SPEECH",
         ):
             with self.subTest(state=state):
                 s = Scenario()
                 self._reach(s, state)
+                success_count = len(s.success_arrivals())
                 s.orch.on_cancel({"task_id": s.task_id, "reason": "operator_cancel"})
                 self.assertEqual("CANCELLED", s.orch.state)
                 self.assertEqual("IDLE", s.motion_modes()[-1])
-                simulation = [
-                    p for kind, p in s.adapter.arrivals if kind == "simulation"
-                ]
-                self.assertEqual([], simulation)
-                if state != "NAVIGATING_TO_SIM_WORKSHOP":
-                    self.assertEqual([], s.success_arrivals())
+                self.assertEqual(success_count, len(s.success_arrivals()))
 
     def _reach(self, s, state):
         s.orch.on_task_request(
@@ -641,10 +692,25 @@ class CancelScenarioTests(unittest.TestCase):
             {"protocol_version": 1, "task_id": s.task_id,
              "speech_id": "speech-1", "status": "success", "message": ""}
         )
+        if state == "DELIVERY_HANDED_OFF":
+            return
+        s.orch.on_navigation_handoff_status(
+            {"protocol_version": 1, "task_id": s.task_id,
+             "goal_id": "delivery-1", "status": "ready", "message": ""}
+        )
+        if state == "NAVIGATING_TO_WORKSHOP":
+            return
+        goal = s.actions_("publish_delivery_goal")[-1]
+        s.adapter.mission.start(goal)
+        s.adapter.mission.phase1_arrived()
+        if state == "WAITING_DELIVERY_SPEECH":
+            return
+        s.complete_current_speech()
         if state == "NAVIGATING_TO_SIM_WORKSHOP":
-            goal = s.actions_("publish_delivery_goal")[-1]
-            s.adapter.mission.start(goal)
-            s.adapter.mission.phase1_arrived()
+            return
+        sim_goal = s.actions_("publish_simulation_navigation_goal")[-1]
+        s.adapter.on_simulation_goal(sim_goal)
+        s.adapter.mission.phase2_arrived()
 
     def test_cancel_during_physical_phase_fails_closed(self):
         # DELIVERY_HANDED_OFF 是终态：取消由 stop 任务侧处理并报失败。

@@ -1,8 +1,8 @@
 # task_orchestrator 操作、部署与联调手册
 
-> **当前状态：已于 2026-08-09 部署到 `ucar@192.168.1.109`，完成 Catkin 编译、
-> 179 项编排器测试和 8 项车端 LLM 测试。** 本文不表示完整实车流程已经通过；本次没有启动业务
-> 节点，也没有进行实车运动。首次上车必须有人看护、保留急停，
+> **第一部分曾于 2026-08-09 部署到 `ucar@192.168.1.109`；本文新增的第二部分修复目前只在
+> `codex/stop-phase2-integration` 本地分支完成，尚未重新部署或实车验收。** 首次部署本版本必须
+> 有人看护、保留急停，
 > 按本文从静态检查、零速度检查再逐步放开运动。
 
 ## 1. 先明确边界和真实终点
@@ -36,9 +36,12 @@ stop 导航栈：实物车间识别、动态避障导航与停车后回传 `/tas
  -> navigation_handoff_supervisor：CANCELLING -> VERIFYING_STOP -> STOPPING_LEGACY
       -> STARTING_STOP -> WAITING_STOP_READY -> READY（每步有界重试，重试中零速度）
  -> /task/stop_mission_goal -> stop 栈（OCR 车间识别 + TEB 动态避障 + PCA 停车）
- -> /task/delivery_arrived -> NAVIGATING_TO_SIM_WORKSHOP
- -> /task/simulation_navigation_goal -> stop 栈 Phase 2
- -> /task/simulation_arrived -> COMPLETE
+ -> /task/delivery_arrived -> WAITING_DELIVERY_SPEECH
+ -> /voice/speak：“已将{实物}放入{实物车间}” -> 匹配 /voice/speak_done success
+ -> /task/simulation_navigation_goal -> NAVIGATING_TO_SIM_WORKSHOP -> stop 栈 Phase 2
+ -> /task/simulation_arrived -> WAITING_SIMULATION_SPEECH
+ -> /voice/speak：“仿真任务已完成，已将{仿真物品}放入{仿真车间}”
+ -> 匹配 /voice/speak_done success -> COMPLETE
 ```
 
 第二阶段细节、参数、无运动人工注入与回滚见第 9 节和
@@ -190,7 +193,7 @@ rostopic info /cmd_vel
 | 输出 | `/voice/speak` | `std_msgs/String` | 待播文本和 speech identity |
 | 输出 | `/task/delivery_navigation_goal` | `std_msgs/String` | 实物配送目标（交接触发，TTS 完成后唯一一次） |
 | 输出 | `/task/simulation_navigation_goal` | `std_msgs/String` | 仿真车间目标（实物停车确认后发布） |
-| 输出 | `/task/navigation_handoff_status` | `std_msgs/String` | 交接 supervisor 状态/诊断（含重试次数与阶段） |
+| 输出 | `/task/navigation_handoff_status` | `std_msgs/String` | 交接 supervisor 严格终态，只允许关联的 `ready/failed`；过程诊断只写 ROS 日志 |
 | 输出 | `/task/stop_mission_goal` | `std_msgs/String` | 交接 READY 后放行给 stop 任务 |
 | 输出 | `/stop/mission_event`、`/stop/mission_ack` | `std_msgs/String` | stop 栈私有集成事件与 Phase 2 放行（不对外承诺） |
 
@@ -220,7 +223,9 @@ rostopic echo /task/delivery_navigation_goal
 ```
 
 状态依次应为 `CHECKING_DEPENDENCIES`、`NAVIGATING_TO_PICKUP`、`WAITING_QR`、
-`WAITING_LLM`、`WAITING_SPEECH`、`DELIVERY_HANDED_OFF`。readiness 回执示例：
+`WAITING_LLM`、`WAITING_SPEECH`、`DELIVERY_HANDED_OFF`、`NAVIGATING_TO_WORKSHOP`、
+`WAITING_DELIVERY_SPEECH`、`NAVIGATING_TO_SIM_WORKSHOP`、
+`WAITING_SIMULATION_SPEECH`、`COMPLETE`。readiness 回执示例：
 
 ```json
 {"protocol_version":1,"task_id":"task-...","status":"ready"}
@@ -274,18 +279,20 @@ done 示例：
 {"protocol_version":1,"task_id":"task-...","speech_id":"speech-...","status":"success","message":""}
 ```
 
-最后会看到一次 delivery message（`protocol_version/task_id/goal_id/target_workshop/selected_item`
-五字段齐全），随后 `/task/status` 停留在 `DELIVERY_HANDED_OFF`，同时必须确认：
+首次比赛格式播报完成后会看到一次 delivery message
+（`protocol_version/task_id/goal_id/target_workshop/selected_item` 五字段齐全），交接期间
+`/task/status` 暂时停留在 `DELIVERY_HANDED_OFF`，同时必须确认：
 
 ```bash
 rostopic echo -n 1 /task/motion_mode    # data: "IDLE"
 rostopic echo -n 1 /cmd_vel             # 六个分量均为 0
 ```
 
-本次自动运行到此结束：不会再启动避障导航，也不会进入 `COMPLETE`。未来避障模块接入后，
-它订阅 `/task/delivery_navigation_goal`，用 `task_id/goal_id` 去重执行配送，到达后回传
-`/task/delivery_arrived`（同样带 `task_id/goal_id`），状态机才会继续后续流程；在本阶段
-这些都不存在，请勿伪造回执。
+默认第二部分已接入时，supervisor 会在安全交接后启动 stop 栈并继续两次导航与停车。第一次
+`/task/delivery_arrived` 只触发实物停车播报；必须收到匹配的 `/voice/speak_done success` 才发布
+`/task/simulation_navigation_goal`。第二次 `/task/simulation_arrived` 只触发最终播报；同样必须收到
+匹配的成功回执才进入 `COMPLETE`。关闭 `start_navigation_handoff` 回滚到第一部分时，流程才停在
+`DELIVERY_HANDED_OFF`。任何到达或语音回执都不得人工伪造来证明实车完成。
 
 identity 必须从上一阶段实际输出复制，不能猜。旧 `task_id`、错 `goal_id/search_id/request_id/speech_id`
 会被忽略；这属于防串任务机制，不是节点“没反应”。
@@ -479,14 +486,15 @@ roslaunch 进程组（第一部分 fast-nav include 与 `stop/mission_integratio
 IDLE -> CANCELLING（取消遗留 action goal，cancel_retries 次）
  -> VERIFYING_STOP（新鲜 /odom 连续近零 stop_stable_duration 秒）
  -> STOPPING_LEGACY（停止旧进程组，legacy_exit_retries 次缺席确认）
- -> STARTING_STOP（启动 stop 栈 + 发布一次初始位姿）
+ -> STARTING_STOP（启动 stop 栈 + supervisor 发布一次 latched 二维码领取区初始位姿）
  -> WAITING_STOP_READY（readiness_retries 次探测 map/AMCL/TF/action/OCR/相机/雷达）
  -> READY -> 发布 /task/stop_mission_goal 放行任务
 ```
 
 每个状态切换先发零速度再发生命周期动作；取消、退出、就绪任一耗尽重试或超过
-`total_timeout` 都进入 `FAILED`（诊断原因发布在 `/task/navigation_handoff_status`，
+`total_timeout` 都进入 `FAILED`（关联的最终失败发布在 `/task/navigation_handoff_status`，
 运动模式保持 `IDLE`），等待人工处理或重新启动任务，绝不带着不确定定位继续运动。
+重试次数、等待条件和底盘仍运动等过程诊断只写 ROS 日志，不混入该业务 topic。
 
 ### 9.3 速度所有权
 
@@ -508,9 +516,10 @@ IDLE -> CANCELLING（取消遗留 action goal，cancel_retries 次）
 ### 9.4 两个独立到达契约
 
 - 第一次停车（实物车间）确认后才发布 `/task/delivery_arrived`（goal_id = delivery goal 的
-  goal_id），不提前 `COMPLETE`；
+  goal_id），编排器播报“已将{物品}放入{车间}”；匹配的播报成功回执前不发布第二阶段目标；
 - 第二次停车（仿真目标车间）稳定确认后才发布 `/task/simulation_arrived`（goal_id =
-  simulation goal 的 goal_id）；
+  simulation goal 的 goal_id），编排器播报“仿真任务已完成，已将{物品}放入{车间}”；匹配的
+  播报成功回执前不进入 `COMPLETE`；
 - stop 任务启动后不自动运动，等 `/task/stop_mission_goal`；Phase 1 停车后停在原地等待
   全局编排器的 `/task/simulation_navigation_goal` 放行（`/stop/mission_ack`，超时
   `phase2_ack_timeout` 秒报失败），放行前不自动进入 Phase 2 运动；
@@ -536,10 +545,22 @@ IDLE -> CANCELLING（取消遗留 action goal，cancel_retries 次）
 | `stop/mission_integration` `x_align_tolerance` | 0.50 | m |
 | `stop/mission_integration` `y_align_tolerance` | 12 | 度 |
 | `stop/mission_integration` `phase2_ack_timeout` | 60.0 | 秒 |
-| `stop/mission_integration` `initial_pose_x/y/yaw` | -0.813/-2.442/0.0 | 车端已验证起点 |
+| `navigation_handoff/initial_pose_x/y/yaw` | -1.40219/-0.627908/0.053792653589793 | 二维码领取区权威观察点，由 supervisor latched 发布一次 |
+| `stop/mission_integration` `initial_pose_x/y/yaw` | 0.0/0.0/0.0 | 集成模式关闭 stop 内部第二个 `/initialpose` 发布者 |
 
 调参必须一次只改一个变量并重启根 launch；stop 栈参数默认值与车端已验证
 `mission.launch` 完全一致，未经验证不得批量改动。
+
+三个车间航点保持车端实跑代码的固定坐标，不在本次接口修复中调整：
+
+```text
+航点1 (-0.812845, -2.44196)
+航点2 ( 0.771455, -2.44196)
+航点3 ( 1.784300, -2.43094)
+```
+
+`current_point_index` 表示当前正在导航/扫描的航点：到达后不递增，只有该点 OCR 旋转扫描耗尽、
+准备前往下一点时才递增一次。这样 Phase 1 识别到的仿真车间索引不会偏移到下一航点。
 
 ### 9.6 停止、残留诊断与禁止事项
 

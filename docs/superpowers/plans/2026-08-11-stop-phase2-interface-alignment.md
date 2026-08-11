@@ -20,7 +20,7 @@
 - Modify: `ucar_ws/src/task_orchestrator/test/test_orchestrator.py`
 - Modify: `ucar_ws/src/task_orchestrator/test/test_package_config.py`
 
-- [ ] **Step 1: Write failing speech-format and state-transition tests**
+- [x] **Step 1: Write failing speech-format and state-transition tests**
 
 Add exact formatter assertions:
 
@@ -63,7 +63,7 @@ self.assertEqual("COMPLETE", h.orch.state)
 
 Also cover failed TTS, speech timeout, stale `speech_id`, duplicate arrival, duplicate `speak_done`, cancellation in each new waiting state, and `simulation_phase_enabled=False` completing only after the physical parking speech succeeds.
 
-- [ ] **Step 2: Run focused tests and verify RED**
+- [x] **Step 2: Run focused tests and verify RED**
 
 Run:
 
@@ -73,7 +73,7 @@ python -m unittest ucar_ws.src.task_orchestrator.test.test_categories ucar_ws.sr
 
 Expected: failures for missing formatter functions and missing `WAITING_DELIVERY_SPEECH` / `WAITING_SIMULATION_SPEECH` behavior.
 
-- [ ] **Step 3: Implement exact formatters and the two waiting states**
+- [x] **Step 3: Implement exact formatters and the two waiting states**
 
 Add pure formatters:
 
@@ -112,11 +112,11 @@ Update `/voice/speak_done` and `/task/cancel` subscriptions so the node accepts 
 )
 ```
 
-- [ ] **Step 4: Run focused tests and verify GREEN**
+- [x] **Step 4: Run focused tests and verify GREEN**
 
 Run the Task 1 command again. Expected: all category and orchestrator tests pass.
 
-- [ ] **Step 5: Commit the TTS state-machine change**
+- [x] **Step 5: Commit the TTS state-machine change**
 
 ```powershell
 git add -- ucar_ws/src/task_orchestrator/src/task_orchestrator/categories.py ucar_ws/src/task_orchestrator/src/task_orchestrator/orchestrator.py ucar_ws/src/task_orchestrator/scripts/task_orchestrator_node.py ucar_ws/src/task_orchestrator/test/test_categories.py ucar_ws/src/task_orchestrator/test/test_orchestrator.py ucar_ws/src/task_orchestrator/test/test_package_config.py
@@ -133,7 +133,7 @@ git commit -m "fix(orchestrator): gate both parking phases on TTS"
 - Modify: `ucar_ws/src/stop/launch/mission_integration.launch`
 - Modify: `ucar_ws/src/stop/test/test_vehicle_characterization.py`
 
-- [ ] **Step 1: Write failing handoff-pose and status-contract tests**
+- [x] **Step 1: Write failing handoff-pose and status-contract tests**
 
 Add node wiring assertions that the supervisor `/initialpose` publisher is latched and uses:
 
@@ -153,7 +153,7 @@ Add a status-topic test that feeds every JSON published to `/task/navigation_han
 
 Add launch/source tests asserting `mission_integration.launch` uses `0.0/0.0/0.0` for its internal initial-pose defaults, so `mission_orchestrator` does not publish a second pose.
 
-- [ ] **Step 2: Run focused tests and verify RED**
+- [x] **Step 2: Run focused tests and verify RED**
 
 Run:
 
@@ -163,7 +163,7 @@ python -m unittest ucar_ws.src.task_orchestrator.test.test_navigation_handoff_su
 
 Expected: failures because the supervisor pose is `(0,0,0)`, its publisher is not latched, stop still uses waypoint 1 as initial pose, and diagnostic JSON without `status` reaches the status topic.
 
-- [ ] **Step 3: Implement one authoritative pickup pose**
+- [x] **Step 3: Implement one authoritative pickup pose**
 
 Set the supervisor defaults to the pickup observation goal:
 
@@ -187,11 +187,11 @@ def publish_diagnostic(self, payload):
 
 Keep `_publish_handoff_status()` as the only publisher of `ready|failed` protocol messages.
 
-- [ ] **Step 4: Run focused tests and verify GREEN**
+- [x] **Step 4: Run focused tests and verify GREEN**
 
 Run the Task 2 command again. Expected: all focused tests pass and every handoff status message satisfies protocol v1.
 
-- [ ] **Step 5: Commit the localization and status changes**
+- [x] **Step 5: Commit the localization and status changes**
 
 ```powershell
 git add -- ucar_ws/src/task_orchestrator/config/orchestrator.yaml ucar_ws/src/task_orchestrator/scripts/navigation_handoff_supervisor_node.py ucar_ws/src/task_orchestrator/test/test_navigation_handoff_supervisor_node.py ucar_ws/src/task_orchestrator/test/test_protocol.py ucar_ws/src/stop/launch/mission_integration.launch ucar_ws/src/stop/test/test_vehicle_characterization.py
@@ -204,7 +204,7 @@ git commit -m "fix(handoff): preserve pickup pose across navigation stacks"
 - Modify: `ucar_ws/src/stop/scripts/mission_orchestrator.py`
 - Modify: `ucar_ws/src/stop/test/test_vehicle_characterization.py`
 
-- [ ] **Step 1: Write failing structural regression tests**
+- [x] **Step 1: Write failing structural regression tests**
 
 Parse `mission_orchestrator.py` and assert:
 
@@ -220,7 +220,7 @@ self.assertLess(
 
 Keep the existing assertion that Phase 1 records `sim_point_index = current_point_index` so it now records the physical scan waypoint.
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run:
 
@@ -230,7 +230,7 @@ python -m unittest ucar_ws.src.stop.test.test_vehicle_characterization -v
 
 Expected: failures because the already-at and move-base-success branches currently increment before OCR.
 
-- [ ] **Step 3: Move the single index increment to scan exhaustion**
+- [x] **Step 3: Move the single index increment to scan exhaustion**
 
 Remove the increment from the `dist < 0.3` branch and normal move-base success branch. In the OCR “Exhausted, next waypoint” branch use:
 
@@ -243,11 +243,11 @@ rotate_num = 0
 
 Do not change the stage-2 PCA approach logic, waypoint coordinates, OCR matching, or parking controllers.
 
-- [ ] **Step 4: Run the focused test and verify GREEN**
+- [x] **Step 4: Run the focused test and verify GREEN**
 
 Run the Task 3 command again. Expected: all stop characterization tests pass.
 
-- [ ] **Step 5: Commit the waypoint fix**
+- [x] **Step 5: Commit the waypoint fix**
 
 ```powershell
 git add -- ucar_ws/src/stop/scripts/mission_orchestrator.py ucar_ws/src/stop/test/test_vehicle_characterization.py
@@ -262,7 +262,7 @@ git commit -m "fix(stop): retain scan waypoint until OCR exhausts"
 - Modify: `ucar_ws/src/task_orchestrator/HANDOFF_TO_CODEX.md`
 - Modify: `docs/superpowers/specs/2026-08-11-stop-phase2-interface-alignment-design.md`
 
-- [ ] **Step 1: Write the failing full-scenario assertions**
+- [x] **Step 1: Write the failing full-scenario assertions**
 
 Update `Scenario.run_to_complete()` so it explicitly acknowledges each parking speech:
 
@@ -277,7 +277,7 @@ self.complete_speech("simulation-speech-1")
 
 Assert exactly three TTS requests in order and assert no simulation goal exists before physical speech completion and no `COMPLETE` exists before final speech completion.
 
-- [ ] **Step 2: Run scenario tests and verify RED where helpers are not yet updated**
+- [x] **Step 2: Run scenario tests and verify RED where helpers are not yet updated**
 
 Run:
 
@@ -287,11 +287,11 @@ python -m unittest ucar_ws.src.task_orchestrator.test.test_stop_phase2_scenarios
 
 Expected: existing scenario helpers fail because they still advance directly from arrivals.
 
-- [ ] **Step 3: Update scenario drivers and operator docs**
+- [x] **Step 3: Update scenario drivers and operator docs**
 
 Update all scenario paths to acknowledge the two new TTS gates. Document the exact runtime sequence, the pickup-area initial pose, the three hard-coded workshop waypoints, the single-owner `/initialpose` rule, and the authoritative task-orchestrator topics. State that the local result is not a vehicle acceptance until Codex deploys and observes the real run.
 
-- [ ] **Step 4: Run all local verification**
+- [x] **Step 4: Run all local verification**
 
 Run:
 
@@ -307,7 +307,7 @@ git status --short
 
 Expected: all unit tests pass, compileall is silent, XML parsing is silent, `git diff --check` is silent, and status contains only intended files before the final commit.
 
-- [ ] **Step 5: Commit tests and documentation**
+- [x] **Step 5: Commit tests and documentation**
 
 ```powershell
 git add -- ucar_ws/src/task_orchestrator/test/test_stop_phase2_scenarios.py ucar_ws/src/task_orchestrator/README.md ucar_ws/src/task_orchestrator/HANDOFF_TO_CODEX.md docs/superpowers/specs/2026-08-11-stop-phase2-interface-alignment-design.md docs/superpowers/plans/2026-08-11-stop-phase2-interface-alignment.md
@@ -319,7 +319,7 @@ git commit -m "test(integration): verify spoken dual-workshop workflow"
 **Files:**
 - Inspect all files changed since `7fb9800`
 
-- [ ] **Step 1: Review the complete diff and commit boundaries**
+- [x] **Step 1: Review the complete diff and commit boundaries**
 
 Run:
 
@@ -332,6 +332,6 @@ git status --short
 
 Confirm no secret, ROS log, build output, map binary, keyframe, or unrelated package change is present.
 
-- [ ] **Step 2: Record deployment handoff**
+- [x] **Step 2: Record deployment handoff**
 
 Report the final HEAD, exact test counts, exact pickup pose, TTS texts and sequencing, remaining hard-coded waypoints, and that no vehicle deployment or motion test was performed in this implementation session.
