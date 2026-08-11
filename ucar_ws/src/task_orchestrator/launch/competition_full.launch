@@ -40,6 +40,12 @@
   <arg name="start_navigation_handoff" default="true"/>
   <!-- stop 栈外部提供时显式关闭（supervisor 不持有 stop launch）。 -->
   <arg name="start_stop_stack" default="true"/>
+  <!-- 第三阶段巡线集成栈。false 时跳过第三阶段交接（不宣称比赛完成）。 -->
+  <arg name="start_line_follow" default="true"/>
+  <arg name="line_follow_launch"
+       default="$(find line_follow_integration)/launch/phase3.launch"/>
+  <arg name="phase3_config"
+       default="$(find line_follow_integration)/config/phase3.yaml"/>
   <arg name="simulation_phase_enabled" default="true"/>
   <arg name="legacy_nav_launch"
        default="$(find task_orchestrator)/launch/legacy_navigation_include.launch"/>
@@ -76,12 +82,16 @@
   <arg name="llm_request_timeout" default="90.0"/>
 
   <!-- 编排阶段超时：显式传给 task_orchestrator.launch，覆盖 orchestrator.yaml。
-       timeout_qr_search 默认 150.0 必须大于 QR 内部总搜索超时 90.0。 -->
+       timeout_qr_search 默认 150.0 必须大于 QR 内部总搜索超时 90.0。
+       第三阶段外层超时严格大于 line_follow_integration 内部 300/30/120 秒。 -->
   <arg name="timeout_dependency_ready" default="120.0"/>
   <arg name="timeout_pickup_navigation" default="300.0"/>
   <arg name="timeout_qr_search" default="150.0"/>
   <arg name="timeout_llm_classification" default="120.0"/>
   <arg name="timeout_speech" default="60.0"/>
+  <arg name="timeout_line_navigation" default="310.0"/>
+  <arg name="timeout_line_direction" default="35.0"/>
+  <arg name="timeout_line_follow" default="125.0"/>
 
   <arg name="fast_nav_launch"
        default="$(find ucar_fast_nav)/launch/pickup_navigation.launch"/>
@@ -174,6 +184,18 @@
       <arg name="timeout_qr_search" value="$(arg timeout_qr_search)"/>
       <arg name="timeout_llm_classification" value="$(arg timeout_llm_classification)"/>
       <arg name="timeout_speech" value="$(arg timeout_speech)"/>
+      <arg name="phase3_config" value="$(arg phase3_config)"/>
+      <arg name="timeout_line_navigation" value="$(arg timeout_line_navigation)"/>
+      <arg name="timeout_line_direction" value="$(arg timeout_line_direction)"/>
+      <arg name="timeout_line_follow" value="$(arg timeout_line_follow)"/>
+    </include>
+  </group>
+
+  <group if="$(arg start_line_follow)">
+    <!-- 第三阶段常驻轻量节点：相机适配/导航适配/巡线监管器。
+         不含任何硬件启动，也不启动原始 YOLO 一键 launch。 -->
+    <include file="$(arg line_follow_launch)">
+      <arg name="phase3_config" value="$(arg phase3_config)"/>
     </include>
   </group>
 

@@ -32,6 +32,7 @@
   <exec_depend>qr_item_search</exec_depend>
   <exec_depend>llm_spark</exec_depend>
   <exec_depend>usb_cam</exec_depend>
+  <exec_depend>line_follow_integration</exec_depend>
 
   <export/>
 </package>

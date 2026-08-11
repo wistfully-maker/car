@@ -1,32 +1,32 @@
 <launch>
   <!-- Phase 3 集成节点常驻声明。所有节点由显式 enable_* 参数控制；
-       不包含任何硬件（相机/底盘/雷达/地图/定位）启动。 -->
+       不包含任何硬件（相机/底盘/雷达/地图/定位）启动。
+       phase3_config 由根 launch 转发，默认指向包内 phase3.yaml。 -->
   <arg name="enable_line_camera_adapter" default="true"/>
   <arg name="enable_line_navigation_adapter" default="true"/>
   <arg name="enable_line_follow_supervisor" default="true"/>
+  <arg name="phase3_config"
+       default="$(find line_follow_integration)/config/phase3.yaml"/>
 
   <node pkg="line_follow_integration"
         type="line_camera_adapter_node.py"
         name="line_camera_adapter"
         output="screen"
         if="$(arg enable_line_camera_adapter)">
-    <rosparam command="load"
-              file="$(find line_follow_integration)/config/phase3.yaml"/>
+    <rosparam command="load" file="$(arg phase3_config)"/>
   </node>
   <node pkg="line_follow_integration"
         type="line_navigation_adapter_node.py"
         name="line_navigation_adapter"
         output="screen"
         if="$(arg enable_line_navigation_adapter)">
-    <rosparam command="load"
-              file="$(find line_follow_integration)/config/phase3.yaml"/>
+    <rosparam command="load" file="$(arg phase3_config)"/>
   </node>
   <node pkg="line_follow_integration"
         type="line_follow_supervisor_node.py"
         name="line_follow_supervisor"
         output="screen"
         if="$(arg enable_line_follow_supervisor)">
-    <rosparam command="load"
-              file="$(find line_follow_integration)/config/phase3.yaml"/>
+    <rosparam command="load" file="$(arg phase3_config)"/>
   </node>
 </launch>

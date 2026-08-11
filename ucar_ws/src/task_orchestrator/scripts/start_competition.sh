@@ -8,6 +8,10 @@ BASE_DEVICE="/dev/ttyS0"
 LIDAR_DEVICE="/dev/ttyS4"
 CAMERA_DEVICE="/dev/video0"
 SPEECH_DEVICE="/dev/ttyS3"
+# 第三阶段 YOLO 模型：路径与哈希必须与
+# line_follow_integration/config/phase3.yaml 的 runtime 段一致。
+YOLO_MODEL="${YOLO_MODEL:-/home/ucar/ucar_ws/src/yolo_turn/best.pt}"
+YOLO_MODEL_SHA256="${YOLO_MODEL_SHA256:-cb1c5db5da5db75fe40000410295970f2d7fb6a59d9600f82a22d836829e1cdd}"
 
 die() { echo "ERROR: $*" >&2; exit 2; }
 warn() { echo "WARNING: $*" >&2; }
@@ -26,6 +30,7 @@ declare -A flags=(
   [start_llm]=true [start_orchestrator]=true
   [start_velocity_arbiter]=true
   [start_navigation_handoff]=true [start_stop_stack]=true
+  [start_line_follow]=true
 )
 
 normalise_bool() {
@@ -45,7 +50,7 @@ for arg in "${launch_args[@]}"; do
       start_fast_nav|start_base|start_lidar|start_camera|\
       start_fast_nav_adapter|start_readiness_gate|start_speech|start_qr|\
       start_llm|start_orchestrator|start_velocity_arbiter|\
-      start_navigation_handoff|start_stop_stack)
+      start_navigation_handoff|start_stop_stack|start_line_follow)
         normalise_bool "$key" "$value"
         ;;
       *) : ;;  # Unknown roslaunch arguments are forwarded unchanged.
@@ -292,6 +297,14 @@ if [[ "${flags[start_stop_stack]}" == true ]]; then
         ;;
     esac
   done < "$stop_root/VEHICLE_SNAPSHOT.sha256"
+fi
+
+if [[ "${flags[start_line_follow]}" == true ]]; then
+  # 第三阶段 YOLO 模型必须存在且哈希一致，否则在 roslaunch 前失败。
+  [[ -f "$YOLO_MODEL" ]] || die "missing phase3 yolo model: $YOLO_MODEL"
+  actual="$(sha256sum "$YOLO_MODEL" | awk '{print $1}')"
+  [[ "$actual" == "$YOLO_MODEL_SHA256" ]] ||
+    die "phase3 yolo model sha256 mismatch: $YOLO_MODEL"
 fi
 
 echo "Preflight OK; starting competition_full.launch"

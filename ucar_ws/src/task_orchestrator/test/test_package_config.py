@@ -444,6 +444,40 @@ class PackageConfigTests(unittest.TestCase):
         self.assertGreater(35.0, 30.0)
         self.assertGreater(125.0, 120.0)
 
+    def test_line_follow_integration_is_an_exec_dependency(self):
+        package = ET.parse(ROOT / "package.xml").getroot()
+        exec_dependencies = {node.text for node in package.findall("exec_depend")}
+        self.assertIn("line_follow_integration", exec_dependencies)
+
+    def test_sole_final_cmd_vel_publisher_is_the_velocity_arbiter(self):
+        def published_topics(script_name):
+            tree = ast.parse(
+                (ROOT / "scripts" / script_name).read_text(encoding="utf-8")
+            )
+            return {
+                node.args[0].value
+                for node in ast.walk(tree)
+                if isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "Publisher"
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+                and isinstance(node.args[0].value, str)
+            }
+
+        for script in (
+            "task_orchestrator_node.py",
+            "voice_task_adapter_node.py",
+            "tts_bridge_node.py",
+            "fast_nav_adapter_node.py",
+            "system_readiness_gate_node.py",
+            "navigation_handoff_supervisor_node.py",
+        ):
+            self.assertNotIn("/cmd_vel", published_topics(script), script)
+        self.assertEqual(
+            {"/cmd_vel"}, published_topics("velocity_arbiter_node.py")
+        )
+
     def test_orchestrator_launch_forwards_phase3_pose_and_timeouts(self):
         launch = ET.parse(
             ROOT / "launch/task_orchestrator.launch"
@@ -457,7 +491,11 @@ class PackageConfigTests(unittest.TestCase):
             if node.attrib["name"] == "task_orchestrator"
         )
         text = ET.tostring(node, encoding="unicode")
-        self.assertIn("phase3.yaml", text)
+        self.assertIn("$(arg phase3_config)", text)
+        self.assertIn(
+            "$(find line_follow_integration)/config/phase3.yaml",
+            ET.tostring(launch, encoding="unicode"),
+        )
         adapter = (ROOT / "scripts/task_orchestrator_node.py").read_text(
             encoding="utf-8"
         )

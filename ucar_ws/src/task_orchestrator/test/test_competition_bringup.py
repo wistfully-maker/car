@@ -8,6 +8,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+import yaml
+
 
 ROOT = Path(__file__).resolve().parents[1]
 COMPETITION = ROOT / "launch" / "competition_full.launch"
@@ -46,10 +48,25 @@ class FakeRosEnvironment:
         self.root = Path(self.temp.name)
         self.bin = self.root / "bin"
         self.bin.mkdir()
+        # Windows 无符号链接特权时回退为包装脚本：shebang 指向真实 bash 的
+        # 绝对路径，由真实 bash 以正确 msys 根 exec 真实工具原位执行。
+        real_bash = shutil.which("bash")
         for tool in ("bash", "awk", "cat", "grep", "sed", "od", "stat", "id"):
             target = shutil.which(tool)
-            if target:
+            if not target:
+                continue
+            try:
                 os.symlink(target, self.bin / tool)
+            except OSError:
+                if real_bash is None:
+                    raise
+                wrapper = self.bin / tool
+                wrapper.write_text(
+                    "#!%s\nexec \"%s\" \"$@\"\n"
+                    % (real_bash.replace("\\", "/"), target.replace("\\", "/")),
+                    encoding="utf-8",
+                )
+                wrapper.chmod(wrapper.stat().st_mode | stat.S_IXUSR)
         self.log = self.root / "calls.log"
         self.script = self.root / "start_competition.sh"
         self.devices = {
@@ -71,11 +88,13 @@ class FakeRosEnvironment:
             script_text = script_text.replace(
                 f'{name}="{default}"', f'{name}="{self.devices[name]}"',
             )
-        self.script.write_text(script_text, encoding="utf-8")
+        self.script.write_text(
+            script_text, encoding="utf-8", newline="\n"
+        )
         self.ros_setup = self.root / "ros_setup.bash"
         self.workspace_setup = self.root / "workspace_setup.bash"
-        self.ros_setup.write_text(":\n", encoding="utf-8")
-        self.workspace_setup.write_text(":\n", encoding="utf-8")
+        self.ros_setup.write_text(":\n", encoding="utf-8", newline="\n")
+        self.workspace_setup.write_text(":\n", encoding="utf-8", newline="\n")
         self._write_fake("rosnode", self._rosnode())
         self._write_fake("rostopic", self._rostopic())
         if self.fuser_available:
@@ -87,6 +106,16 @@ class FakeRosEnvironment:
             'for arg in "$@"; do printf "roslaunch-arg:%s\\n" "$arg" >> "$CALL_LOG"; done\nexit 0',
         )
         self._install_stop_package()
+        self._install_phase3_model()
+
+    def _install_phase3_model(self):
+        """模拟第三阶段 YOLO 模型：存在且哈希与环境覆盖值一致。"""
+        self.phase3_model = self.root / "yolo_model" / "best.pt"
+        self.phase3_model.parent.mkdir(parents=True)
+        model_bytes = b"fake-yolo-model"
+        self.phase3_model.write_bytes(model_bytes)
+        self.phase3_model_sha256 = hashlib.sha256(model_bytes).hexdigest()
+        self.phase3_model_missing = False
 
     def _install_stop_package(self):
         """模拟 stop 包：模型文件 + 快照清单，供 preflight 模型校验使用。"""
@@ -106,19 +135,26 @@ class FakeRosEnvironment:
                 % (hashlib.sha256(content).hexdigest(), name)
             )
         (self.stop_root / "VEHICLE_SNAPSHOT.sha256").write_text(
-            "\n".join(manifest) + "\n", encoding="utf-8"
+            "\n".join(manifest) + "\n", encoding="utf-8", newline="\n"
         )
         self._write_fake(
             "rospack",
             'echo "rospack:$*" >> "$CALL_LOG"\n'
             'if [[ "$1 $2" == "find stop" ]]; then\n'
-            '  echo "%s"\n  exit 0\nfi\nexit 1' % str(self.stop_root),
+            '  echo "%s"\n  exit 0\nfi\nexit 1'
+            % str(self.stop_root).replace("\\", "/"),
         )
-        self._write_fake("sha256sum", 'exec /usr/bin/sha256sum "$@"')
+        self._write_fake(
+            "sha256sum",
+            'echo "sha256sum:$*" >> "$CALL_LOG"\nexec /usr/bin/sha256sum "$@"',
+        )
 
     def _write_fake(self, name, body):
         path = self.bin / name
-        path.write_text("#!/usr/bin/env bash\n" + body + "\n", encoding="utf-8")
+        path.write_text(
+            "#!/usr/bin/env bash\n" + body + "\n",
+            encoding="utf-8", newline="\n",
+        )
         path.chmod(path.stat().st_mode | stat.S_IXUSR)
 
     def _rosnode(self):
@@ -188,11 +224,18 @@ exit 1'''
             "ROS_SETUP": str(self.ros_setup),
             "WORKSPACE_SETUP": str(self.workspace_setup),
             "SPARK_API_PASSWORD": "test-secret",
+            "YOLO_MODEL": str(self.phase3_model),
+            "YOLO_MODEL_SHA256": self.phase3_model_sha256,
         })
         env.update(extra_env or {})
+        # 模拟小车上的 POSIX 路径，避免 Windows 反斜杠触发 coreutils 转义。
+        for key in ("YOLO_MODEL", "SPARK_SECRET_FILE"):
+            if key in env:
+                env[key] = env[key].replace("\\", "/")
         return subprocess.run(
             [working_bash(), str(self.script), *args], env=env,
             text=True, capture_output=True, timeout=10,
+            encoding="utf-8", errors="replace",
         )
 
     def calls(self):
@@ -229,6 +272,71 @@ class CompetitionBringupTests(unittest.TestCase):
         self.assertEqual("true", args["start_stop_stack"])
         self.assertIn("$(arg start_navigation_handoff)", self.text)
         self.assertIn("start_stop_stack", self.text)
+
+    def test_declares_phase3_line_follow_switch(self):
+        args = {arg.attrib["name"]: arg.attrib.get("default")
+                for arg in self.root.findall("arg")}
+        self.assertEqual("true", args["start_line_follow"])
+        self.assertIn("$(arg start_line_follow)", self.text)
+        self.assertIn(
+            "$(find line_follow_integration)/launch/phase3.launch", self.text
+        )
+        self.assertIn(
+            "$(find line_follow_integration)/config/phase3.yaml", self.text
+        )
+
+    def test_includes_phase3_launch_exactly_once_and_never_yolo_launch(self):
+        includes = [include.attrib.get("file", "")
+                    for include in self.root.iter("include")]
+        self.assertEqual(1, includes.count("$(arg line_follow_launch)"))
+        self.assertNotIn("start_all_yolo.launch", self.text)
+
+    def test_phase3_group_forwards_config_path(self):
+        group = next(
+            group for group in self.root.findall("group")
+            if group.attrib.get("if") == "$(arg start_line_follow)"
+        )
+        include = group.find("include")
+        self.assertEqual("$(arg line_follow_launch)", include.attrib["file"])
+        values = {arg.attrib["name"]: arg.attrib["value"]
+                  for arg in include.findall("arg")}
+        self.assertEqual("$(arg phase3_config)", values["phase3_config"])
+
+    def test_root_launch_forwards_phase3_config_and_outer_timeouts(self):
+        include = next(
+            include for include in self.root.iter("include")
+            if include.attrib.get("file") == "$(arg orchestrator_launch)"
+        )
+        values = {arg.attrib["name"]: arg.attrib["value"]
+                  for arg in include.findall("arg")}
+        self.assertEqual("$(arg phase3_config)", values["phase3_config"])
+        self.assertEqual("$(arg timeout_line_navigation)",
+                         values["timeout_line_navigation"])
+        self.assertEqual("$(arg timeout_line_direction)",
+                         values["timeout_line_direction"])
+        self.assertEqual("$(arg timeout_line_follow)",
+                         values["timeout_line_follow"])
+
+    def test_hardware_and_navigation_owners_stay_single(self):
+        self.assertEqual(1, self.text.count('<node pkg="usb_cam"'))
+        self.assertEqual(
+            1,
+            self.text.count(
+                '<include file="$(find ucar_controller)/launch/base_driver.launch"/>'
+            ),
+        )
+        self.assertNotIn("map_server", self.text)
+        self.assertNotIn("amcl", self.text)
+
+    def test_qr_keeps_raw_image_and_line_uses_derived_topic(self):
+        args = {arg.attrib["name"]: arg.attrib.get("default")
+                for arg in self.root.findall("arg")}
+        self.assertEqual("/usb_cam/image_raw", args["qr_image_topic"])
+        phase3 = (ROOT.parent / "line_follow_integration"
+                  / "config" / "phase3.yaml")
+        config = yaml.safe_load(phase3.read_text(encoding="utf-8"))
+        self.assertEqual("/usb_cam/image_raw", config["camera"]["input_topic"])
+        self.assertEqual("/line_follow/image_raw", config["camera"]["line_topic"])
 
     def test_navigation_stacks_are_only_supervisor_owned(self):
         includes = [include.attrib.get("file", "")
@@ -679,6 +787,7 @@ class CompetitionBringupTests(unittest.TestCase):
                 "start_readiness_gate", "start_speech", "start_qr",
                 "start_llm", "start_orchestrator", "start_velocity_arbiter",
                 "start_navigation_handoff", "start_stop_stack",
+                "start_line_follow",
             },
             patterns,
         )
@@ -818,6 +927,55 @@ class CompetitionStartScriptTests(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertIn("rospack:", fake.calls())
 
+    def test_phase3_switch_strictly_validates_boolean(self):
+        _, result = self.run_fake("start_line_follow:=maybe", master=False)
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("invalid boolean", result.stderr.lower())
+
+    def test_phase3_model_passes_preflight(self):
+        fake, result = self.run_fake(master=False)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn(
+            "sha256sum:%s" % str(fake.phase3_model).replace("\\", "/"),
+            fake.calls(),
+        )
+
+    def test_phase3_model_missing_is_fatal(self):
+        fake = FakeRosEnvironment(self, master=False)
+        self.addCleanup(fake.close)
+        fake.phase3_model.unlink()
+        result = fake.run()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("yolo model", result.stderr.lower())
+
+    def test_phase3_model_sha_mismatch_is_fatal(self):
+        fake = FakeRosEnvironment(self, master=False)
+        self.addCleanup(fake.close)
+        result = fake.run(extra_env={"YOLO_MODEL_SHA256": "0" * 64})
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("mismatch", result.stderr.lower())
+
+    def test_disabling_phase3_skips_only_model_check(self):
+        fake = FakeRosEnvironment(self, master=False)
+        self.addCleanup(fake.close)
+        fake.phase3_model.unlink()
+        result = fake.run("start_line_follow:=false")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertNotIn("yolo model", result.stderr.lower())
+
+    def test_phase3_tuning_args_are_forwarded_verbatim(self):
+        fake, result = self.run_fake(
+            "start_line_follow:=true", "timeout_line_follow:=130.0",
+            "line_follow_launch:=/custom/phase3.launch", master=False,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        for arg in (
+            "start_line_follow:=true",
+            "timeout_line_follow:=130.0",
+            "line_follow_launch:=/custom/phase3.launch",
+        ):
+            self.assertIn("roslaunch-arg:%s" % arg, fake.calls())
+
     def test_missing_stop_model_file_is_fatal(self):
         fake = FakeRosEnvironment(self, master=False)
         self.addCleanup(fake.close)
@@ -909,36 +1067,53 @@ class CompetitionStartScriptTests(unittest.TestCase):
         self.addCleanup(fake.close)
         marker = fake.root / "must_not_exist"
         secret = fake.root / "secret"
-        secret.write_text("$(touch %s)\n" % marker, encoding="utf-8")
+        secret.write_text(
+            "$(touch %s)\n" % marker, encoding="utf-8", newline="\n"
+        )
         secret.chmod(0o600)
-        result = fake.run(extra_env={
-            "SPARK_API_PASSWORD": "", "SPARK_SECRET_FILE": str(secret),
-        })
-        self.assertEqual(0, result.returncode, result.stderr)
+        if os.name == "posix":
+            # Windows 文件系统没有 Unix 权限位（stat 恒报 0666），
+            # 0600 通过断言只在 POSIX 上可验证。
+            result = fake.run(extra_env={
+                "SPARK_API_PASSWORD": "", "SPARK_SECRET_FILE": str(secret),
+            })
+            self.assertEqual(0, result.returncode, result.stderr)
+        else:
+            result = fake.run(extra_env={
+                "SPARK_API_PASSWORD": "", "SPARK_SECRET_FILE": str(secret),
+            })
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("permissions", result.stderr.lower())
         self.assertFalse(marker.exists())
-        secret.write_text("first\nsecond\n", encoding="utf-8")
+        secret.write_text("first\nsecond\n", encoding="utf-8", newline="\n")
         result = fake.run(extra_env={
             "SPARK_API_PASSWORD": "", "SPARK_SECRET_FILE": str(secret),
         })
         self.assertNotEqual(0, result.returncode)
-        self.assertIn("single line", result.stderr.lower())
+        if os.name == "posix":
+            self.assertIn("single line", result.stderr.lower())
 
     def test_secret_file_metadata_and_crlf_are_rejected(self):
         fake = FakeRosEnvironment(self, master=False)
         self.addCleanup(fake.close)
         secret = fake.root / "secret"
-        secret.write_text("literal-secret\n", encoding="utf-8")
+        secret.write_text("literal-secret\n", encoding="utf-8", newline="\n")
         secret.chmod(0o644)
         result = fake.run(extra_env={"SPARK_API_PASSWORD": "", "SPARK_SECRET_FILE": str(secret)})
         self.assertNotEqual(0, result.returncode)
-        secret.chmod(0o600)
-        result = fake.run(extra_env={"SPARK_API_PASSWORD": "", "SPARK_SECRET_FILE": str(secret)})
-        self.assertEqual(0, result.returncode, result.stderr)
+        if os.name == "posix":
+            secret.chmod(0o600)
+            result = fake.run(extra_env={"SPARK_API_PASSWORD": "", "SPARK_SECRET_FILE": str(secret)})
+            self.assertEqual(0, result.returncode, result.stderr)
         secret.write_bytes(b"literal-secret\r\n")
         result = fake.run(extra_env={"SPARK_API_PASSWORD": "", "SPARK_SECRET_FILE": str(secret)})
         self.assertNotEqual(0, result.returncode)
         link = fake.root / "secret-link"
-        link.symlink_to(secret)
+        try:
+            link.symlink_to(secret)
+        except OSError:
+            # Windows 无符号链接特权：跳过符号链接子场景。
+            return
         result = fake.run(extra_env={"SPARK_API_PASSWORD": "", "SPARK_SECRET_FILE": str(link)})
         self.assertNotEqual(0, result.returncode)
 

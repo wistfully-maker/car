@@ -19,10 +19,14 @@
   <arg name="timeout_qr_search" default="120.0"/>
   <arg name="timeout_llm_classification" default="120.0"/>
   <arg name="timeout_speech" default="60.0"/>
-  <!-- 第三阶段外层超时，严格大于 line_follow_integration 内部 300/30/120 秒。 -->
+  <!-- 第三阶段外层超时，严格大于 line_follow_integration 内部 300/30/120 秒。
+       phase3_config 由根 launch 转发；默认指向 line_follow_integration 的
+       phase3.yaml，避免在本 launch 复制 pose 字面量。 -->
   <arg name="timeout_line_navigation" default="310.0"/>
   <arg name="timeout_line_direction" default="35.0"/>
   <arg name="timeout_line_follow" default="125.0"/>
+  <arg name="phase3_config"
+       default="$(find line_follow_integration)/config/phase3.yaml"/>
 
   <node pkg="task_orchestrator"
         type="task_orchestrator_node.py"
@@ -33,8 +37,7 @@
               file="$(find task_orchestrator)/config/orchestrator.yaml"/>
     <!-- 第三阶段巡线起点与内部超时来自 line_follow_integration 的 phase3.yaml，
          不在本 launch 复制 pose 字面量。 -->
-    <rosparam command="load"
-              file="$(find line_follow_integration)/config/phase3.yaml"/>
+    <rosparam command="load" file="$(arg phase3_config)"/>
     <param name="timeouts/dependency_ready"
            value="$(arg timeout_dependency_ready)"/>
     <param name="timeouts/pickup_navigation"
