@@ -4,6 +4,7 @@ import math
 
 from task_orchestrator.motion_mode import (
     IDLE,
+    LINE_FOLLOW,
     NAVIGATION,
     QR_SEARCH,
     STOP_NAVIGATION,
@@ -49,11 +50,12 @@ def _normalized(message, max_linear_abs, max_angular_abs):
 
 
 class VelocityArbiter:
-    SOURCES = frozenset(("navigation", "qr", "stop"))
+    SOURCES = frozenset(("navigation", "qr", "stop", "line_follow"))
     ACTIVE_SOURCE = {
         NAVIGATION: "navigation",
         QR_SEARCH: "qr",
         STOP_NAVIGATION: "stop",
+        LINE_FOLLOW: "line_follow",
     }
 
     def __init__(self, source_timeout=0.3, max_linear_abs=1.0,
@@ -81,7 +83,7 @@ class VelocityArbiter:
 
     def set_mode(self, mode, timestamp):
         _, rolled_back = self._observe_time(timestamp)
-        valid = mode in (IDLE, NAVIGATION, QR_SEARCH, STOP_NAVIGATION)
+        valid = mode in (IDLE, NAVIGATION, QR_SEARCH, STOP_NAVIGATION, LINE_FOLLOW)
         safe_mode = mode if valid else IDLE
         changed = safe_mode != self.mode
         self.mode = safe_mode

@@ -235,6 +235,48 @@ class VelocityArbiterNodeTests(unittest.TestCase):
         )
         self.assertEqual("STOP_NAVIGATION", capture.messages[-1].data)
 
+    def test_line_follow_subscription_is_isolated_from_other_sources(self):
+        node, state = install_node()
+        self.assertIn("/cmd_vel/line_follow", state.subscribers)
+        state.subscribers["/task/motion_mode"](String("LINE_FOLLOW"))
+        self.assertEqual(0.0, state.messages[-1].linear.x)
+        for source in ("/cmd_vel/navigation", "/cmd_vel/qr", "/cmd_vel/stop"):
+            state.subscribers[source](Twist(8.0))
+            self.assertNotEqual(8.0, state.messages[-1].linear.x)
+        state.subscribers["/cmd_vel/line_follow"](Twist(0.5, 0.2))
+        self.assertEqual(0.5, state.messages[-1].linear.x)
+        self.assertEqual(0.2, state.messages[-1].angular.z)
+        # 模式切换先零速度，随后 line_follow 来源不再放行。
+        state.subscribers["/task/motion_mode"](String("NAVIGATION"))
+        self.assertEqual(0.0, state.messages[-1].linear.x)
+        state.subscribers["/cmd_vel/line_follow"](Twist(0.5))
+        self.assertNotEqual(0.5, state.messages[-1].linear.x)
+
+    def test_line_follow_watchdog_invalid_and_shutdown_zero(self):
+        node, state = install_node()
+        state.subscribers["/task/motion_mode"](String("LINE_FOLLOW"))
+        state.subscribers["/cmd_vel/line_follow"](Twist(1.0))
+        self.assertEqual(1.0, state.messages[-1].linear.x)
+        state.now += 0.31
+        state.timer_callback(None)
+        self.assertEqual(0.0, state.messages[-1].linear.x)
+        state.subscribers["/cmd_vel/line_follow"](Twist(math.nan))
+        self.assertEqual(0.0, state.messages[-1].linear.x)
+        state.subscribers["/cmd_vel/line_follow"](Twist(1.0))
+        state.shutdown()
+        self.assertEqual(0.0, state.messages[-1].linear.x)
+
+    def test_orchestrator_dispatches_line_follow_mode(self):
+        _node, _state = install_node()
+        adapter = load_orchestrator_adapter()
+        capture = types.SimpleNamespace(messages=[])
+        capture.publish = lambda message: capture.messages.append(message)
+        adapter._dispatch(
+            [("publish_motion_mode", "LINE_FOLLOW")],
+            {"publish_motion_mode": capture},
+        )
+        self.assertEqual("LINE_FOLLOW", capture.messages[-1].data)
+
     def test_start_sources_switch_watchdog_invalid_and_shutdown(self):
         node, state = install_node()
         self.assertEqual(0.0, state.messages[-1].linear.x)

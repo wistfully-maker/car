@@ -47,6 +47,8 @@ class VelocityArbiterNode:
                          lambda msg: self._on_source("qr", msg), queue_size=1)
         rospy.Subscriber("/cmd_vel/stop", Twist,
                          lambda msg: self._on_source("stop", msg), queue_size=1)
+        rospy.Subscriber("/cmd_vel/line_follow", Twist,
+                         lambda msg: self._on_source("line_follow", msg), queue_size=1)
         self._timer = rospy.Timer(rospy.Duration(period), self._on_timer)
         rospy.on_shutdown(self._on_shutdown)
         self._publish_zero(force=True)

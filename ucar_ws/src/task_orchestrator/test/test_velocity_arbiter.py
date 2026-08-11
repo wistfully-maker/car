@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from task_orchestrator.motion_mode import (
     IDLE,
+    LINE_FOLLOW,
     NAVIGATION,
     QR_SEARCH,
     STOP_NAVIGATION,
@@ -116,6 +117,36 @@ class VelocityArbiterTests(unittest.TestCase):
         self.assertIsNone(self.arbiter.accept("navigation", twist(math.inf), 10.3))
         self.assertEqual((0.0,) * 6, values(self.arbiter.tick(9.0)))
         self.assertIsNone(self.arbiter.tick(9.1))
+
+    def test_line_follow_forwards_only_line_follow_source(self):
+        moving = twist(0.6, 0.3)
+        expected_values = values(moving)
+        self.assertEqual((0.0,) * 6, values(self.arbiter.set_mode(LINE_FOLLOW, 10.0)))
+        self.assertIsNone(self.arbiter.accept("navigation", moving, 10.1))
+        self.assertIsNone(self.arbiter.accept("qr", moving, 10.1))
+        self.assertIsNone(self.arbiter.accept("stop", moving, 10.1))
+        self.assertEqual(expected_values, values(self.arbiter.accept("line_follow", moving, 10.1)))
+
+    def test_line_follow_source_is_ignored_outside_line_follow(self):
+        self.arbiter.set_mode(NAVIGATION, 1.0)
+        self.assertIsNone(self.arbiter.accept("line_follow", twist(9.0), 1.1))
+        self.arbiter.set_mode(IDLE, 2.0)
+        self.assertIsNone(self.arbiter.accept("line_follow", twist(9.0), 2.1))
+
+    def test_line_follow_transitions_publish_zero_and_timeout_fails_closed(self):
+        self.arbiter.set_mode(NAVIGATION, 10.0)
+        self.arbiter.accept("navigation", twist(1.0), 10.1)
+        into = self.arbiter.set_mode(LINE_FOLLOW, 10.2)
+        self.assertEqual((0.0,) * 6, values(into))
+        self.arbiter.accept("line_follow", twist(0.5), 10.3)
+        out = self.arbiter.set_mode(NAVIGATION, 10.4)
+        self.assertEqual((0.0,) * 6, values(out))
+        self.arbiter.set_mode(LINE_FOLLOW, 20.0)
+        self.arbiter.accept("line_follow", twist(0.5), 20.1)
+        self.assertIsNone(self.arbiter.tick(20.39))
+        self.assertEqual((0.0,) * 6, values(self.arbiter.tick(20.41)))
+        self.arbiter.accept("line_follow", twist(0.5), 20.5)
+        self.assertEqual((0.0,) * 6, values(self.arbiter.accept("line_follow", twist(0.6), 19.9)))
 
 
 if __name__ == "__main__":
