@@ -32,8 +32,10 @@ class Harness:
                 "llm-1",
                 "speech-1",
                 "delivery-1",
+                "delivery-speech-1",
                 "simulation-1",
-                "unused-7",
+                "simulation-speech-1",
+                "unused-9",
             ]
         )
         self.orch = TaskOrchestrator(
@@ -126,7 +128,9 @@ class Harness:
             )
         self.orch.on_llm_result(message)
 
-    def speech_done(self, status="success", speech_id="speech-1"):
+    def speech_done(self, status="success", speech_id=None):
+        if speech_id is None:
+            speech_id = self.orch.task["speech_id"]
         self.orch.on_speech_done(
             {
                 "protocol_version": 1,
@@ -193,6 +197,15 @@ class Harness:
         if state == "NAVIGATING_TO_WORKSHOP":
             return
         self.delivery_arrived()
+        if state == "WAITING_DELIVERY_SPEECH":
+            return
+        self.speech_done()
+        if state == "NAVIGATING_TO_SIM_WORKSHOP":
+            return
+        self.simulation_arrived()
+        if state == "WAITING_SIMULATION_SPEECH":
+            return
+        self.speech_done()
 
     def actions(self, name):
         return [payload for action, payload in self.outputs if action == name]
@@ -285,9 +298,16 @@ class OrchestratorFailureTests(unittest.TestCase):
             "WAITING_QR",
             "WAITING_LLM",
             "WAITING_SPEECH",
+            "WAITING_DELIVERY_SPEECH",
+            "WAITING_SIMULATION_SPEECH",
         ):
             with self.subTest(state=state):
-                h = Harness()
+                h = Harness(simulation_phase_enabled=(
+                    state in (
+                        "WAITING_DELIVERY_SPEECH",
+                        "WAITING_SIMULATION_SPEECH",
+                    )
+                ))
                 h.reach(state)
                 h.now[0] = h.orch.deadline + 0.01
                 h.orch.tick()
@@ -369,9 +389,16 @@ class OrchestratorSafetyTests(unittest.TestCase):
             "WAITING_QR",
             "WAITING_LLM",
             "WAITING_SPEECH",
+            "WAITING_DELIVERY_SPEECH",
+            "WAITING_SIMULATION_SPEECH",
         ):
             with self.subTest(state=state):
-                h = Harness()
+                h = Harness(simulation_phase_enabled=(
+                    state in (
+                        "WAITING_DELIVERY_SPEECH",
+                        "WAITING_SIMULATION_SPEECH",
+                    )
+                ))
                 h.reach(state)
                 h.orch.on_cancel(
                     {"task_id": "task-1", "reason": "operator_cancel"}
@@ -410,6 +437,9 @@ class OrchestratorDualWorkshopTests(unittest.TestCase):
         h = Harness(simulation_phase_enabled=False)
         h.reach("NAVIGATING_TO_WORKSHOP")
         h.delivery_arrived()
+        self.assertEqual("WAITING_DELIVERY_SPEECH", h.orch.state)
+        self.assertEqual([], h.actions("publish_simulation_navigation_goal"))
+        h.speech_done()
         self.assertEqual("COMPLETE", h.orch.state)
         self.assertEqual([], h.actions("publish_simulation_navigation_goal"))
         self.assertEqual(
@@ -421,6 +451,12 @@ class OrchestratorDualWorkshopTests(unittest.TestCase):
         h = Harness(simulation_phase_enabled=True)
         h.reach("NAVIGATING_TO_WORKSHOP")
         h.delivery_arrived(status="arrived")
+        self.assertEqual("WAITING_DELIVERY_SPEECH", h.orch.state)
+        self.assertEqual([], h.actions("publish_simulation_navigation_goal"))
+        speech = h.actions("publish_speech")[-1]
+        self.assertEqual("delivery-speech-1", speech["speech_id"])
+        self.assertEqual("已将苹果放入食品加工车间", speech["text"])
+        h.speech_done()
         self.assertEqual("NAVIGATING_TO_SIM_WORKSHOP", h.orch.state)
         goal = h.actions("publish_simulation_navigation_goal")[-1]
         self.assertEqual(1, goal["protocol_version"])
@@ -433,6 +469,14 @@ class OrchestratorDualWorkshopTests(unittest.TestCase):
             set(goal),
         )
         h.simulation_arrived(goal_id=goal["goal_id"], status="arrived")
+        self.assertEqual("WAITING_SIMULATION_SPEECH", h.orch.state)
+        final_speech = h.actions("publish_speech")[-1]
+        self.assertEqual("simulation-speech-1", final_speech["speech_id"])
+        self.assertEqual(
+            "仿真任务已完成，已将毛巾放入日用品加工车间",
+            final_speech["text"],
+        )
+        h.speech_done()
         self.assertEqual("COMPLETE", h.orch.state)
         self.assertEqual(
             "complete",
@@ -453,6 +497,7 @@ class OrchestratorDualWorkshopTests(unittest.TestCase):
         h = Harness(simulation_phase_enabled=True)
         h.reach("NAVIGATING_TO_WORKSHOP")
         h.delivery_arrived()
+        h.speech_done()
         h.simulation_arrived(status="failed")
         self.assertEqual("ERROR", h.orch.state)
         self.assertEqual(
@@ -464,7 +509,7 @@ class OrchestratorDualWorkshopTests(unittest.TestCase):
         h = Harness(simulation_phase_enabled=True)
         h.reach("NAVIGATING_TO_WORKSHOP")
         h.delivery_arrived()
-        self.assertEqual("NAVIGATING_TO_SIM_WORKSHOP", h.orch.state)
+        self.assertEqual("WAITING_DELIVERY_SPEECH", h.orch.state)
         self.assertNotEqual(
             "complete",
             h.actions("publish_status")[-1]["status"],
@@ -474,6 +519,7 @@ class OrchestratorDualWorkshopTests(unittest.TestCase):
         h = Harness(simulation_phase_enabled=True)
         h.reach("NAVIGATING_TO_WORKSHOP")
         h.delivery_arrived()
+        h.speech_done()
         for label, message in (
             (
                 "wrong_task",
@@ -496,6 +542,7 @@ class OrchestratorDualWorkshopTests(unittest.TestCase):
         h = Harness(simulation_phase_enabled=True)
         h.reach("NAVIGATING_TO_WORKSHOP")
         h.delivery_arrived()
+        h.speech_done()
         self.assertIsNotNone(h.orch.deadline)
         h.now[0] = h.orch.deadline + 0.01
         h.orch.tick()
@@ -509,11 +556,49 @@ class OrchestratorDualWorkshopTests(unittest.TestCase):
         h = Harness(simulation_phase_enabled=True)
         h.reach("NAVIGATING_TO_WORKSHOP")
         h.delivery_arrived()
+        h.speech_done()
         h.orch.on_cancel(
             {"task_id": "task-1", "reason": "operator_cancel"}
         )
         self.assertEqual("CANCELLED", h.orch.state)
         self.assertEqual("IDLE", h.actions("publish_motion_mode")[-1])
+
+    def test_parking_speech_failure_and_stale_identity_fail_closed(self):
+        h = Harness(simulation_phase_enabled=True)
+        h.reach("WAITING_DELIVERY_SPEECH")
+        output_count = len(h.outputs)
+        h.speech_done(speech_id="stale-speech")
+        self.assertEqual("WAITING_DELIVERY_SPEECH", h.orch.state)
+        self.assertEqual(output_count, len(h.outputs))
+        h.speech_done(status="error")
+        self.assertEqual("ERROR", h.orch.state)
+        self.assertEqual([], h.actions("publish_simulation_navigation_goal"))
+
+    def test_final_speech_timeout_prevents_complete(self):
+        h = Harness(simulation_phase_enabled=True)
+        h.reach("WAITING_SIMULATION_SPEECH")
+        h.now[0] = h.orch.deadline + 0.01
+        h.orch.tick()
+        self.assertEqual("ERROR", h.orch.state)
+        self.assertNotEqual("complete", h.actions("publish_status")[-1]["status"])
+
+    def test_final_speech_failure_prevents_complete(self):
+        h = Harness(simulation_phase_enabled=True)
+        h.reach("WAITING_SIMULATION_SPEECH")
+        h.speech_done(status="error")
+        self.assertEqual("ERROR", h.orch.state)
+        self.assertNotEqual("complete", h.actions("publish_status")[-1]["status"])
+
+    def test_duplicate_arrivals_and_speech_done_do_not_repeat_actions(self):
+        h = Harness(simulation_phase_enabled=True)
+        h.reach("WAITING_DELIVERY_SPEECH")
+        speech_count = len(h.actions("publish_speech"))
+        h.delivery_arrived()
+        self.assertEqual(speech_count, len(h.actions("publish_speech")))
+        h.speech_done()
+        goal_count = len(h.actions("publish_simulation_navigation_goal"))
+        h.speech_done(speech_id="delivery-speech-1")
+        self.assertEqual(goal_count, len(h.actions("publish_simulation_navigation_goal")))
 
 
 class OrchestratorNavigationHandoffTests(unittest.TestCase):

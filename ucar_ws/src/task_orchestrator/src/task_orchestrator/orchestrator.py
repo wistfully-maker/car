@@ -1,6 +1,10 @@
 """ROS-independent state machine for one complete U-CAR task."""
 
-from task_orchestrator.categories import format_result_speech
+from task_orchestrator.categories import (
+    format_delivery_speech,
+    format_result_speech,
+    format_simulation_delivery_speech,
+)
 from task_orchestrator.motion_mode import motion_mode_for_state
 
 
@@ -11,6 +15,8 @@ class TaskOrchestrator:
     WAITING_QR = "WAITING_QR"
     WAITING_LLM = "WAITING_LLM"
     WAITING_SPEECH = "WAITING_SPEECH"
+    WAITING_DELIVERY_SPEECH = "WAITING_DELIVERY_SPEECH"
+    WAITING_SIMULATION_SPEECH = "WAITING_SIMULATION_SPEECH"
     DELIVERY_HANDED_OFF = "DELIVERY_HANDED_OFF"
     NAVIGATING_TO_WORKSHOP = "NAVIGATING_TO_WORKSHOP"
     NAVIGATING_TO_SIM_WORKSHOP = "NAVIGATING_TO_SIM_WORKSHOP"
@@ -25,6 +31,8 @@ class TaskOrchestrator:
             WAITING_QR,
             WAITING_LLM,
             WAITING_SPEECH,
+            WAITING_DELIVERY_SPEECH,
+            WAITING_SIMULATION_SPEECH,
             DELIVERY_HANDED_OFF,
             NAVIGATING_TO_WORKSHOP,
             NAVIGATING_TO_SIM_WORKSHOP,
@@ -39,6 +47,8 @@ class TaskOrchestrator:
         WAITING_QR: "qr_search",
         WAITING_LLM: "llm_classification",
         WAITING_SPEECH: "speech",
+        WAITING_DELIVERY_SPEECH: "speech",
+        WAITING_SIMULATION_SPEECH: "speech",
         DELIVERY_HANDED_OFF: "delivery_navigation",
         NAVIGATING_TO_WORKSHOP: "delivery_navigation",
         NAVIGATING_TO_SIM_WORKSHOP: "simulation_navigation",
@@ -261,7 +271,11 @@ class TaskOrchestrator:
         )
 
     def on_speech_done(self, message):
-        if self.state != self.WAITING_SPEECH:
+        if self.state not in (
+            self.WAITING_SPEECH,
+            self.WAITING_DELIVERY_SPEECH,
+            self.WAITING_SIMULATION_SPEECH,
+        ):
             if self._matches(message, "speech_id", "speech_id"):
                 self._republish_status()
             return
@@ -269,6 +283,16 @@ class TaskOrchestrator:
             return
         if message["status"] != "success":
             self._fail(message.get("message") or "speech playback failed")
+            return
+
+        if self.state == self.WAITING_DELIVERY_SPEECH:
+            if self.simulation_phase_enabled:
+                self._publish_simulation_goal()
+            else:
+                self._complete()
+            return
+        if self.state == self.WAITING_SIMULATION_SPEECH:
+            self._complete()
             return
 
         goal_id = self._id_factory()
@@ -297,12 +321,31 @@ class TaskOrchestrator:
         if message["status"] == "failed":
             self._fail(message["message"])
             return
-        if not self.simulation_phase_enabled:
-            self._transition(self.COMPLETE)
-            self._publish_status("complete")
-            return
-        # 实物停车确认后进入仿真车间导航；第二次停车由仿真到达事件确认，
-        # 第一次到达不得提前 COMPLETE。
+        # 实物停车播报成功后才允许第二阶段继续。
+        self._start_speech(
+            self.WAITING_DELIVERY_SPEECH,
+            format_delivery_speech(
+                self.task["physical"]["selected_item"],
+                self.task["physical"]["workshop"],
+            ),
+        )
+
+    def _start_speech(self, state, text):
+        speech_id = self._id_factory()
+        self.task["speech_id"] = speech_id
+        self._transition(state)
+        self._publish_status("running")
+        self._emit(
+            "publish_speech",
+            {
+                "protocol_version": 1,
+                "task_id": self.task["task_id"],
+                "speech_id": speech_id,
+                "text": text,
+            },
+        )
+
+    def _publish_simulation_goal(self):
         goal_id = self._id_factory()
         self.task["simulation_goal_id"] = goal_id
         self._transition(self.NAVIGATING_TO_SIM_WORKSHOP)
@@ -317,6 +360,10 @@ class TaskOrchestrator:
                 "selected_item": self.task["simulation"]["selected_item"],
             },
         )
+
+    def _complete(self):
+        self._transition(self.COMPLETE)
+        self._publish_status("complete")
 
     def on_navigation_handoff_status(self, message):
         if self.state != self.DELIVERY_HANDED_OFF:
@@ -337,8 +384,13 @@ class TaskOrchestrator:
         if message["status"] == "failed":
             self._fail(message["message"])
             return
-        self._transition(self.COMPLETE)
-        self._publish_status("complete")
+        self._start_speech(
+            self.WAITING_SIMULATION_SPEECH,
+            format_simulation_delivery_speech(
+                self.task["simulation"]["selected_item"],
+                self.task["simulation"]["workshop"],
+            ),
+        )
 
     def on_cancel(self, message):
         if self.state not in self._ACTIVE_STATES:

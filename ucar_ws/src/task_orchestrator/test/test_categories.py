@@ -10,6 +10,7 @@ from task_orchestrator.categories import (
     category_config,
     format_result_speech,
 )
+from task_orchestrator import categories
 
 
 class CategoryTests(unittest.TestCase):
@@ -33,6 +34,20 @@ class CategoryTests(unittest.TestCase):
             "取得苹果属于食品大类应放置在食品加工车间，"
             "仿真环境中取得毛巾属于日用品大类应放置在日用品加工车间",
             text,
+        )
+
+    def test_parking_speech_uses_exact_phase_templates(self):
+        self.assertTrue(hasattr(categories, "format_delivery_speech"))
+        self.assertTrue(hasattr(categories, "format_simulation_delivery_speech"))
+        self.assertEqual(
+            "已将毛巾放入日用品加工车间",
+            categories.format_delivery_speech("毛巾", "日用品加工车间"),
+        )
+        self.assertEqual(
+            "仿真任务已完成，已将手机放入电子产品生产车间",
+            categories.format_simulation_delivery_speech(
+                "手机", "电子产品生产车间"
+            ),
         )
 
 

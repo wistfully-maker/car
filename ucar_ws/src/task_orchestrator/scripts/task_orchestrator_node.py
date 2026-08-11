@@ -259,7 +259,11 @@ def _subscribe(orchestrator, outputs, publishers, callback_lock):
             ),
             orchestrator.on_speech_done,
             callback_lock,
-            TaskOrchestrator.WAITING_SPEECH,
+            (
+                TaskOrchestrator.WAITING_SPEECH,
+                TaskOrchestrator.WAITING_DELIVERY_SPEECH,
+                TaskOrchestrator.WAITING_SIMULATION_SPEECH,
+            ),
         ),
     )
     rospy.Subscriber(
@@ -332,6 +336,8 @@ def _subscribe(orchestrator, outputs, publishers, callback_lock):
                 TaskOrchestrator.WAITING_QR,
                 TaskOrchestrator.WAITING_LLM,
                 TaskOrchestrator.WAITING_SPEECH,
+                TaskOrchestrator.WAITING_DELIVERY_SPEECH,
+                TaskOrchestrator.WAITING_SIMULATION_SPEECH,
                 TaskOrchestrator.DELIVERY_HANDED_OFF,
                 TaskOrchestrator.NAVIGATING_TO_WORKSHOP,
                 TaskOrchestrator.NAVIGATING_TO_SIM_WORKSHOP,

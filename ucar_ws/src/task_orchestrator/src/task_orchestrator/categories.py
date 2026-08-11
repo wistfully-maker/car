@@ -33,3 +33,11 @@ def format_result_speech(
             simulation["workshop"],
         )
     )
+
+
+def format_delivery_speech(selected_item, workshop):
+    return "已将%s放入%s" % (selected_item, workshop)
+
+
+def format_simulation_delivery_speech(selected_item, workshop):
+    return "仿真任务已完成，已将%s放入%s" % (selected_item, workshop)
