@@ -388,6 +388,100 @@ class RosHandoffStatusTests(unittest.TestCase):
             self.assertFalse(handle.terminated, handle.name)
 
 
+class RosHandoffPoseTransferTests(unittest.TestCase):
+    @staticmethod
+    def _message():
+        return types.SimpleNamespace(
+            header=types.SimpleNamespace(frame_id="", stamp=None),
+            pose=types.SimpleNamespace(
+                pose=types.SimpleNamespace(
+                    position=types.SimpleNamespace(x=0.0, y=0.0, z=0.0),
+                    orientation=types.SimpleNamespace(
+                        x=0.0, y=0.0, z=0.0, w=0.0
+                    ),
+                ),
+                covariance=[0.0] * 36,
+            ),
+        )
+
+    def _actions(self, module, transform=None):
+        actions = module._RosHandoffActions.__new__(module._RosHandoffActions)
+        actions._supervisor = {
+            "initial_pose_frame": "map",
+            "base_frame": "base_link",
+            "pose_snapshot_timeout": 0.2,
+            "pose_snapshot_retries": 3,
+            "initial_pose_covariance": 0.1,
+        }
+        actions._captured_initial_pose = None
+        actions._initial_pose_pub = types.SimpleNamespace(published=[])
+        actions._initial_pose_pub.publish = actions._initial_pose_pub.published.append
+        actions._pose_buffer = types.SimpleNamespace(
+            lookup_transform=lambda *_args: transform
+        )
+        module.PoseWithCovarianceStamped = self._message
+        module.rospy.Time = lambda value=0: value
+        module.rospy.Duration = lambda value: value
+        module.rospy.get_rostime = lambda: 123.0
+        module.rospy.loginfo = lambda *_args: None
+        module.rospy.logwarn = lambda *_args: None
+        return actions
+
+    def test_captures_live_map_to_base_pose_and_republishes_same_orientation(self):
+        module = load_module()
+        transform = types.SimpleNamespace(
+            transform=types.SimpleNamespace(
+                translation=types.SimpleNamespace(x=-1.31, y=-0.72, z=0.0),
+                rotation=types.SimpleNamespace(x=0.0, y=0.0, z=0.97, w=-0.24),
+            )
+        )
+        actions = self._actions(module, transform)
+
+        self.assertTrue(actions._capture_initial_pose())
+        actions._publish_initial_pose()
+
+        message = actions._initial_pose_pub.published[-1]
+        norm = (0.97 ** 2 + (-0.24) ** 2) ** 0.5
+        self.assertAlmostEqual(-1.31, message.pose.pose.position.x)
+        self.assertAlmostEqual(-0.72, message.pose.pose.position.y)
+        self.assertAlmostEqual(0.97 / norm, message.pose.pose.orientation.z)
+        self.assertAlmostEqual(-0.24 / norm, message.pose.pose.orientation.w)
+        self.assertEqual("map", message.header.frame_id)
+
+    def test_legacy_stack_is_not_stopped_when_live_pose_snapshot_is_missing(self):
+        module = load_module()
+        actions = self._actions(module)
+        actions._pose_buffer.lookup_transform = lambda *_args: (_ for _ in ()).throw(
+            RuntimeError("TF unavailable")
+        )
+        actions._config = {"legacy_exit_timeout": 10.0}
+        actions._legacy_group = FakeProcess("legacy")
+
+        self.assertFalse(actions.stop_owned_legacy())
+        self.assertTrue(actions._legacy_group.is_alive())
+
+    def test_live_pose_snapshot_retries_transient_tf_misses(self):
+        module = load_module()
+        transform = types.SimpleNamespace(
+            transform=types.SimpleNamespace(
+                translation=types.SimpleNamespace(x=-1.31, y=-0.72, z=0.0),
+                rotation=types.SimpleNamespace(x=0.0, y=0.0, z=0.97, w=-0.24),
+            )
+        )
+        attempts = []
+
+        def lookup(*_args):
+            attempts.append(1)
+            if len(attempts) < 3:
+                raise RuntimeError("transient TF miss")
+            return transform
+
+        actions = self._actions(module)
+        actions._pose_buffer.lookup_transform = lookup
+
+        self.assertTrue(actions._capture_initial_pose())
+        self.assertEqual(3, len(attempts))
+
 class HandoffDriverRetryTests(unittest.TestCase):
     def test_cancel_transient_miss_retries_then_succeeds(self):
         module = load_module()
@@ -649,6 +743,17 @@ class NodeWiringTests(unittest.TestCase):
         self.assertIn("initial_pose_x: -1.40219", config)
         self.assertIn("initial_pose_y: -0.627908", config)
         self.assertIn("initial_pose_yaw: 0.053792653589793", config)
+
+    def test_live_pose_snapshot_timeout_is_configurable(self):
+        _node, state, _module = self._install()
+        self.assertIn(
+            "~navigation_handoff_supervisor/pose_snapshot_timeout",
+            state.params,
+        )
+        self.assertIn(
+            "~navigation_handoff_supervisor/pose_snapshot_retries",
+            state.params,
+        )
 
     def test_goal_subscriber_parses_and_starts_handoff(self):
         fake = FakeActions()

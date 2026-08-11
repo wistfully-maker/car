@@ -360,6 +360,7 @@ class CompetitionBringupTests(unittest.TestCase):
         cameras = [node for node in self.root.iter("node")
                    if node.attrib.get("pkg") == "usb_cam"]
         self.assertEqual(1, len(cameras))
+        self.assertEqual("log", cameras[0].attrib.get("output"))
         qr_groups = [group for group in self.root.findall("group")
                      if group.attrib.get("if") == "$(arg start_qr)"]
         self.assertEqual(1, len(qr_groups))

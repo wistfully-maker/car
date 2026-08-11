@@ -117,7 +117,8 @@
   </group>
 
   <group if="$(arg start_camera)">
-    <node pkg="usb_cam" type="usb_cam_node" name="usb_cam" output="screen"/>
+    <!-- libswscale conversion warnings remain in usb_cam's ROS log, not the root console. -->
+    <node pkg="usb_cam" type="usb_cam_node" name="usb_cam" output="log"/>
   </group>
 
   <group if="$(arg start_speech)">

@@ -352,6 +352,9 @@ class _RosHandoffActions:
         self._runner = RosLaunchProcessRunner()
         self._legacy_group = None
         self._stop_group = None
+        self._captured_initial_pose = None
+        self._pose_buffer = tf2_ros.Buffer()
+        self._pose_listener = tf2_ros.TransformListener(self._pose_buffer)
         if supervisor_config["legacy_nav_launch"]:
             try:
                 self._legacy_group = self._runner.start(
@@ -402,10 +405,66 @@ class _RosHandoffActions:
             self._driver.on_cancel_result(ok)
 
     def stop_owned_legacy(self):
+        if self._captured_initial_pose is None and not self._capture_initial_pose():
+            return False
         group = self._legacy_group
         if group is None:
             return True
         return group.terminate(self._config["legacy_exit_timeout"])
+
+    def _capture_initial_pose(self):
+        s = self._supervisor
+        last_error = None
+        for _attempt in range(s["pose_snapshot_retries"]):
+            try:
+                transform = self._pose_buffer.lookup_transform(
+                    s["initial_pose_frame"],
+                    s["base_frame"],
+                    rospy.Time(0),
+                    rospy.Duration(s["pose_snapshot_timeout"]),
+                )
+                translation = transform.transform.translation
+                rotation = transform.transform.rotation
+                values = (
+                    translation.x,
+                    translation.y,
+                    rotation.x,
+                    rotation.y,
+                    rotation.z,
+                    rotation.w,
+                )
+                if not all(math.isfinite(value) for value in values):
+                    raise ValueError("pose contains a non-finite value")
+                quaternion_norm = math.sqrt(
+                    sum(value * value for value in values[2:])
+                )
+                if quaternion_norm < 1e-6:
+                    raise ValueError("pose quaternion has zero norm")
+                self._captured_initial_pose = {
+                    "x": translation.x,
+                    "y": translation.y,
+                    "qx": rotation.x / quaternion_norm,
+                    "qy": rotation.y / quaternion_norm,
+                    "qz": rotation.z / quaternion_norm,
+                    "qw": rotation.w / quaternion_norm,
+                }
+                rospy.loginfo(
+                    "captured live navigation handoff pose: x=%.3f y=%.3f qz=%.4f qw=%.4f",
+                    translation.x,
+                    translation.y,
+                    self._captured_initial_pose["qz"],
+                    self._captured_initial_pose["qw"],
+                )
+                return True
+            except Exception as exc:
+                last_error = exc
+        rospy.logwarn(
+            "live navigation handoff pose unavailable after %d attempts; "
+            "legacy stack retained: %s",
+            s["pose_snapshot_retries"],
+            last_error,
+        )
+        return False
 
     def verify_legacy_absent(self):
         if self._legacy_group is not None and self._legacy_group.is_alive():
@@ -506,13 +565,18 @@ class _RosHandoffActions:
 
     def _publish_initial_pose(self):
         s = self._supervisor
+        pose = self._captured_initial_pose
+        if pose is None:
+            raise RuntimeError("live navigation handoff pose was not captured")
         message = PoseWithCovarianceStamped()
+        message.header.stamp = rospy.get_rostime()
         message.header.frame_id = s["initial_pose_frame"]
-        message.pose.pose.position.x = s["initial_pose_x"]
-        message.pose.pose.position.y = s["initial_pose_y"]
-        yaw = s["initial_pose_yaw"]
-        message.pose.pose.orientation.z = math.sin(yaw / 2.0)
-        message.pose.pose.orientation.w = math.cos(yaw / 2.0)
+        message.pose.pose.position.x = pose["x"]
+        message.pose.pose.position.y = pose["y"]
+        message.pose.pose.orientation.x = pose["qx"]
+        message.pose.pose.orientation.y = pose["qy"]
+        message.pose.pose.orientation.z = pose["qz"]
+        message.pose.pose.orientation.w = pose["qw"]
         message.pose.covariance[0] = s["initial_pose_covariance"]
         message.pose.covariance[7] = s["initial_pose_covariance"]
         message.pose.covariance[35] = s["initial_pose_covariance"]
@@ -609,6 +673,8 @@ class NavigationHandoffSupervisorNode:
             "initial_pose_y": float(param("initial_pose_y", 0.0)),
             "initial_pose_yaw": float(param("initial_pose_yaw", 0.0)),
             "initial_pose_covariance": float(param("initial_pose_covariance", 0.1)),
+            "pose_snapshot_timeout": float(param("pose_snapshot_timeout", 0.2)),
+            "pose_snapshot_retries": max(1, int(param("pose_snapshot_retries", 3))),
             "readiness_max_age": float(param("readiness_max_age", 3.0)),
             "readiness_action_wait_timeout": float(
                 param("readiness_action_wait_timeout", 0.05)

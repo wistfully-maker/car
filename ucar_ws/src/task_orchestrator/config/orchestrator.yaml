@@ -74,6 +74,8 @@ navigation_handoff_supervisor:
   initial_pose_y: -0.627908
   initial_pose_yaw: 0.053792653589793
   initial_pose_covariance: 0.1
+  pose_snapshot_timeout: 0.2
+  pose_snapshot_retries: 3
   readiness_max_age: 3.0
   readiness_action_wait_timeout: 0.05
   readiness_tf_timeout: 0.05
