@@ -159,6 +159,9 @@ class LineNavigationAdapter:
         self._publisher = rospy.Publisher(
             "/task/line_navigation_arrived", String, queue_size=10
         )
+        self._stop_mode_publisher = rospy.Publisher(
+            "/stop/motion_mode", String, queue_size=1, latch=False
+        )
         self._client = actionlib.SimpleActionClient(
             "/move_base", MoveBaseAction
         )
@@ -175,6 +178,14 @@ class LineNavigationAdapter:
             self._publisher.publish(
                 String(data=json.dumps(payload, ensure_ascii=False))
             )
+
+    def _set_stop_mode(self, mode):
+        try:
+            self._stop_mode_publisher.publish(String(data=mode))
+            return True
+        except Exception as exc:
+            rospy.logerr("failed to publish stop motion mode %s: %s", mode, exc)
+            return False
 
     def _move_base_goal(self, pose):
         goal = MoveBaseGoal()
@@ -219,6 +230,8 @@ class LineNavigationAdapter:
                 self._client.cancel_goal()
             if not still_current():
                 return
+            if not self._set_stop_mode("NAVIGATION"):
+                raise RuntimeError("failed to enable stop navigation mode")
             self._client.send_goal(
                 goal,
                 done_cb=lambda status, result: self._on_done(
@@ -252,7 +265,8 @@ class LineNavigationAdapter:
             self._action_identity = None
             self._action_started = None
             self._current_pose = None
-            return payload
+        self._set_stop_mode("IDLE")
+        return payload
 
     def _on_done(self, generation, task_id, goal_id, status, _result):
         payload = None
@@ -276,6 +290,7 @@ class LineNavigationAdapter:
             self._action_identity = None
             self._action_started = None
             self._current_pose = None
+        self._set_stop_mode("IDLE")
         self._publish(payload)
 
     def _on_odom(self, message):
@@ -300,6 +315,7 @@ class LineNavigationAdapter:
             self._action_identity = None
             self._action_started = None
             self._current_pose = None
+        self._set_stop_mode("IDLE")
         self._publish(payload)
 
     def _on_cancel(self, message):
@@ -333,6 +349,8 @@ class LineNavigationAdapter:
             self._coordinator.run_if_current(generation, cancel_current)
         except Exception as exc:
             rospy.logerr("move_base line navigation cancel failed: %s", exc)
+        if result[0] is not None:
+            self._set_stop_mode("IDLE")
         self._publish(result[0])
 
     def _on_timer(self, _event):
@@ -370,6 +388,8 @@ class LineNavigationAdapter:
         except Exception as exc:
             rospy.logerr("move_base line navigation timeout cancel failed: %s",
                          exc)
+        if result[0] is not None:
+            self._set_stop_mode("IDLE")
         self._publish(result[0])
 
     def _on_shutdown(self):
@@ -397,6 +417,7 @@ class LineNavigationAdapter:
         except Exception as exc:
             rospy.logerr("move_base line navigation shutdown cancel failed: %s",
                          exc)
+        self._set_stop_mode("IDLE")
 
 
 def main():

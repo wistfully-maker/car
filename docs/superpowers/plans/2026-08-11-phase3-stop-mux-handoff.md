@@ -16,14 +16,14 @@
 - Create: `ucar_ws/src/line_follow_integration/test/test_line_navigation_adapter_node.py`
 - Modify: `ucar_ws/src/line_follow_integration/scripts/line_navigation_adapter_node.py`
 
-- [ ] **Step 1: Write the failing node tests**
+- [x] **Step 1: Write the failing node tests**
 
 Create a fake ROS publisher registry and action client. Assert that a valid line
 goal publishes `NAVIGATION` before the action client's `send_goal`, and that
 settled success, non-success action result, send exception, cancellation,
 timeout, and shutdown each leave the final internal mode at `IDLE`.
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run:
 
@@ -34,17 +34,17 @@ python -m unittest discover -s ucar_ws/src/line_follow_integration/test -p "test
 Expected: failures because the adapter does not create `/stop/motion_mode` and
 does not publish `NAVIGATION` or terminal `IDLE`.
 
-- [ ] **Step 3: Implement the minimal mode publisher**
+- [x] **Step 3: Implement the minimal mode publisher**
 
-Add a latched `std_msgs/String` publisher for `/stop/motion_mode`, a small
+Add a non-latched `std_msgs/String` publisher for `/stop/motion_mode`, a small
 `_set_stop_mode(mode)` helper, `NAVIGATION` immediately before `send_goal`, and
 `IDLE` in every path that clears the active navigation identity.
 
-- [ ] **Step 4: Run focused tests and verify GREEN**
+- [x] **Step 4: Run focused tests and verify GREEN**
 
 Run the command from Step 2. Expected: all new tests pass with no warnings.
 
-- [ ] **Step 5: Run regression and static verification**
+- [x] **Step 5: Run regression and static verification**
 
 ```powershell
 python -m unittest discover -s ucar_ws/src/line_follow_integration/test -p "test_*.py" -v

@@ -21,9 +21,12 @@ the lifetime of a Phase 3 line-start navigation goal:
 4. Do not add a permanent global-to-stop mode bridge, because that would force
    `NAVIGATION` during Phase 2 manual parking and break its `MANUAL` ownership.
 
-The mode publisher is latched so a restarted `stop_velocity_mux` receives the
-current safe mode. Every mode transition remains fail-closed: the stop mux emits
-zero velocity on a mode change, and terminal paths always request `IDLE`.
+The adapter's mode publisher is not latched. The Phase 2 mission is already a
+latched publisher on this topic, so adding a second latched source would make
+delivery order ambiguous after a mux restart. If the mux is not connected when
+Phase 3 requests navigation, the vehicle therefore remains stopped. Every mode
+transition remains fail-closed: the stop mux emits zero velocity on a mode
+change, and terminal paths always request `IDLE`.
 
 ## Verification
 
