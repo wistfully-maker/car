@@ -152,10 +152,18 @@ class VehicleCharacterizationTests(unittest.TestCase):
         )
         self.assertIn("/move_base/clear_costmaps", MISSION_SOURCE)
 
-    def test_phase2_double_pointer_jump_is_intact(self):
+    def test_phase2_route_prefers_only_unique_remembered_workshop(self):
         switch = function(MISSION_TREE, "switch_to_phase2")
         self.assertIsNotNone(switch)
-        self.assertIn("current_point_index = sim_point_index", MISSION_SOURCE)
+        switch_source = function_source(
+            MISSION_SOURCE, MISSION_TREE, "switch_to_phase2"
+        )
+        self.assertIn(
+            "waypoint_memory.unique_waypoint(sim_warehouse)", switch_source
+        )
+        self.assertIn("build_phase2_route(", switch_source)
+        self.assertIn("phase2_route_cursor = 0", switch_source)
+        self.assertIn("current_point_index = phase2_route[0]", switch_source)
 
     def test_vehicle_parameters_and_retry_defaults_are_intact(self):
         self.assertEqual(2, assigned_literal(MISSION_TREE, "max_navigation_retries"))
@@ -197,11 +205,8 @@ class VehicleCharacterizationTests(unittest.TestCase):
             aborted_source,
         )
         self.assertGreaterEqual(aborted_source.count("go_to_find_point()"), 2)
-        self.assertIn("current_point_index += 1", aborted_source)
-        self.assertLess(
-            aborted_source.index("current_point_index += 1"),
-            aborted_source.rindex("go_to_find_point()"),
-        )
+        self.assertIn("advance_to_next_waypoint()", aborted_source)
+        self.assertNotIn("current_point_index += 1", aborted_source)
 
     def test_success_resets_navigation_failure_budget(self):
         goal_source = function_source(
@@ -241,17 +246,78 @@ class VehicleCharacterizationTests(unittest.TestCase):
         exhausted_source = boxes_source[
             boxes_source.index('rospy.loginfo("  Exhausted, next waypoint")'):
         ]
-        self.assertIn("current_point_index += 1", exhausted_source)
-        self.assertLess(
-            exhausted_source.index("current_point_index += 1"),
-            exhausted_source.index("go_to_find_point()"),
-        )
+        self.assertIn("advance_to_next_waypoint()", exhausted_source)
+        self.assertNotIn("current_point_index += 1", exhausted_source)
 
-    def test_sim_workshop_records_the_active_scan_waypoint(self):
+    def test_ocr_records_all_canonical_workshops_at_active_waypoint(self):
         boxes_source = function_source(
             MISSION_SOURCE, MISSION_TREE, "boxes_callback"
         )
-        self.assertIn("sim_point_index = current_point_index", boxes_source)
+        record_source = function_source(
+            MISSION_SOURCE, MISSION_TREE, "record_workshop_observations"
+        )
+        self.assertIsNotNone(record_source)
+        self.assertIn("record_workshop_observations(slist_tool)", boxes_source)
+        self.assertIn("WAREHOUSE_MAP.items()", record_source)
+        self.assertIn(
+            "waypoint_memory.record(canonical_workshop, current_point_index)",
+            record_source,
+        )
+
+    def test_scan_completion_and_target_confirmation_mark_the_waypoint(self):
+        boxes_source = function_source(
+            MISSION_SOURCE, MISSION_TREE, "boxes_callback"
+        )
+        self.assertGreaterEqual(
+            boxes_source.count(
+                "waypoint_memory.mark_scanned(current_point_index)"
+            ),
+            2,
+        )
+
+    def test_start_resets_waypoint_memory_and_phase2_route(self):
+        start_source = function_source(
+            MISSION_SOURCE, MISSION_TREE, "start_mission"
+        )
+        self.assertIn("waypoint_memory.reset()", start_source)
+        self.assertIn("physical_point_index = None", start_source)
+        self.assertIn("phase2_route = []", start_source)
+        self.assertIn("phase2_route_cursor = 0", start_source)
+
+    def test_phase2_restarts_fresh_perception_and_parking(self):
+        switch_source = function_source(
+            MISSION_SOURCE, MISSION_TREE, "switch_to_phase2"
+        )
+        reset_source = function_source(
+            MISSION_SOURCE, MISSION_TREE, "reset_scan_state"
+        )
+        self.assertIsNotNone(reset_source)
+        self.assertIn("reset_scan_state()", switch_source)
+        for marker in (
+            "search_item_stage = 0",
+            "rotate_num = 0",
+            "lidar_processing_flag = False",
+            "stage2_creeping = False",
+            "camera_angle_rad = 0.0",
+            "dist_forward_item = 0.7",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, reset_source)
+
+    def test_observation_memory_never_caches_parking_measurements(self):
+        helper_source = (
+            STOP_ROOT / "src" / "stop_integration" / "waypoint_memory.py"
+        ).read_text(encoding="utf-8")
+        for forbidden in (
+            "camera_angle",
+            "lidar",
+            "pca",
+            "alignment",
+            "cmd_vel",
+            "parking_success",
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, helper_source.lower())
 
     def test_frozen_snapshot_files_match_vehicle_manifest(self):
         expected = {}
