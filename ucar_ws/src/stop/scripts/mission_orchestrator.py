@@ -98,7 +98,7 @@ stage2_creeping = False              # Stage 2 cmd_vel 慢速逼近标志
 FIND_POINTS_LIST = [
     (-0.812845, -2.44196, 0.0, 1.0),
     (0.771455, -2.44196, 0.0, 1.0),
-    (1.7843, -2.43094, 0.0, 1.0),
+    (2.2843, -2.43094, 0.0, 1.0),
 ]
 waypoint_memory = WaypointMemory(len(FIND_POINTS_LIST))
 physical_point_index = None
