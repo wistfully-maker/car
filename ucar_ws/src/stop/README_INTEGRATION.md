@@ -1,10 +1,9 @@
-# stop 包第二阶段集成说明（DeepSeek 本地实现，非实车验收）
+# stop 包第二阶段集成说明
 
 > 本文件说明车端已验证的 `stop` 包如何以最小改造接入全局编排器。
 > 车辆算法（FIND_POINTS_LIST 航点、AMCL+TEB+move_base、OCR 车间识别、
-> Stage 0-6 停车顺序、Phase 1→2 倒车/掉头/清代价地图/双指针）全部保留；
+> Stage 0-6 停车顺序、Phase 1→2 倒车/掉头/清代价地图）全部保留；
 > 集成只增加启动门控、任务注入、速度隔离、阶段事件与结果映射。
-> 实车验收由 Codex 按 `HANDOFF_TO_CODEX.md` 检查点逐个单独授权。
 
 ## 1. 车端快照与冻结
 
@@ -47,8 +46,17 @@ stop_protocol_adapter_node --/task/delivery_arrived--> 全局编排器
   零速度、只发一次 `failed:cancelled`；
 - **Phase 2 放行**：实物停车后停在原地等待全局编排器的仿真目标；
   `/stop/mission_ack`（action=start_phase2）到达才执行原有 `switch_to_phase2()`
-  （倒车 0.5m → 180° 掉头 → 清代价地图 → 双指针跳转），超时
+  （倒车 0.5m → 180° 掉头 → 清代价地图 → 按航点记忆选择路线），超时
   `phase2_ack_timeout` 秒报 `failed:phase2_timeout`；
+- **航点记忆**：Phase 1 按 1、2、3 顺序查找实物车间时，会把每次 OCR 能映射到
+  `WAREHOUSE_MAP` 的标准车间名及其航点记住；仿真目标在 Phase 1 完成后才下发，因此
+  记录过程不依赖提前知道仿真货品；
+- **Phase 2 路线**：仿真车间只在一个航点出现时优先前往该点；零个或多个候选时，
+  从实物停车点之后继续并绕回前面的未访问点。实物停车点始终排除，因为两类货品保证
+  属于不同车间。首选点 OCR 无果或导航重试耗尽时，会继续路线中的其余航点，不重复卡住；
+- **重新识别后停车**：记忆只保存“标准车间名 → 航点编号”。到达仿真航点后仍从
+  Stage 0 重新执行 OCR、LiDAR/PCA 对齐及停车；不缓存或复用相机角度、雷达距离、
+  PCA 角度、横纵向微调量、速度命令或上一次停车结果；
 - **TTS 移除**：`mission_done()` 不再直接调 `speak()`，语音统一由全局编排器处理；
 - **速度模式**：`_set_mode()` 把 NAVIGATION/MANUAL/IDLE 发布到 `/stop/motion_mode`
   供 stop mux 使用（旋转、逼近、微调、倒车为 MANUAL；move_base 目标为 NAVIGATION）。
@@ -103,12 +111,12 @@ python -m compileall -q ucar_ws/src/stop
 - `test_velocity_mux.py` / `test_velocity_mux_node.py`：隔离与 fail-closed；
 - `test_protocol_adapter_node.py`：双到达契约与缓存重发；
 - `test_integration_launch.py`：launch 组成与参数默认值。
+- `test_waypoint_memory.py`：标准车间记忆、冲突处理、三种典型路线与回退顺序。
 
 ## 8. 未完成与边界
 
-- 本文件描述的只是本地实现与测试；**没有部署、没有实车运行**；
-- 车端编译、部署、无运动启动、旧栈退出、AMCL/TF 就绪、单独实物/仿真、连续两阶段
-  均需 Codex 逐个检查点单独授权；
+- 车端部署前必须先做带时间戳备份，并在不启动比赛流程、不发布导航目标的条件下完成
+  全量测试和 catkin 编译；连续两阶段运动仍须人工看护；
 - 已知假设：stop 栈 AMCL 节点名为 `/amcl`、OCR 节点名为 `/ocr_native_node`、
   地图为 `$(find ucar_nav)/maps/map.yaml`、初始位姿默认 -0.813/-2.442/0.0，
   均可在 launch/参数中覆盖，但改变即偏离车端已验证配置。
