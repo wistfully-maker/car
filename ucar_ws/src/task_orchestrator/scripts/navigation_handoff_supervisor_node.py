@@ -461,14 +461,10 @@ class _RosHandoffActions:
             rospy.logerr("stop mission release failed: %s", exc)
 
     def publish_diagnostic(self, payload):
-        message = {"protocol_version": 1}
-        message.update(payload)
-        try:
-            self._status_pub.publish(
-                String(data=json.dumps(message, ensure_ascii=False))
-            )
-        except Exception as exc:
-            rospy.logerr("handoff diagnostic publish failed: %s", exc)
+        rospy.logwarn(
+            "navigation handoff diagnostic: %s",
+            json.dumps(payload, ensure_ascii=False),
+        )
 
     def handoff_failed(self, payload):
         self.publish_diagnostic(payload)
@@ -548,7 +544,7 @@ class NavigationHandoffSupervisorNode:
             rospy.Publisher("/cmd_vel/stop_navigation", Twist, queue_size=1),
         ]
         self._initial_pose_pub = rospy.Publisher(
-            "/initialpose", PoseWithCovarianceStamped, queue_size=1
+            "/initialpose", PoseWithCovarianceStamped, queue_size=1, latch=True
         )
         self._mode_pub = rospy.Publisher(
             "/task/motion_mode", String, queue_size=1, latch=True

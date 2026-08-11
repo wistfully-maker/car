@@ -70,9 +70,9 @@ navigation_handoff_supervisor:
   stop_integration_launch: ""
   legacy_nodes: [/lidar_loc, /move_base, /map_server]
   initial_pose_frame: map
-  initial_pose_x: 0.0
-  initial_pose_y: 0.0
-  initial_pose_yaw: 0.0
+  initial_pose_x: -1.40219
+  initial_pose_y: -0.627908
+  initial_pose_yaw: 0.053792653589793
   initial_pose_covariance: 0.1
   readiness_max_age: 3.0
   readiness_action_wait_timeout: 0.05

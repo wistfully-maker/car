@@ -97,7 +97,7 @@ class MissionIntegrationLaunchTests(unittest.TestCase):
         ):
             self.assertEqual(default, args[name], name)
         for name in ("initial_pose_x", "initial_pose_y", "initial_pose_yaw"):
-            self.assertIn(name, args)
+            self.assertEqual("0.0", args[name], name)
 
     def test_integration_launch_starts_mission_mux_and_adapter(self):
         root = ET.parse(MISSION_INTEGRATION).getroot()

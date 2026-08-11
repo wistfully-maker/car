@@ -9,8 +9,8 @@
   -->
 
   <!-- ====== 机器人初始位姿（map 坐标系） ====== -->
-  <arg name="initial_pose_x"   default="-0.813" />
-  <arg name="initial_pose_y"   default="-2.442" />
+  <arg name="initial_pose_x"   default="0.0" />
+  <arg name="initial_pose_y"   default="0.0" />
   <arg name="initial_pose_yaw" default="0.0" />
 
   <!-- ====== OCR 扫描 / PCA 停车参数（车端已验证默认值不变） ====== -->

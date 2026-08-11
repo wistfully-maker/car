@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+CONFIG = ROOT / "config" / "orchestrator.yaml"
 sys.path.insert(0, str(ROOT / "src"))
 
 from task_orchestrator.handoff import NavigationHandoff
@@ -282,11 +283,25 @@ class RosHandoffStatusTests(unittest.TestCase):
         module = load_module()
         actions, published = self._actions(module)
         module.rospy.logerr = lambda *args: None
+        module.rospy.logwarn = lambda *args: None
         actions.handoff_failed(dict(
             task_id="task-1", goal_id="delivery-1", reason="stop not ready"
         ))
+        self.assertEqual(1, len(published))
         self.assertEqual("failed", published[-1]["status"])
         self.assertEqual("stop not ready", published[-1]["message"])
+
+    def test_retry_diagnostics_do_not_use_status_topic(self):
+        module = load_module()
+        actions, published = self._actions(module)
+        module.rospy.logwarn = lambda *args: None
+        actions.publish_diagnostic(dict(
+            task_id="task-1",
+            goal_id="delivery-1",
+            stage="readiness",
+            reason="retrying",
+        ))
+        self.assertEqual([], published)
 
     def test_publish_zero_precedes_every_lifecycle_step(self):
         module = load_module()
@@ -467,6 +482,7 @@ class NodeWiringTests(unittest.TestCase):
             now=10.0,
             params=[],
             publishers={},
+            publisher_options={},
             subscribers={},
             timer_callback=None,
             shutdown=None,
@@ -506,6 +522,7 @@ class NodeWiringTests(unittest.TestCase):
                 else:
                     state.messages.append((topic, message))
             state.publishers[topic] = publish
+            state.publisher_options[topic] = dict(_kwargs)
             return types.SimpleNamespace(publish=publish)
 
         rospy.Publisher = publisher
@@ -575,6 +592,14 @@ class NodeWiringTests(unittest.TestCase):
         self.assertIn("/task/stop_mission_goal", state.publishers)
         self.assertIn("/task/delivery_navigation_goal", state.subscribers)
         self.assertIn("/odom", state.subscribers)
+
+    def test_initial_pose_is_latched_and_configured_for_pickup_area(self):
+        _node, state, _module = self._install()
+        self.assertTrue(state.publisher_options["/initialpose"]["latch"])
+        config = CONFIG.read_text(encoding="utf-8")
+        self.assertIn("initial_pose_x: -1.40219", config)
+        self.assertIn("initial_pose_y: -0.627908", config)
+        self.assertIn("initial_pose_yaw: 0.053792653589793", config)
 
     def test_goal_subscriber_parses_and_starts_handoff(self):
         fake = FakeActions()
