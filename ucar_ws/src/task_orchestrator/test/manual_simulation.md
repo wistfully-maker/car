@@ -219,3 +219,45 @@ rostopic pub -1 /task/cancel std_msgs/String \
   {"reason": "operator_cancel"}
 ]
 ```
+
+## 10. 第三阶段：巡线联调分层模拟（不动车）
+
+本节只验证第三阶段协议层与状态机，不验证真实导航/巡线/红绿灯。先机械断能或架空
+驱动轮；所有 `rostopic pub` 用 `-1` 只发一次；不启动 `line_follow_integration`
+的 `phase3.launch` 真实节点（相机适配/导航适配/监管器）、不启动相机、move_base、
+YOLO 模型与巡线子进程时，用以下 JSON 依次注入（identity 取自上一轮输出）。
+
+```bash
+# 1) 第二阶段仿真车间播报成功后，状态机应发布一次 /task/line_navigation_goal
+rostopic echo -n 1 /task/line_navigation_goal
+
+# 2) 注入导航到达（goal_id 取自上面的输出）
+rostopic pub -1 /task/line_navigation_arrived std_msgs/String '{
+  "protocol_version": 1, "task_id": "task-1", "goal_id": "<goal_id>",
+  "status": "arrived", "message": ""}'
+
+# 3) 状态机应发布 /task/line_follow/start；注入红灯（保持等待，不推进）
+rostopic pub -1 /task/line_follow/status std_msgs/String '{
+  "protocol_version": 1, "task_id": "task-1", "goal_id": "<goal_id>",
+  "status": "waiting_signal"}'
+
+# 4) 注入方向锁定（left_turn/right_turn/straight 三选一）
+rostopic pub -1 /task/line_follow/status std_msgs/String '{
+  "protocol_version": 1, "task_id": "task-1", "goal_id": "<goal_id>",
+  "status": "direction_selected", "direction": "left_turn"}'
+
+# 5) 注入巡线成功（只有此时才进入 WAITING_FINAL_SPEECH 并播报“任务完成”）
+rostopic pub -1 /task/line_follow/status std_msgs/String '{
+  "protocol_version": 1, "task_id": "task-1", "goal_id": "<goal_id>",
+  "status": "success", "direction": "left_turn"}'
+
+# 6) 完成播报回执后状态机进入 COMPLETE
+rostopic pub -1 /voice/speak_done std_msgs/String '{
+  "protocol_version": 1, "task_id": "task-1",
+  "speech_id": "<speech_id>", "status": "success", "message": ""}'
+```
+
+失败场景：`/task/line_navigation_arrived` 返回 `failed`、`/task/line_follow/status`
+返回 `failure`（带 `reason`）、`/voice/speak_done` 返回 `error`，都应进入 `ERROR` 且
+最后运动模式为 `IDLE`。`direction_selected` 之前注入 `success` 不推进；错误
+`task_id`/`goal_id` 与重复消息不推进、不重复发布。

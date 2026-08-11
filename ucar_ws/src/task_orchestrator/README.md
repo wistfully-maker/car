@@ -578,3 +578,75 @@ rostopic echo -n 1 /task/navigation_handoff_status
 禁止：同时启动 lidar_loc 与 AMCL、同时启动两个 move_base/map server/相机/雷达/底盘
 driver；让 stop、move_base 或其他节点直接发布最终 `/cmd_vel`；伪造
 `/task/delivery_arrived`、`/task/simulation_arrived`；用 `rosnode cleanup` 停 live 节点。
+
+## 10. 第三阶段：红绿灯识别与巡线联调
+
+在第二阶段仿真车间播报成功后，状态机不再直接完成，而是进入第三阶段：
+
+```text
+WAITING_SIMULATION_SPEECH
+ -> NAVIGATING_LINE_START      发布 /task/line_navigation_goal（YAML 巡线起点）
+ -> WAITING_LINE_DIRECTION     等待红绿灯/方向识别（red_light 保持等待）
+ -> LINE_FOLLOWING             按 left_turn/right_turn/straight 巡线
+ -> WAITING_FINAL_SPEECH       “任务完成”TTS
+ -> COMPLETE
+```
+
+### 10.1 公共接口
+
+```text
+/task/line_navigation_goal    发布：带 pose 的导航目标（frame_id/x/y/qz/qw）
+/task/line_navigation_arrived 订阅：arrived|failed（失败带 message）
+/task/line_follow/start       发布：开始方向识别
+/task/line_follow/status      订阅：waiting_signal|direction_selected|following|success|failure
+/task/motion_mode             LINE_FOLLOW 期间只放行 /cmd_vel/line_follow
+/cmd_vel/line_follow          巡线速度隔离源，只有 phase3 supervisor 发布
+```
+
+巡线状态带方向：`direction_selected`/`following` 携带 `direction`；`failure` 携带
+`reason`。30 秒无方向结果时选择 `straight`。只有匹配 `task_id/goal_id` 的新鲜成功
+才推进状态机；重复与过期事件只重发缓存状态。
+
+### 10.2 配置与数据流
+
+第三阶段巡线起点、相机参数与超时来自
+`line_follow_integration/config/phase3.yaml`（小车部署路径
+`/home/ucar/ucar_ws/src/line_follow_integration/config/phase3.yaml`），由根 launch
+通过 `phase3_config` 参数转发；**修改 YAML 必须重启根 launch**，不修改 Python。
+物理相机保持 1020x720 唯一配置；YOLO 使用原始图像；巡线使用派生的 640x480 图像
+（`/line_follow/image_raw`）。根 launch 通过 `start_line_follow` 开关包含
+`line_follow_integration/launch/phase3.launch`，**不得同时运行原始
+`start_all_yolo.launch`**。
+
+### 10.3 速度所有权
+
+```text
+巡线脚本 /cmd_vel --remap--> /line_follow/cmd_vel_candidate
+  --supervisor 图像健康门控--> /cmd_vel/line_follow
+  --velocity_arbiter mode=LINE_FOLLOW--> /cmd_vel
+```
+
+图像超过 0.5 秒未更新立即零速度并阻断候选速度，3 秒未恢复则失败；导航到巡线起点仍
+使用 `STOP_NAVIGATION` 模式与 stop 导航速度链。
+
+### 10.4 故障与子进程
+
+supervisor 只终止自己创建的 YOLO/巡线子进程（按 PID），禁止 `pkill`/`killall`/
+`rosnode kill`。模型缺失或哈希不一致、原始图像 5 秒未就绪、巡线子进程提前退出、
+120 秒巡线超时都失败；只有最终停车线的新鲜标记才是成功。失败、取消与关闭先零速度
+再结束子进程，最后发布一次关联失败。TTS 失败或超时进入 ERROR，不进入 COMPLETE。
+
+### 10.5 分模块调试与验收
+
+```bash
+# 先禁动（机械断能/架空驱动轮），再逐模块启动
+roslaunch line_follow_integration phase3.launch enable_line_follow_supervisor:=false enable_line_navigation_adapter:=false
+rostopic hz /usb_cam/image_raw       # 原始图像
+rostopic hz /line_follow/image_raw   # 派生 640x480 图像
+rostopic echo /task/line_follow/status
+rostopic echo /task/motion_mode
+rostopic echo /cmd_vel/line_follow
+```
+
+实车看护验收逐层放行：导航起点与停车姿态 → IDLE 下验证两路图像 → 红灯等待与方向锁定
+→ 单独放行 `/cmd_vel/line_follow` → 最终停车线与单次“任务完成”播报 → 全流程。

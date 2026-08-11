@@ -51,5 +51,39 @@ class PackageConfigTests(unittest.TestCase):
             self.assertNotIn(forbidden, text)
 
 
+class OperatorDocumentationTests(unittest.TestCase):
+    def test_operator_visible_contracts_are_documented(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        for required in (
+            "/task/line_navigation_goal",
+            "/task/line_navigation_arrived",
+            "/task/line_follow/start",
+            "/task/line_follow/status",
+            "/cmd_vel/line_follow",
+            "LINE_FOLLOW",
+            "red_light",
+            "left_turn",
+            "right_turn",
+            "straight",
+            "任务完成",
+            "/home/ucar/ucar_ws/src/line_follow_integration/config/phase3.yaml",
+            "D:\\program_sec\\智能车\\.worktrees\\phase3-line-follow-integration\\ucar_ws\\src\\line_follow_integration\\config\\phase3.yaml",
+        ):
+            self.assertIn(required, readme)
+
+    def test_readme_states_operation_truths(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        for statement in (
+            "重启根 launch",
+            "只有最终停车线检测才是成功",
+            "30 秒无方向结果时选择 straight",
+            "1020x720",
+            "YOLO 使用原始图像",
+            "640x480",
+            "start_all_yolo.launch",
+        ):
+            self.assertIn(statement, readme)
+
+
 if __name__ == "__main__":
     unittest.main()

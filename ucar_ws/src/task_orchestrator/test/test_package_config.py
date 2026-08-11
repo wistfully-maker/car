@@ -444,6 +444,29 @@ class PackageConfigTests(unittest.TestCase):
         self.assertGreater(35.0, 30.0)
         self.assertGreater(125.0, 120.0)
 
+    def test_phase3_operator_documentation_covers_full_timeline(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        manual = (ROOT / "test/manual_simulation.md").read_text(
+            encoding="utf-8"
+        )
+        for required in (
+            "/task/line_navigation_goal",
+            "/task/line_navigation_arrived",
+            "/task/line_follow/start",
+            "/task/line_follow/status",
+            "/cmd_vel/line_follow",
+            "LINE_FOLLOW",
+            "red_light",
+            "left_turn",
+            "right_turn",
+            "straight",
+            "任务完成",
+            "/home/ucar/ucar_ws/src/line_follow_integration/config/phase3.yaml",
+        ):
+            self.assertIn(required, readme + manual)
+        self.assertIn("phase3.launch", manual)
+        self.assertIn("line_follow_integration/launch/phase3.launch", readme)
+
     def test_line_follow_integration_is_an_exec_dependency(self):
         package = ET.parse(ROOT / "package.xml").getroot()
         exec_dependencies = {node.text for node in package.findall("exec_depend")}

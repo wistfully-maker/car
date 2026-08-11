@@ -232,3 +232,58 @@ branch:   codex/stop-phase2-integration
 
 未执行：小车部署、Catkin 车端编译、ROS 无运动注入、真实语音、真实导航、OCR/停车和底盘运动。
 下一步必须先按用户指定位置备份并部署，再在人工看护和急停可用条件下分段验收。
+
+## 14. 第三阶段交接（2026-08-11）
+
+> 本节由第三阶段实施写入；最终测试数量、最终 HEAD 与提交清单在任务 9 全量回归后更新。
+
+### 14.1 范围与来源
+
+第三阶段新增 `line_follow_integration` 包（相机适配、导航适配、巡线监管器）并扩展
+`task_orchestrator` 状态机与仲裁器。四个冻结源脚本逐一从权威来源导入并核对 SHA-256
+（见 `SOURCE_SNAPSHOT.sha256`）：三个 V4 巡线脚本来自本地 `E:\follow_v1\follow_v1`，
+`yolo_server.py` 来自小车 `/home/ucar/ucar_ws/src/car_server/yolo_server.py`（只读
+SSH 取得）。未导入 `auto_drive_v3.py`（含 TTS 与假成功逻辑），未导入
+`start_all_yolo.launch`。YOLO 模型不提交 Git：
+
+```text
+/home/ucar/ucar_ws/src/yolo_turn/best.pt
+sha256: cb1c5db5da5db75fe40000410295970f2d7fb6a59d9600f82a22d836829e1cdd
+```
+
+### 14.2 公共接口与速度所有权
+
+```text
+/task/line_navigation_goal    发布（pose 来自 phase3.yaml）
+/task/line_navigation_arrived 订阅（arrived|failed）
+/task/line_follow/start       发布
+/task/line_follow/status      订阅（waiting_signal|direction_selected|following|success|failure）
+/task/motion_mode             LINE_FOLLOW 只放行 /cmd_vel/line_follow
+/cmd_vel/line_follow          supervisor 唯一发布者
+```
+
+速度链：巡线脚本 `/cmd_vel` remap 到 `/line_follow/cmd_vel_candidate`，supervisor
+图像健康门控（0.5s 阻断 + 3s 恢复）后发布 `/cmd_vel/line_follow`，velocity arbiter
+在 `LINE_FOLLOW` 模式下放行。外层超时 `line_navigation=310/line_direction=35/
+line_follow=125` 严格大于内部 300/30/120 秒。
+
+### 14.3 配置文件
+
+```text
+仓库相对: ucar_ws/src/line_follow_integration/config/phase3.yaml
+本地绝对: D:\program_sec\智能车\.worktrees\phase3-line-follow-integration\ucar_ws\src\line_follow_integration\config\phase3.yaml
+小车部署: /home/ucar/ucar_ws/src/line_follow_integration/config/phase3.yaml
+```
+
+### 14.4 子进程与故障纪律
+
+supervisor 只终止自己 `subprocess.Popen` 创建的 PID；禁止 `pkill`/`killall`/
+`rosnode kill`。取消/异常/超时/关闭先零速度再结束子进程，最后发布一次关联失败。
+只有本次新鲜停车标记是成功；子进程提前退出与 120s 超时失败；“任务完成”只由
+task_orchestrator 播报，匹配回执后进入 COMPLETE。
+
+### 14.5 测试与部署状态
+
+本地 TDD 任务 1～8 已完成（每任务 RED→GREEN→单独提交），任务 9 全量回归待执行。
+**尚未部署、未 catkin 编译、未实车验收**；车端下一步顺序：审查 diff → 备份车端包 →
+部署到 `/home/ucar/ucar_ws/src` → catkin build → 无运动 topic 模拟 → 分级看护实车验收。
