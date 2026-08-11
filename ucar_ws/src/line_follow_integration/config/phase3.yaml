@@ -1,0 +1,28 @@
+line_start_goal:
+  frame_id: map
+  x: 0.5167081260031493
+  y: -3.125171302690142
+  qz: -0.7044294777312331
+  qw: 0.7097739857893512
+
+camera:
+  input_topic: /usb_cam/image_raw
+  line_topic: /line_follow/image_raw
+  output_width: 640
+  output_height: 480
+  output_fps: 15.0
+  crop_mode: center_4_3
+
+timeouts:
+  navigation: 300.0
+  image_ready: 5.0
+  image_max_age: 0.5
+  image_recovery_grace: 3.0
+  direction: 30.0
+  line_follow: 120.0
+
+runtime:
+  yolo_result_file: /tmp/yolo_result.txt
+  stop_done_file: /tmp/stop_done.txt
+  yolo_model: /home/ucar/ucar_ws/src/yolo_turn/best.pt
+  yolo_model_sha256: cb1c5db5da5db75fe40000410295970f2d7fb6a59d9600f82a22d836829e1cdd
