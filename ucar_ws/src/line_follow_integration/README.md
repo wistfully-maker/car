@@ -191,3 +191,16 @@ rostopic echo /task/line_navigation_arrived    # 导航到达结果
   `ucar_ws/src/task_orchestrator/HANDOFF_TO_CODEX.md`。
 - 外部 YOLO 模型（`best.pt`）由小车提供，未提交 Git。
 - **尚未部署、未编译、未实车验收**：本地测试通过不代表车端可用。
+
+## 10. V5 左右巡线最小接入
+
+- `left_turn` 使用 `follow_left_v5.py`，`right_turn` 使用
+  `follow_right_v5.py`；`straight` 仍使用 `follow_mid_v4.py`。
+- V4 的左、右、中三个脚本均原样保留，可随时回退，不做覆盖。
+- V5 保留车端版本的 8 秒停车线屏蔽、转向角度和视觉阈值。识别到前停车线后，寻找后停车线的
+  线速度上限降为 `0.15 m/s`；写入 `/tmp/stop_done.txt` 前、回调异常时和节点退出时连续发布
+  三次零速候选指令。
+- 车端原始 V5 与联调安全补丁后的哈希记录在 `SOURCE_SNAPSHOT.sha256`。
+- 回退只需把
+  `src/line_follow_integration/runtime.py` 中 `left_turn/right_turn` 的文件名改回对应 V4，随后
+  `Ctrl+C` 停止总 launch 并重新启动；运行中的节点不会自动读取该改动。

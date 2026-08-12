@@ -4,11 +4,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
+RUNTIME = ROOT / "src" / "line_follow_integration" / "runtime.py"
 
 EXPECTED_SOURCES = {
     "follow_left_v4.py": "8a9471e5917b93bdddd1f0b191e8ace48fe4d6baa8269f68204d4fba23fbbfb3",
     "follow_right_v4.py": "92fd5098be423bab61c3eb5deb5c202c12adbc6c45bc4638a1af7bf5931a5d73",
     "follow_mid_v4.py": "736d0666475f25f48f1e11e888a6c40864af95496754ff37f6311fbba3d0b07e",
+    "follow_left_v5.py": "d1edbf433b42181139b295f2fe31d59595ab35f26a2893ba72f6042ff03335ef",
+    "follow_right_v5.py": "95d46a6cd452aa2febbfc222b0d339cdddf66ca492066747afa80478f94bd1ab",
     "yolo_server.py": "9d7010328a636742c1c60012cd6c4f0c78ae3cfc2ab4cf57c815ec88de4e9a51",
 }
 
@@ -31,6 +34,14 @@ class SourceSnapshotTests(unittest.TestCase):
         for name, digest in EXPECTED_SOURCES.items():
             self.assertIn(name, snapshot)
             self.assertIn(digest, snapshot)
+        self.assertIn(
+            "4140f85c6bb2617482e47cdb6966644fcffb74f74dc213d5374f7f95bed3bbc6",
+            snapshot,
+        )
+        self.assertIn(
+            "47070a7966adcb81ff5f87abb510714023337bb6e38fa63166f3b3dc5c55041f",
+            snapshot,
+        )
 
     def test_auto_drive_and_start_all_yolo_are_not_imported(self):
         self.assertFalse((SCRIPTS / "auto_drive_v3.py").exists())
@@ -41,6 +52,64 @@ class SourceSnapshotTests(unittest.TestCase):
                     self.assertNotIn(
                         "start_all_yolo.launch", text, str(path)
                     )
+
+
+class V5MinimalIntegrationTests(unittest.TestCase):
+    V5_SCRIPTS = ("follow_left_v5.py", "follow_right_v5.py")
+
+    def test_v4_baseline_remains_available_and_v5_is_added(self):
+        for name in (
+            "follow_left_v4.py",
+            "follow_right_v4.py",
+            "follow_mid_v4.py",
+            *self.V5_SCRIPTS,
+        ):
+            self.assertTrue((SCRIPTS / name).is_file(), name)
+
+        cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
+        for name in self.V5_SCRIPTS:
+            self.assertIn("scripts/{}".format(name), cmake)
+
+    def test_only_left_and_right_routes_switch_to_v5(self):
+        runtime = RUNTIME.read_text(encoding="utf-8")
+        self.assertIn('"left_turn": "follow_left_v5.py"', runtime)
+        self.assertIn('"right_turn": "follow_right_v5.py"', runtime)
+        self.assertIn('"straight": "follow_mid_v4.py"', runtime)
+
+    def test_v5_rear_line_search_is_slow_and_terminal_stop_is_ordered(self):
+        for name in self.V5_SCRIPTS:
+            with self.subTest(name=name):
+                source = _read_script(name)
+                self.assertIn("self.rear_search_speed = 0.15", source)
+                self.assertIn(
+                    "if self.stop_front_found:\n"
+                    "                    t.linear.x = min(t.linear.x, self.rear_search_speed)",
+                    source,
+                )
+                parking_index = source.index("if self.detect_stop_line(frame):")
+                done_index = source.index(
+                    'with open("/tmp/stop_done.txt","w")', parking_index
+                )
+                stop_index = source.index(
+                    "self._publish_stop_burst()", parking_index, done_index
+                )
+                self.assertLess(stop_index, done_index)
+
+    def test_v5_stops_on_shutdown_and_callback_exception(self):
+        for name in self.V5_SCRIPTS:
+            with self.subTest(name=name):
+                source = _read_script(name)
+                self.assertIn("def _publish_stop_burst(self):", source)
+                self.assertIn("rospy.on_shutdown(self._publish_stop_burst)", source)
+                helper_start = source.index("def _publish_stop_burst(self):")
+                helper_end = source.index("\n    def ", helper_start + 1)
+                helper = source[helper_start:helper_end]
+                self.assertIn("time.sleep(0.03)", helper)
+                self.assertNotIn("rospy.sleep", helper)
+                exception_index = source.index("except Exception as e:")
+                self.assertIn(
+                    "self._publish_stop_burst()", source[exception_index:]
+                )
 
 
 class CameraAdapterContractTests(unittest.TestCase):

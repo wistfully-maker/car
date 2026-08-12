@@ -4,8 +4,8 @@ import subprocess
 
 
 ROUTE_SCRIPTS = {
-    "left_turn": "follow_left_v4.py",
-    "right_turn": "follow_right_v4.py",
+    "left_turn": "follow_left_v5.py",
+    "right_turn": "follow_right_v5.py",
     "straight": "follow_mid_v4.py",
 }
 

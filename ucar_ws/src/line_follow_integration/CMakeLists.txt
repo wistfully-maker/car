@@ -24,6 +24,8 @@ catkin_install_python(PROGRAMS
   scripts/follow_left_v4.py
   scripts/follow_right_v4.py
   scripts/follow_mid_v4.py
+  scripts/follow_left_v5.py
+  scripts/follow_right_v5.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
