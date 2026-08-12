@@ -1,19 +1,17 @@
 #!/usr/bin/env python3
 """Gate the shared camera into a 640x480 15-FPS line-follow image stream.
 
-订阅原始 1020x720 图像与 /task/line_follow/start 启动消息，只在一个关联的
-巡线 goal 激活期间发布派生图像；保留输入 header；用消息时间戳限流到
-配置 FPS；收到关联 success/failure 状态后停发。不拥有、不重配物理相机。
+The vehicle camera already publishes the required 640x480 image. While one
+line-follow goal is active, forward that ROS Image unchanged at the configured
+rate. Do not own, reconfigure, crop, resize, or re-encode the shared camera.
 """
 
 import threading
 
 import rospy
-from cv_bridge import CvBridge
 from sensor_msgs.msg import Image
 from std_msgs.msg import String
 
-from line_follow_integration.camera_transform import transform_line_frame
 from line_follow_integration.protocol import (
     ProtocolError,
     parse_identity_json,
@@ -28,7 +26,6 @@ class LineCameraAdapter:
         self.output_width = int(camera.get("output_width", 640))
         self.output_height = int(camera.get("output_height", 480))
         self.output_fps = float(camera.get("output_fps", 15.0))
-        self.crop_mode = camera.get("crop_mode", "center_4_3")
         if (
             self.output_width <= 0
             or self.output_height <= 0
@@ -39,7 +36,6 @@ class LineCameraAdapter:
         self._lock = threading.RLock()
         self._active_identity = None
         self._last_publish_stamp = None
-        self._bridge = CvBridge()
         self._publisher = rospy.Publisher(
             self.line_topic, Image, queue_size=1
         )
@@ -101,6 +97,18 @@ class LineCameraAdapter:
         with self._lock:
             if self._active_identity is None:
                 return
+            if (
+                message.width != self.output_width
+                or message.height != self.output_height
+            ):
+                rospy.logwarn_throttle(
+                    5.0,
+                    "line camera input is %sx%s, expected %sx%s; "
+                    "refusing to alter shared-camera geometry",
+                    message.width, message.height,
+                    self.output_width, self.output_height,
+                )
+                return
             stamp = message.header.stamp
             if stamp.to_sec() <= 0:
                 stamp = rospy.Time.from_sec(rospy.get_time())
@@ -110,18 +118,8 @@ class LineCameraAdapter:
                 < rospy.Duration(1.0 / self.output_fps)
             ):
                 return
-            try:
-                frame = self._bridge.imgmsg_to_cv2(message, "bgr8")
-                output = transform_line_frame(
-                    frame, self.output_width, self.output_height,
-                    self.crop_mode,
-                )
-                out_message = self._bridge.cv2_to_imgmsg(output, "bgr8")
-                out_message.header = message.header
-                self._publisher.publish(out_message)
-                self._last_publish_stamp = stamp
-            except Exception as exc:
-                rospy.logwarn("line camera transform failed: %s", exc)
+            self._publisher.publish(message)
+            self._last_publish_stamp = stamp
 
 
 def main():

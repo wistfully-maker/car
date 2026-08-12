@@ -58,9 +58,14 @@ class CameraAdapterContractTests(unittest.TestCase):
     def test_publishes_derived_line_image(self):
         self.assertIn("/line_follow/image_raw", self.source)
 
-    def test_preserves_header_and_rate_limits_to_configured_fps(self):
-        self.assertIn("header", self.source)
+    def test_preserves_message_and_rate_limits_to_configured_fps(self):
+        self.assertIn("self._publisher.publish(message)", self.source)
         self.assertIn("output_fps", self.source)
+
+    def test_matching_frames_bypass_cv_bridge_and_image_transform(self):
+        self.assertNotIn("imgmsg_to_cv2", self.source)
+        self.assertNotIn("cv2_to_imgmsg", self.source)
+        self.assertNotIn("transform_line_frame", self.source)
 
     def test_never_owns_cmd_vel_or_camera_device(self):
         self.assertNotIn("/cmd_vel", self.source)
