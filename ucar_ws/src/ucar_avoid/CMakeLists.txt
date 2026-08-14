@@ -18,9 +18,6 @@ find_package(catkin REQUIRED COMPONENTS
   image_transport
   sensor_msgs
 )
-# jsoncpp 头文件位于 /usr/include/jsoncpp 子目录；pkg-config 是标准解析方式。
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(JSONCPP REQUIRED jsoncpp)
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
@@ -126,7 +123,6 @@ catkin_package(
 include_directories(
 # include
   ${catkin_INCLUDE_DIRS}
-  ${JSONCPP_INCLUDE_DIRS}
 )
 
 ## Declare a C++ library
@@ -214,7 +210,7 @@ include_directories(
 ## Add folders to be run by python nosetests
 # catkin_add_nosetests(test)
 add_executable(racecar_control src/avoid.cpp)
-target_link_libraries(racecar_control ${catkin_LIBRARIES} ${JSONCPP_LIBRARIES})
+target_link_libraries(racecar_control ${catkin_LIBRARIES})
 catkin_install_python(PROGRAMS
   scripts/vision_node.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}

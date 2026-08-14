@@ -107,6 +107,51 @@ class DecodeVariantsTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             list(decode_variants(np.zeros((8, 8), dtype=np.float32), True))
 
+    def test_scale_one_yields_only_original_size_path(self):
+        image = np.full((40, 40, 3), 100, dtype=np.uint8)
+        variants = list(decode_variants(image, True, decode_scale=1.0))
+        self.assertEqual(4, len(variants))
+        self.assertIs(image, variants[0])
+        self.assertTrue(all(variant.shape[:2] == (40, 40) for variant in variants))
+
+    def test_scale_above_one_adds_bounded_upscale_without_mutating_input(self):
+        image = np.full((40, 40, 3), 100, dtype=np.uint8)
+        before = image.copy()
+        variants = list(decode_variants(image, True, decode_scale=2.0))
+        self.assertEqual(5, len(variants))
+        self.assertIs(image, variants[0])
+        self.assertEqual((80, 80, 3), variants[1].shape)
+        self.assertIsNot(image, variants[1])
+        np.testing.assert_array_equal(before, image)
+
+    def test_scale_applies_before_enhanced_variants(self):
+        image = np.full((20, 20, 3), 100, dtype=np.uint8)
+        variants = list(decode_variants(image, False, decode_scale=1.5))
+        self.assertEqual(2, len(variants))
+        self.assertIs(image, variants[0])
+        self.assertEqual((30, 30, 3), variants[1].shape)
+
+    def test_scale_rejects_non_finite_zero_negative_and_oversized(self):
+        image = np.zeros((8, 8), dtype=np.uint8)
+        for scale in (0.0, -1.0, math.nan, math.inf, 2.01, True):
+            with self.subTest(scale=scale):
+                with self.assertRaises(ValueError):
+                    list(decode_variants(image, False, decode_scale=scale))
+
+    def test_scale_bounds_are_inclusive(self):
+        image = np.zeros((8, 8), dtype=np.uint8)
+        self.assertEqual(2, len(list(decode_variants(image, False, decode_scale=2.0))))
+        self.assertEqual(1, len(list(decode_variants(image, False, decode_scale=1.0))))
+
+    def test_failed_upscale_continues_with_enhanced_paths(self):
+        image = np.full((20, 20, 3), 100, dtype=np.uint8)
+        with patch.object(image_quality.cv2, "resize",
+                          side_effect=RuntimeError("decode error")):
+            variants = list(decode_variants(image, True, decode_scale=2.0))
+        self.assertEqual(4, len(variants))
+        self.assertIs(image, variants[0])
+        self.assertEqual((20, 20), variants[1].shape)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,20 +1,59 @@
 <launch>
   <arg name="image_topic" default="/usb_cam/image_raw"/>
+  <arg name="start_debug_stream" default="false"/>
+  <arg name="debug_host" default="0.0.0.0"/>
+  <arg name="debug_port" default="8080"/>
+  <arg name="metrics_dir" default="$(env HOME)/qr_metrics"/>
+  <arg name="keyframe_dir" default="$(env HOME)/qr_keyframes"/>
+  <arg name="decode_scale" default="1.5"/>
+  <arg name="step_angle_deg" default="45.0"/>
+  <arg name="cruise_angular_speed" default="0.50"/>
+  <arg name="approach_angular_speed" default="0.20"/>
+  <arg name="approach_zone_deg" default="10.0"/>
+  <arg name="yaw_tolerance_deg" default="2.0"/>
+  <arg name="settled_angular_speed" default="0.03"/>
+  <arg name="settled_duration" default="0.20"/>
+  <arg name="scan_window" default="1.0"/>
+  <arg name="offset_angle_deg" default="22.5"/>
+  <arg name="max_passes" default="2"/>
+  <arg name="search_total_timeout" default="60.0"/>
+  <arg name="settling_timeout" default="3.0"/>
+  <arg name="heading_timeout" default="1.0"/>
+  <arg name="camera_timeout" default="1.0"/>
+
   <node pkg="qr_item_search" type="qr_scanner_node.py" name="qr_scanner" output="screen">
     <param name="image_topic" value="$(arg image_topic)"/>
+    <param name="keyframe_dir" value="$(arg keyframe_dir)"/>
+    <param name="decode_scale" value="$(arg decode_scale)"/>
     <param name="connect_timeout" value="1.0"/>
     <param name="read_timeout" value="2.0"/>
     <param name="http_retries" value="1"/>
     <param name="http_worker_count" value="3"/>
   </node>
+
   <node pkg="qr_item_search" type="item_search_controller_node.py" name="item_search_controller" output="screen">
-    <param name="fast_angular_speed" value="0.40"/>
-    <param name="targeted_angular_speed" value="0.20"/>
-    <param name="minimum_effective_speed" value="0.11"/>
-    <param name="fast_sweep_angle" value="6.632251"/>
-    <param name="yaw_tolerance" value="0.035"/>
-    <param name="heading_timeout" value="1.0"/>
-    <param name="camera_timeout" value="1.0"/>
-    <param name="search_total_timeout" value="40.0"/>
+    <param name="metrics_dir" value="$(arg metrics_dir)"/>
+    <param name="step_angle_deg" value="$(arg step_angle_deg)"/>
+    <param name="cruise_angular_speed" value="$(arg cruise_angular_speed)"/>
+    <param name="approach_angular_speed" value="$(arg approach_angular_speed)"/>
+    <param name="approach_zone_deg" value="$(arg approach_zone_deg)"/>
+    <param name="yaw_tolerance_deg" value="$(arg yaw_tolerance_deg)"/>
+    <param name="settled_angular_speed" value="$(arg settled_angular_speed)"/>
+    <param name="settled_duration" value="$(arg settled_duration)"/>
+    <param name="scan_window" value="$(arg scan_window)"/>
+    <param name="offset_angle_deg" value="$(arg offset_angle_deg)"/>
+    <param name="max_passes" value="$(arg max_passes)"/>
+    <param name="search_total_timeout" value="$(arg search_total_timeout)"/>
+    <param name="settling_timeout" value="$(arg settling_timeout)"/>
+    <param name="heading_timeout" value="$(arg heading_timeout)"/>
+    <param name="camera_timeout" value="$(arg camera_timeout)"/>
   </node>
+
+  <group if="$(arg start_debug_stream)">
+    <node pkg="qr_item_search" type="qr_debug_stream_node.py" name="qr_debug_stream" output="screen">
+      <param name="image_topic" value="$(arg image_topic)"/>
+      <param name="host" value="$(arg debug_host)"/>
+      <param name="port" value="$(arg debug_port)"/>
+    </node>
+  </group>
 </launch>

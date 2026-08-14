@@ -36,7 +36,7 @@ class PackageConfigTests(unittest.TestCase):
         )
         self.assertEqual({
             "frame_id": "map",
-            "x": 0.5167081260031493,
+            "x": 0.4167081260031493,
             "y": -3.125171302690142,
             "qz": -0.7044294777312331,
             "qw": 0.7097739857893512,

@@ -23,7 +23,7 @@ class Resolver:
 class IntegrationContractTest(unittest.TestCase):
     def setUp(self):
         self.outputs = Outputs()
-        self.controller = SearchController(self.outputs)
+        self.controller = SearchController(self.outputs, camera_timeout=100.0)
         self.controller.update_yaw(0.0, 0.0)
         self.controller.start(json.dumps({"protocol_version": 1, "task_id": "task",
                                           "search_id": "search", "expected_count": 3}), 0.0)
@@ -60,7 +60,7 @@ class IntegrationContractTest(unittest.TestCase):
         logic = self.logic(["not-a-url"])
         logic.reset_search("task", "search"); logic.set_control(True, False, 0.5)
         logic.submit_frame(object()); logic.process_latest_frame()
-        self.assertEqual("FAST_SWEEP", self.controller.state)
+        self.assertEqual("INITIAL_SCAN", self.controller.state)
         self.assertIn("invalid_url", [event["event"] for event in self.events])
 
 

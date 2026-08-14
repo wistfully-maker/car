@@ -8,10 +8,10 @@ RUNTIME = ROOT / "src" / "line_follow_integration" / "runtime.py"
 
 EXPECTED_SOURCES = {
     "follow_left_v4.py": "8a9471e5917b93bdddd1f0b191e8ace48fe4d6baa8269f68204d4fba23fbbfb3",
-    "follow_right_v4.py": "92fd5098be423bab61c3eb5deb5c202c12adbc6c45bc4638a1af7bf5931a5d73",
-    "follow_mid_v4.py": "736d0666475f25f48f1e11e888a6c40864af95496754ff37f6311fbba3d0b07e",
-    "follow_left_v5.py": "d1edbf433b42181139b295f2fe31d59595ab35f26a2893ba72f6042ff03335ef",
-    "follow_right_v5.py": "95d46a6cd452aa2febbfc222b0d339cdddf66ca492066747afa80478f94bd1ab",
+    "follow_right_v4.py": "afc51bf8b9a6aaaa38dd95f6efcab0cc68b0e18402f83f54b880b2f4eabfe454",
+    "follow_mid_v4.py": "7a830b931b4bedd28c7aca67e09093d1557053061cd7b9de073e329fb3b902f5",
+    "follow_left_v5.py": "8090854794f84d9ab8bfcb4deaac9c0be536dd1276385d740efc6b524f27cfb4",
+    "follow_right_v5.py": "31f34715fb48bf9759f10ecebf6e068e41156a2d6db7a8de3182f6e1385e4a03",
     "yolo_server.py": "9d7010328a636742c1c60012cd6c4f0c78ae3cfc2ab4cf57c815ec88de4e9a51",
 }
 
@@ -26,7 +26,8 @@ class SourceSnapshotTests(unittest.TestCase):
             with self.subTest(name=name):
                 path = SCRIPTS / name
                 self.assertTrue(path.is_file(), name)
-                actual = hashlib.sha256(path.read_bytes()).hexdigest()
+                normalized = path.read_bytes().replace(b"\r\n", b"\n")
+                actual = hashlib.sha256(normalized).hexdigest()
                 self.assertEqual(digest, actual)
 
     def test_source_snapshot_file_records_all_hashes(self):
@@ -76,16 +77,13 @@ class V5MinimalIntegrationTests(unittest.TestCase):
         self.assertIn('"right_turn": "follow_right_v5.py"', runtime)
         self.assertIn('"straight": "follow_mid_v4.py"', runtime)
 
-    def test_v5_rear_line_search_is_slow_and_terminal_stop_is_ordered(self):
+    def test_vehicle_v5_stop_search_and_terminal_stop_are_locked(self):
         for name in self.V5_SCRIPTS:
             with self.subTest(name=name):
                 source = _read_script(name)
-                self.assertIn("self.rear_search_speed = 0.15", source)
-                self.assertIn(
-                    "if self.stop_front_found:\n"
-                    "                    t.linear.x = min(t.linear.x, self.rear_search_speed)",
-                    source,
-                )
+                self.assertIn("self.stop_fps_thr = 33", source)
+                self.assertIn("t.linear.x = min(t.linear.x, 0.48)", source)
+                self.assertNotIn("self.rear_search_speed", source)
                 parking_index = source.index("if self.detect_stop_line(frame):")
                 done_index = source.index(
                     'with open("/tmp/stop_done.txt","w")', parking_index

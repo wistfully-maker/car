@@ -5,6 +5,18 @@ def pyzbar_backend(image):
     return [result.data.decode("utf-8").strip() for result in results]
 
 
+def pyzbar_backend_with_rect(image):
+    """Like :func:`pyzbar_backend` but also returns each code's pixel rect.
+
+    Rect values are pyzbar ``Rect`` objects (``x``, ``y``, ``width``,
+    ``height``); they are used only to annotate saved keyframes.
+    """
+    from pyzbar.pyzbar import ZBarSymbol, decode
+
+    results = decode(image, symbols=[ZBarSymbol.QRCODE])
+    return [(result.data.decode("utf-8").strip(), result.rect) for result in results]
+
+
 class UniqueQrDecoder:
     """Return each non-empty QR URL once per search."""
 

@@ -24,26 +24,62 @@ class PackageConfigTest(unittest.TestCase):
         self.scanner = (ROOT / "scripts" / "qr_scanner_node.py").read_text(encoding="utf-8")
         self.controller = (ROOT / "scripts" / "item_search_controller_node.py").read_text(encoding="utf-8")
 
-    def test_launch_has_exact_continuous_search_parameters(self):
+    def test_launch_has_exact_stop_and_scan_parameters(self):
         root = ET.parse(str(ROOT / "launch" / "qr_item_search.launch")).getroot()
-        self.assertEqual({"image_topic": "/usb_cam/image_raw"},
-                         {arg.get("name"): arg.get("default") for arg in root.findall("arg")})
+        args = {arg.get("name"): arg.get("default") for arg in root.findall("arg")}
+        self.assertEqual("/usb_cam/image_raw", args["image_topic"])
+        self.assertEqual("false", args["start_debug_stream"])
+        self.assertEqual("0.0.0.0", args["debug_host"])
+        self.assertEqual("8080", args["debug_port"])
+        self.assertIn("qr_metrics", args["metrics_dir"])
+        self.assertIn("qr_keyframes", args["keyframe_dir"])
+        self.assertEqual("1.5", args["decode_scale"])
+        expected_tuning_args = {
+            "step_angle_deg": "45.0", "cruise_angular_speed": "0.50",
+            "approach_angular_speed": "0.20", "approach_zone_deg": "10.0",
+            "yaw_tolerance_deg": "2.0", "settled_angular_speed": "0.03",
+            "settled_duration": "0.20", "scan_window": "1.0",
+            "offset_angle_deg": "22.5", "max_passes": "2",
+            "search_total_timeout": "60.0", "settling_timeout": "3.0",
+            "heading_timeout": "1.0", "camera_timeout": "1.0",
+        }
+        for name, default in expected_tuning_args.items():
+            self.assertIn(name, args)
+            self.assertEqual(default, args[name])
         nodes = {node.get("type"): node for node in root.findall("node")}
+        self.assertEqual({"qr_scanner_node.py", "item_search_controller_node.py"},
+                         set(nodes))
+        names = [node.get("name") for node in root.findall("node")]
+        self.assertEqual(len(names), len(set(names)))
         scanner = {p.get("name"): p.get("value") for p in nodes["qr_scanner_node.py"].findall("param")}
         controller = {p.get("name"): p.get("value") for p in nodes["item_search_controller_node.py"].findall("param")}
-        self.assertEqual({"image_topic": "$(arg image_topic)", "connect_timeout": "1.0",
-                          "read_timeout": "2.0", "http_retries": "1", "http_worker_count": "3"}, scanner)
-        self.assertEqual({"fast_angular_speed": "0.40", "targeted_angular_speed": "0.20",
-                          "minimum_effective_speed": "0.11", "fast_sweep_angle": "6.632251",
-                          "yaw_tolerance": "0.035", "heading_timeout": "1.0",
-                          "camera_timeout": "1.0", "search_total_timeout": "40.0"}, controller)
+        self.assertEqual({"image_topic": "$(arg image_topic)", "keyframe_dir": "$(arg keyframe_dir)",
+                          "decode_scale": "$(arg decode_scale)", "connect_timeout": "1.0", "read_timeout": "2.0",
+                          "http_retries": "1", "http_worker_count": "3"}, scanner)
+        expected_controller = {"metrics_dir": "$(arg metrics_dir)"}
+        expected_controller.update({name: "$(arg %s)" % name
+                                    for name in expected_tuning_args})
+        self.assertEqual(expected_controller, controller)
+        groups = root.findall("group")
+        self.assertEqual(1, len(groups))
+        self.assertEqual("$(arg start_debug_stream)", groups[0].get("if"))
+        debug = groups[0].findall("node")
+        self.assertEqual(1, len(debug))
+        self.assertEqual("qr_debug_stream_node.py", debug[0].get("type"))
+        self.assertEqual("qr_debug_stream", debug[0].get("name"))
+
+    def test_launch_removed_continuous_search_parameters(self):
+        text = (ROOT / "launch" / "qr_item_search.launch").read_text(encoding="utf-8")
+        for old in ("fast_sweep_angle", "fast_angular_speed", "targeted_angular_speed",
+                    "minimum_effective_speed", 'yaw_tolerance"'):
+            self.assertNotIn(old, text)
 
     def test_package_runtime_dependencies_include_opencv(self):
         root = ET.parse(str(ROOT / "package.xml")).getroot()
         deps = {e.text.strip() for tag in ("depend", "exec_depend") for e in root.findall(tag)}
         self.assertTrue({"tf", "python3-pyzbar", "python3-requests", "python3-opencv",
                          "python3-numpy"}.issubset(deps))
-        self.assertIn("Continuous four-edge", root.find("description").text)
+        self.assertIn("stop-and-scan", root.find("description").text)
 
     def test_nodes_use_only_new_string_protocol_topics(self):
         combined = self.scanner + self.controller
@@ -75,6 +111,33 @@ class PackageConfigTest(unittest.TestCase):
         for topic in ("/qr_item_search/start", "/qr_item_search/stop", "/qr_item_search/scanner_event"):
             self.assertEqual("String", self._topic_call(tree, "Subscriber", topic).args[1].id)
 
+    def test_controller_node_maps_stop_and_scan_parameters(self):
+        defaults = {}
+        for node in ast.walk(ast.parse(self.controller)):
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "get_param" and len(node.args) == 2
+                    and isinstance(node.args[0], (ast.Str, ast.Constant))):
+                defaults[_literal(node.args[0])] = _literal(node.args[1])
+        expected = {
+            "~step_angle_deg": 45.0, "~cruise_angular_speed": 0.50,
+            "~approach_angular_speed": 0.20, "~approach_zone_deg": 10.0,
+            "~yaw_tolerance_deg": 2.0, "~settled_angular_speed": 0.03,
+            "~settled_duration": 0.20, "~scan_window": 0.60,
+            "~offset_angle_deg": 22.5, "~max_passes": 2,
+            "~search_total_timeout": 60.0, "~settling_timeout": 3.0,
+            "~heading_timeout": 1.0, "~camera_timeout": 1.0,
+        }
+        for name, value in expected.items():
+            with self.subTest(name=name):
+                self.assertEqual(value, defaults[name])
+        for old in ("fast_angular_speed", "targeted_angular_speed",
+                    "minimum_effective_speed", "fast_sweep_angle"):
+            self.assertNotIn(old, self.controller)
+
+    def test_odom_callback_passes_angular_speed_from_twist(self):
+        self.assertIn("message.twist.twist.angular.z", self.controller)
+        self.assertIn("angular_speed=angular_speed", self.controller)
+
     def test_controller_callback_fault_stops_future_callbacks_and_shuts_down(self):
         tree = ast.parse(self.controller)
         safe = next(node for node in tree.body if isinstance(node, ast.FunctionDef)
@@ -103,6 +166,12 @@ class PackageConfigTest(unittest.TestCase):
         self.assertIs(True, next(_literal(k.value) for k in publisher.keywords if k.arg == "latch"))
         self.assertEqual("String", self._topic_call(tree, "Subscriber", "/qr_item_search/scanner_control").args[1].id)
 
+    def test_scanner_publishes_throttled_frame_seen_heartbeat(self):
+        self.assertIn('"event": "frame_seen"', self.scanner)
+        self.assertIn("time.monotonic()", self.scanner)
+        self.assertIn("frame_seen_interval", self.scanner)
+        self.assertIn("logic.submit_frame(image, stamp=stamp)", self.scanner)
+
     def test_scanner_publishes_uuid_session_handshake(self):
         tree = ast.parse(self.scanner)
         self.assertTrue(any(isinstance(node, ast.Import) and any(alias.name == "uuid" for alias in node.names)
@@ -120,7 +189,13 @@ class PackageConfigTest(unittest.TestCase):
         self.assertEqual("UniqueQrDecoder", keywords["decoder"].func.id)
         self.assertEqual("ItemResolver", keywords["resolver"].func.id)
         self.assertEqual("measure_quality", keywords["quality_function"].id)
-        self.assertEqual("decode_variants", keywords["variant_function"].id)
+        self.assertIsInstance(keywords["variant_function"], ast.Lambda)
+        variants_call = next(node for node in ast.walk(keywords["variant_function"])
+                             if isinstance(node, ast.Call)
+                             and isinstance(node.func, ast.Name)
+                             and node.func.id == "decode_variants")
+        variant_keywords = {item.arg: item.value for item in variants_call.keywords}
+        self.assertIsInstance(variant_keywords["decode_scale"], ast.Name)
         self.assertEqual("worker_count", keywords["worker_count"].id)
         self.assertEqual(3, _literal(keywords["expected_count"]))
         defaults = {}
@@ -133,6 +208,16 @@ class PackageConfigTest(unittest.TestCase):
         self.assertEqual(2.0, defaults["~read_timeout"])
         self.assertEqual(1, defaults["~http_retries"])
         self.assertEqual(3, defaults["~http_worker_count"])
+        self.assertEqual(1.5, defaults["~decode_scale"])
+
+    def test_launch_owns_no_camera_and_scales_only_inside_scanner(self):
+        text = (ROOT / "launch" / "qr_item_search.launch").read_text(encoding="utf-8")
+        self.assertNotIn('pkg="usb_cam"', text)
+        for camera_field in ("image_width", "image_height", "fps", "pixel_format",
+                             "video_device"):
+            self.assertNotIn('name="%s"' % camera_field, text)
+        self.assertIn('decode_scale', text)
+        self.assertNotIn("decode_scale", self.controller)
 
     def test_scanner_thread_worker_shutdown_and_stop_recheck_structure(self):
         tree = ast.parse(self.scanner)
@@ -159,6 +244,7 @@ class PackageConfigTest(unittest.TestCase):
     def test_cmake_still_installs_both_scripts_and_launch(self):
         cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
         for value in ("scripts/qr_scanner_node.py", "scripts/item_search_controller_node.py",
+                      "scripts/qr_debug_stream_node.py",
                       "install(DIRECTORY launch/"):
             self.assertIn(value, cmake)
 

@@ -59,8 +59,7 @@ class FollowLeftV5:
         # 停车
         self.stop_flag = False
         self.stop_front_found = False; self.stop_fps = 0
-        self.stop_fps_thr = 37; self.stop_voice = False
-        self.rear_search_speed = 0.15
+        self.stop_fps_thr = 33; self.stop_voice = False
         self.stop_rs = 24; self.stop_re = 119
         self.stop_f_thr = 60; self.stop_b_thr = 60
 
@@ -216,8 +215,6 @@ class FollowLeftV5:
                     with open("/tmp/stop_done.txt","w") as f: f.write("parked")
                     return
                 t = self._pid(err, True); t.linear.x = min(t.linear.x, 0.48)
-                if self.stop_front_found:
-                    t.linear.x = min(t.linear.x, self.rear_search_speed)
                 self.cmd_pub.publish(t)
                 if self.fc%30==0: rospy.loginfo("🔍 找停车线中...")
                 return

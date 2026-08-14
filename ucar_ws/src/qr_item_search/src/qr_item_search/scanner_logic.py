@@ -19,7 +19,8 @@ class ScannerJob:
 
 class ScannerLogic:
     def __init__(self, decoder, resolver, event_publisher, quality_function, variant_function,
-                 jobs=None, worker_count=3, expected_count=3, warning=None, error_handler=None):
+                 jobs=None, worker_count=3, expected_count=3, warning=None, error_handler=None,
+                 keyframe_sink=None, failed_station_sink=None):
         if type(worker_count) is not int or worker_count < 1:
             raise ValueError("worker_count must be a positive integer")
         if type(expected_count) is not int or expected_count < 1:
@@ -30,6 +31,8 @@ class ScannerLogic:
         self._worker_count = worker_count
         self._expected_count = expected_count
         self._warning, self._error_handler = warning or (lambda _: None), error_handler or (lambda _: None)
+        self._keyframe_sink = keyframe_sink or (lambda *_: None)
+        self._failed_station_sink = failed_station_sink or (lambda *_: None)
         self._lock, self._decoder_lock = threading.Lock(), threading.Lock()
         self._generation = 0
         self._task_id = self._search_id = None
@@ -40,6 +43,9 @@ class ScannerLogic:
         self._reserved_urls = set()
         self._retry_requested = False
         self._pending_decoder_reset = 0
+        self._window_new_urls = False
+        self._window_last_frame = None
+        self._window_meta = None
 
     @property
     def jobs(self): return self._jobs
@@ -57,15 +63,46 @@ class ScannerLogic:
             self._ready_gates = {}
             self._retry_requested = False
             self._pending_decoder_reset = self._generation
+            self._window_new_urls = False
+            self._window_last_frame = None
+            self._window_meta = None
             self._drain_jobs_locked()
 
-    def set_control(self, enabled, enhanced, detected_yaw, retry_failed=False):
+    def set_control(self, enabled, enhanced, detected_yaw, retry_failed=False,
+                    capture_id=None, capture_after=None, pass_index=None, station_index=None):
         if type(enabled) is not bool or type(enhanced) is not bool or type(retry_failed) is not bool:
             raise ValueError("control flags must be bool")
         if isinstance(detected_yaw, bool) or not isinstance(detected_yaw, (int, float)) or not math.isfinite(detected_yaw):
             raise ValueError("detected_yaw must be finite")
+        if capture_id is not None and (type(capture_id) is not int or capture_id < 1):
+            raise ValueError("capture_id must be a positive integer")
+        if capture_after is not None and (isinstance(capture_after, bool)
+                or not isinstance(capture_after, (int, float)) or not math.isfinite(capture_after)):
+            raise ValueError("capture_after must be finite")
+        if pass_index is not None and (type(pass_index) is not int or pass_index < 0):
+            raise ValueError("pass_index must be a non-negative integer")
+        if station_index is not None and (type(station_index) is not int or station_index < 0):
+            raise ValueError("station_index must be a non-negative integer")
         retry_jobs = []
+        failed_save = None
+        new_meta = (pass_index, station_index)
         with self._lock:
+            if enabled:
+                if self._window_meta is not None and new_meta != self._window_meta:
+                    if not self._window_new_urls and self._window_last_frame is not None:
+                        failed_save = (self._window_last_frame, self._task_id,
+                                       self._search_id, self._window_meta)
+                    self._window_new_urls = False
+                    self._window_last_frame = None
+                self._window_meta = new_meta
+            else:
+                if self._window_meta is not None and not self._window_new_urls \
+                        and self._window_last_frame is not None:
+                    failed_save = (self._window_last_frame, self._task_id,
+                                   self._search_id, self._window_meta)
+                self._window_new_urls = False
+                self._window_last_frame = None
+                self._window_meta = None
             self._enabled, self._enhanced, self._yaw = enabled, enhanced, float(detected_yaw)
             if not enabled:
                 self._latest = None
@@ -75,13 +112,21 @@ class ScannerLogic:
                 for url, job in self._failed.items():
                     if url not in self._retried:
                         self._retried.add(url); retry_jobs.append(job)
+        if failed_save is not None:
+            self._call_failed_sink(*failed_save)
         for job in retry_jobs: self._requeue_retry(job)
         self._flush_deferred()
 
-    def submit_frame(self, frame):
+    def submit_frame(self, frame, stamp=None):
+        if stamp is not None and (isinstance(stamp, bool)
+                or not isinstance(stamp, (int, float)) or not math.isfinite(stamp)):
+            raise ValueError("stamp must be finite")
         with self._lock:
             if not self._enabled or self._task_id is None: return False
-            self._latest = (frame, self._generation, self._task_id, self._search_id, self._enhanced, self._yaw)
+            self._latest = (frame, self._generation, self._task_id, self._search_id,
+                            self._enhanced, self._yaw,
+                            None if stamp is None else float(stamp))
+            self._window_last_frame = frame
             return True
 
     def process_latest_frame(self):
@@ -89,7 +134,7 @@ class ScannerLogic:
         with self._lock:
             snapshot, self._latest = self._latest, None
         if snapshot is None: return False
-        frame, gen, task, search, enhanced, yaw = snapshot
+        frame, gen, task, search, enhanced, yaw, stamp = snapshot
         if not self._current(gen, task, search): return False
         try: quality = self._quality(frame)
         except Exception as error: self._report_error(error); return False
@@ -103,7 +148,9 @@ class ScannerLogic:
                     try: variant_valid.append(validate_url(raw))
                     except InvalidQrUrl as error: invalids.append((raw, str(error)))
                 if variant_valid:
-                    valid_urls.extend(variant_valid); break
+                    valid_urls.extend(variant_valid)
+                    if len(set(valid_urls)) >= self._expected_count:
+                        break
         except Exception as error: self._report_error(error); return False
         if not self._current(gen, task, search): return False
         seen = set()
@@ -113,9 +160,23 @@ class ScannerLogic:
             if url not in seen:
                 seen.add(url); self._enqueue_or_defer(gen, task, search, url, yaw)
         fields = self._quality_fields(quality)
+        if seen:
+            with self._lock:
+                self._window_new_urls = True
+                meta = self._window_meta
+            try:
+                self._keyframe_sink(frame, sorted(seen), fields, yaw, task, search, meta)
+            except Exception as error:
+                self._report_error(error)
         fields.update(detected_yaw=yaw, decoded=bool(seen))
         self._publish_current(self._event("quality", task, search, **fields), gen, task, search)
         return True
+
+    def _call_failed_sink(self, frame, task, search, meta):
+        try:
+            self._failed_station_sink(frame, task, search, meta)
+        except Exception as error:
+            self._report_error(error)
 
     def work_once(self, block=True, timeout=None):
         try: job = self._jobs.get(block=block, timeout=timeout)

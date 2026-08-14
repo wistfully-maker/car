@@ -3,7 +3,7 @@ import types
 import unittest
 from unittest.mock import Mock, patch
 
-from qr_item_search.qr_decode import UniqueQrDecoder, pyzbar_backend
+from qr_item_search.qr_decode import UniqueQrDecoder, pyzbar_backend, pyzbar_backend_with_rect
 
 
 class PyzbarBackendTest(unittest.TestCase):
@@ -32,6 +32,29 @@ class PyzbarBackendTest(unittest.TestCase):
 
         self.assertEqual(["https://example.test/香蕉"], result)
         pyzbar_module.decode.assert_called_once_with(image, symbols=[qr_code])
+
+    def test_decodes_urls_with_optional_rects(self):
+        pyzbar_package = types.ModuleType("pyzbar")
+        pyzbar_module = types.ModuleType("pyzbar.pyzbar")
+        qr_code = object()
+        rect = types.SimpleNamespace(x=1, y=2, width=30, height=30)
+        pyzbar_module.ZBarSymbol = types.SimpleNamespace(QRCODE=qr_code)
+        pyzbar_module.decode = Mock(
+            return_value=[
+                types.SimpleNamespace(data=b"https://a.test", rect=rect),
+                types.SimpleNamespace(data=b"https://b.test", rect=rect),
+            ]
+        )
+        image = object()
+
+        with patch.dict(
+            sys.modules,
+            {"pyzbar": pyzbar_package, "pyzbar.pyzbar": pyzbar_module},
+        ):
+            result = pyzbar_backend_with_rect(image)
+
+        self.assertEqual(["https://a.test", "https://b.test"], [url for url, _ in result])
+        self.assertEqual(rect, result[0][1])
 
 
 class UniqueQrDecoderTest(unittest.TestCase):

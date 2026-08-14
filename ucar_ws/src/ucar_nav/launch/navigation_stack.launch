@@ -3,6 +3,10 @@
   <arg name="map_file" default="$(find ucar_nav)/maps/map.yaml"/>
   <arg name="navigation_profile" default="navfn_teb_corner"/>
   <arg name="enable_lateral_mode_controller" default="true"/>
+  <!-- move_base 输出隔离点：delivery_standalone.launch 传
+       /cmd_vel/delivery_navigation，由 ucar_delivery 本地 velocity mux
+       选通为最终 /cmd_vel；默认 /cmd_vel 保持原行为。 -->
+  <arg name="cmd_vel_topic" default="/cmd_vel"/>
 
   <group if="$(eval arg('navigation_profile') == 'navfn_teb_corner')">
     <param name="/move_base/base_global_planner" value="navfn/NavfnROS"/>
@@ -59,5 +63,7 @@
   <node name="amcl" pkg="amcl" type="amcl" output="screen">
     <rosparam command="load" file="$(find ucar_nav)/config/amcl/amcl_omni.yaml"/>
   </node>
-  <node name="move_base" pkg="move_base" type="move_base" output="screen" respawn="false"/>
+  <node name="move_base" pkg="move_base" type="move_base" output="screen" respawn="false">
+    <remap from="/cmd_vel" to="$(arg cmd_vel_topic)"/>
+  </node>
 </launch>

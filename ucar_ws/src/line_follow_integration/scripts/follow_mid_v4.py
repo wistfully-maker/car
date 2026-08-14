@@ -65,7 +65,7 @@ class FollowMidV4:
         # 第二条白线(停车)
         self.stop_flag = False
         self.stop_front_found = False; self.stop_fps = 0
-        self.stop_fps_thr = 36; self.stop_voice = False
+        self.stop_fps_thr = 33; self.stop_voice = False
         self.stop_front_time = None  # 前白线触发时间(用于超时重置)
         self.stop_reset_timeout = 3.0  # 3秒内无后线就重置
         self.stop_reset_count = 0  # 只重置一次

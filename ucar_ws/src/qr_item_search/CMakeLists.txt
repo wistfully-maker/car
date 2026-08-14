@@ -17,6 +17,7 @@ catkin_package()
 catkin_install_python(PROGRAMS
   scripts/qr_scanner_node.py
   scripts/item_search_controller_node.py
+  scripts/qr_debug_stream_node.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

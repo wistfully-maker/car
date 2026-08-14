@@ -1,34 +1,63 @@
-# QR 物品连续搜索：运行、调试与联调手册
+# QR 持续扫码搜索：运行、调试与联调手册
 
-`qr_item_search` 是 U-CAR-02 上的 ROS 1 Noetic 包。小车到达物品领取区观察点后，包控制底盘原地连续旋转，通过前置相机识别场地四边中随机放置的三个二维码，访问二维码 URL，从返回 JSON 中取得三个物品名称，并发布统一结果。
+`qr_item_search` 是 U-CAR-02 上的 ROS 1 Noetic 包。小车到达物品领取区观察点后，以航向闭环快速转到固定观察角（默认每 45° 一站），每站确认停稳后至少驻留 `scan_window` 秒；**从任务开始到进入终态前，二维码解码持续运行**——转向、停稳、驻留期间都接收并解码最新相机帧，识别到新二维码立即异步发起 HTTP 请求，底盘继续转动，直到取得三个不同二维码并全部解析出物品名称。
 
-> 当前包只实现“旋转搜索 + 二维码解码 + HTTP 解析 + 结果发布”。语音理解、任务编排器、LLM 分类、语音播报、抓取和下一目标点导航尚未包含在本包中。
+> 当前包只实现“定点停靠 + 持续扫码 + HTTP 解析 + 结果发布”。语音理解、任务编排器、LLM 分类、语音播报、抓取和下一目标点导航尚未包含在本包中。
 
-## 1. 当前版本的完成条件
+## 1. 架构与状态机
 
-比赛要求依次读取三个二维码的全部内容，因此当前搜索只有取得三个不同 URL、且三个 URL 都成功返回有效物品名称时，才发布 `status: "complete"`。识别一个或两个二维码不会提前结束。
-
-二维码 URL 的 HTTP 响应必须是 JSON：
-
-```json
-{
-  "code": 200,
-  "result": "香蕉"
-}
+```text
+IDLE
+  -> INITIAL_SCAN
+  -> TURNING
+  -> SETTLING
+  -> SCANNING       此状态表示停稳驻留，不再表示唯一允许扫码的窗口
+  -> TURNING
+  -> OFFSET_PASS
+  -> WAITING_HTTP
+  -> COMPLETE / NOT_FOUND / ERROR
 ```
 
-- `code` 必须是整数 `200`。
-- `result` 必须是非空字符串。
-- 手机扫码打不开不必然说明二维码无法解码；但小车必须能够联网访问该 URL，才能得到物品名称。
+- 第一站是启动朝向 `0°`，无需先转动；第一圈观察角 `0°、45°、…、315°`。
+- 第二圈（偏移圈）观察角 `22.5°、67.5°、…、337.5°`，只运行到补齐三个 URL 或第二圈结束。
+- 到达目标角度容差后发布零速度进入 `SETTLING`；里程计角速度连续低于阈值满 `settled_duration` 后才进入 `SCANNING` 驻留。
+- **扫码使能规则**：`IDLE/COMPLETE/NOT_FOUND/ERROR/STOPPED` 时关闭；从任务进入 `INITIAL_SCAN` 起至任务进入终态前一直开启，不随 `TURNING/SETTLING/SCANNING` 开关。
+- **持续扫码**：解码线程忙时只保留最新帧（无帧积压），URL 在转向途中识别同样有效；慢解码跨过站点边界只要仍属同一搜索任务（同一 `task_id/search_id`）结果照常接受；上一搜索任务的慢结果仍会被 generation/identity 丢弃。
+- **驻留**：`scan_window` 是每站最短稳定驻留时间，不再控制扫码开关。驻留期间识别到新 URL 不提前结束本站，默认驻留满后前往下一站；第三个不同 URL 例外——立即发布零速度并进入 `WAITING_HTTP`。
+- **HTTP 并行**：识别到新 URL 立即发布 `detected` 并交给 HTTP worker，底盘继续转动；绝不原地等待网络返回。
+- `WAITING_HTTP`：三个 URL 已取得后停车等待，全部解析成功才发布 `complete`；最终仍失败发布 `not_found` 并给出原因，不把部分结果伪装成完成。
+- 任意停止、超时、异常、ROS shutdown 都会先发布零速度，再关闭扫码。
 
-搜索流程：
+## 2. 目录结构
 
-1. `FAST_SWEEP`：默认以 `0.40 rad/s` 连续旋转约 380°，边转边识别。
-2. `WAITING_HTTP`：三个 URL 都发现后停车，等待并发 HTTP 请求完成。
-3. `TARGETED_RESCAN`：对未覆盖、过曝、模糊或解析失败的方向低速补扫。
-4. 最终进入 `COMPLETE`、`NOT_FOUND`、`ERROR` 或 `STOPPED`，并保持零角速度。
+```text
+launch/qr_item_search.launch          一键启动（scanner + controller，可选调试流）
+scripts/qr_scanner_node.py            USB 相机订阅、解码、HTTP、关键帧、frame_seen 心跳
+scripts/item_search_controller_node.py 航向控制状态机、协议、指标
+scripts/qr_debug_stream_node.py       可选浏览器实时画面（默认关闭）
+src/qr_item_search/
+  search_state.py                     状态机
+  scan_schedule.py                    角度序列
+  yaw_control.py                      分档转向命令
+  settling.py                         停稳判定
+  controller_logic.py                 控制器核心（纯逻辑，可本地测试）
+  scanner_logic.py                    扫码核心（纯逻辑，可本地测试）
+  qr_decode.py                        pyzbar/ZBar 解码
+  qr_payload.py                       URL 校验与 HTTP JSON 解析
+  protocol.py                         protocol v1 消息校验
+  image_quality.py                    画面质量与解码变体（含 decode_scale）
+  keyframes.py                        关键帧异步保存
+  run_metrics.py                      结构化指标 JSONL 写入
+  debug_stream.py                     MJPEG HTTP 服务器与叠加层
+```
 
-## 2. 安全前提
+## 3. 相机所有权与分辨率
+
+- **相机由外部公共节点启动**（例如 `rosrun usb_cam usb_cam_node ...`），QR launch 不启动、不配置、不重配摄像头，只订阅已有 `/usb_cam/image_raw`。
+- 相机输入分辨率与格式由外部相机节点决定；小车现有 `car_server/ucar_camera.launch` 默认为 **640×480 MJPEG**。QR 节点内部的 `decode_scale` 只是解码预处理（软件放大），**不是物理分辨率**；软件放大不增加真实采样细节，只可能改善部分解码器的采样行为。
+- 调试流始终显示相机原始画面（可叠加状态文字），不伪装成分辨率提升。
+
+## 4. 安全前提
 
 启动完整搜索会向 `/cmd_vel` 发布角速度，小车会原地旋转。运行前必须：
 
@@ -38,12 +67,12 @@
 - 先检查 `/odom` 和 `/usb_cam/image_raw` 持续有数据。
 - 第一次调试先执行“Scanner-only 无运动测试”，再执行带底盘运动的完整搜索。
 
-## 3. 连接、编译和环境加载
+## 5. 连接、编译和环境加载
 
 从电脑连接小车：
 
 ```bash
-ssh ucar@172.20.10.4
+ssh ucar@192.168.1.109
 ```
 
 首次部署、源码更新后或编译产物不存在时执行：
@@ -62,14 +91,14 @@ source /opt/ros/noetic/setup.bash
 source ~/ucar_ws/devel/setup.bash
 ```
 
-## 4. 一键运行 QR 包
+## 6. 一键运行
 
 这里的“一键”是指底盘驱动、相机和 ROS Master 已经启动后，用一个 launch 同时启动本包的 scanner 与 controller：
 
 ```bash
 source /opt/ros/noetic/setup.bash
 source ~/ucar_ws/devel/setup.bash
-  roslaunch qr_item_search qr_item_search.launch image_topic:=/usb_cam/image_raw
+roslaunch qr_item_search qr_item_search.launch image_topic:=/usb_cam/image_raw
 ```
 
 该 launch 启动：
@@ -77,9 +106,9 @@ source ~/ucar_ws/devel/setup.bash
 - `/qr_scanner`
 - `/item_search_controller`
 
-它不会自动启动底盘驱动和 USB 相机。执行 launch 后节点处于 `IDLE`，还不会旋转；收到 `/qr_item_search/start` 后才开始搜索。
+它不会自动启动底盘驱动和 USB 相机。执行 launch 后节点处于 `IDLE`，收到 `/qr_item_search/start` 后才开始搜索。正式比赛默认不启动调试流（`start_debug_stream:=false`）。
 
-## 5. 从零开始分步运行
+## 7. 从零开始分步运行
 
 以下阻塞命令必须分别放在独立 SSH 终端。
 
@@ -100,8 +129,10 @@ rosrun usb_cam usb_cam_node \
   _video_device:=/dev/video0 \
   _image_width:=640 \
   _image_height:=480 \
-  _pixel_format:=yuyv
+  _pixel_format:=mjpeg
 ```
+
+以上参数与小车当前 `car_server/launch/ucar_camera.launch` 的默认图像规格一致；若公共相机 launch 已经启动，不要重复运行此命令。
 
 ### 终端 C：QR scanner
 
@@ -121,9 +152,37 @@ rosrun qr_item_search item_search_controller_node.py
 
 分步运行适合定位某个节点的问题；正常使用优先采用上一节的 launch。
 
-## 6. 启动一次搜索
+## 8. Windows 浏览器实时画面（调试用）
 
-### 6.1 运行前检查
+调试流是独立的旁路节点，默认关闭，不参与正式搜索，也绝不重新打开摄像头（只订阅相机已有的话题）。
+
+一键启动时开启：
+
+```bash
+roslaunch qr_item_search qr_item_search.launch \
+  start_debug_stream:=true \
+  debug_host:=0.0.0.0 \
+  debug_port:=8080
+```
+
+在 Windows 浏览器打开：
+
+- `http://<小车IP>:8080/`：实时画面，叠加状态、相对/目标航向、停稳标志、已识别数量（`x/3`）与图像质量。
+- `http://<小车IP>:8080/snapshot.jpg`：当前帧单张 JPEG。
+- `http://<小车IP>:8080/stream.mjpg`：MJPEG 视频流。
+
+分步启动调试流：
+
+```bash
+rosrun qr_item_search qr_debug_stream_node.py \
+  _image_topic:=/usb_cam/image_raw _host:=0.0.0.0 _port:=8080
+```
+
+调试流基于 Python 标准库 HTTP server，不依赖 Flask；帧率默认限制 10 fps（`~max_fps`），编码质量默认 80（`~jpeg_quality`）。
+
+## 9. 启动一次搜索
+
+### 9.1 运行前检查
 
 ```bash
 rostopic hz /odom
@@ -132,9 +191,9 @@ rosnode list
 rostopic info /cmd_vel
 ```
 
-`/odom` 和图像话题应持续输出。`rosnode list` 应包含 QR 两个节点。检查 `/cmd_vel` 时要确认不存在非预期控制节点。
+`/odom` 和图像话题应持续输出。检查 `/cmd_vel` 时确认不存在非预期控制节点。
 
-### 6.2 手动发送开始信号
+### 9.2 手动发送开始信号
 
 ```bash
 rostopic pub -1 /qr_item_search/start std_msgs/String \
@@ -149,24 +208,12 @@ rostopic pub -1 /qr_item_search/start std_msgs/String \
 - 重复发送同一个 `search_id` 不会启动第二次旋转。
 - 搜索失败或 scanner 重启后再次尝试，必须换新的 `search_id`。
 
-### 6.3 观察状态和结果
-
-在其他终端运行：
+### 9.3 观察状态和结果
 
 ```bash
 rostopic echo /qr_item_search/state
-```
-
-```bash
 rostopic echo /qr_item_search/result
-```
-
-```bash
 rostopic echo /cmd_vel
-```
-
-```bash
-rqt_image_view /usb_cam/image_raw
 ```
 
 结果状态含义：
@@ -175,13 +222,13 @@ rqt_image_view /usb_cam/image_raw
 |---|---|---|
 | `searching` | 已接受任务，正在搜索 | 等待最终结果 |
 | `complete` | 三个物品都已解析 | 才能请求 LLM 分类 |
-| `not_found` | 超时或补扫后仍不足三个 | 不调用 LLM，报告失败或生成新搜索 |
-| `error` | 相机、航向、协议或内部安全错误 | 停止流程，排查后用新 `search_id` 重试 |
+| `not_found` | 超时或两圈后仍不足三个 | 不调用 LLM，报告失败或生成新搜索 |
+| `error` | 相机、航向、停稳、协议或内部安全错误 | 停止流程，排查后用新 `search_id` 重试 |
 | `stopped` | 收到人工或上层停止指令 | 等待新任务 |
 
-## 7. 怎么停止，以及是否需要手动关闭节点
+## 10. 怎么停止，以及是否需要手动关闭节点
 
-### 7.1 只停止当前搜索
+### 10.1 只停止当前搜索
 
 发送与当前任务匹配的 `task_id` 和 `search_id`：
 
@@ -190,14 +237,14 @@ rostopic pub -1 /qr_item_search/stop std_msgs/String \
 "data: '{\"protocol_version\":1,\"task_id\":\"task-test-001\",\"search_id\":\"search-test-001\",\"reason\":\"operator_stop\"}'"
 ```
 
-这会停车并结束当前搜索，但不会关闭 ROS 节点。节点会继续运行并等待下一次 start。
+这会停车并结束当前搜索，但不会关闭 ROS 节点。
 
-### 7.2 搜索正常结束后要不要关闭节点
+### 10.2 搜索正常结束后要不要关闭节点
 
-- 连续进行多次任务：不需要关闭；收到 `complete/not_found/error/stopped` 后 controller 已发布零速度，可保留节点等待下一次任务。
+- 连续进行多次任务：不需要关闭；收到终态后 controller 已发布零速度，可保留节点等待下一次任务。
 - 本轮调试结束、准备关机或移动小车：需要关闭本包、相机和底盘节点。
 
-### 7.3 正常关闭
+### 10.3 正常关闭
 
 1. 若搜索仍在进行，先发送 stop。
 2. 在运行 `roslaunch qr_item_search ...` 的终端按 `Ctrl+C`。
@@ -205,12 +252,12 @@ rostopic pub -1 /qr_item_search/stop std_msgs/String \
 4. 确认 QR 节点已消失：
 
 ```bash
-rosnode list | grep -E 'qr_scanner|item_search_controller'
+rosnode list | grep -E 'qr_scanner|item_search_controller|qr_debug_stream'
 ```
 
 无输出表示 QR 节点已关闭。
 
-### 7.4 找不到原终端时关闭
+### 10.4 找不到原终端时关闭
 
 先停止当前搜索，再执行：
 
@@ -218,19 +265,13 @@ rosnode list | grep -E 'qr_scanner|item_search_controller'
 rosnode kill /qr_scanner /item_search_controller
 ```
 
-然后按实际节点名关闭相机和底盘。关机前再次检查：
+调试流节点按实际节点名一并关闭。`rosnode kill` 是异常收尾手段，正常情况优先在 launch 终端按 `Ctrl+C`，这样 shutdown 回调能够发布零速度并清理线程。
 
-```bash
-rosnode list
-```
+### 10.5 紧急情况
 
-`rosnode kill` 是异常收尾手段，正常情况优先在 launch 终端按 `Ctrl+C`，这样 shutdown 回调能够发布零速度并清理线程。
+人员或物体进入旋转范围时，优先使用实体急停/电源开关，不要只依赖网络命令。
 
-### 7.5 紧急情况
-
-人员或物体进入旋转范围时，优先使用实体急停/电源开关，不要只依赖网络命令。安全后再关闭 ROS 节点并排查原因。
-
-## 8. Scanner-only 无运动测试
+## 11. Scanner-only 无运动测试
 
 此模式只测试相机、二维码解码和 HTTP，不启动 controller，因此本包不会发布 `/cmd_vel`。
 
@@ -253,469 +294,129 @@ rostopic pub -1 /qr_item_search/scanner_control std_msgs/String \
 "data: '{\"protocol_version\":1,\"task_id\":\"manual\",\"search_id\":\"scanner-only-001\",\"enabled\":true,\"enhanced\":true,\"detected_yaw\":0.0,\"retry_failed\":false}'"
 ```
 
-停止接帧：
+## 12. scanner 事件：`frame_seen` / `quality` / `detected` / `resolved` 的区别
 
-```bash
-rostopic pub -1 /qr_item_search/scanner_control std_msgs/String \
-"data: '{\"protocol_version\":1,\"task_id\":\"manual\",\"search_id\":\"scanner-only-001\",\"enabled\":false,\"enhanced\":false,\"detected_yaw\":0.0,\"retry_failed\":false}'"
-```
+| 事件 | 谁发布 | 含义 |
+|---|---|---|
+| `frame_seen` | scanner 图像回调 | 原始图像成功转换并提交给扫码逻辑（按单调时间节流到 5 Hz）。**相机存活的唯一证明** |
+| `quality` | scanner 解码线程 | 每处理一帧输出亮度/过曝/清晰度，用于指标与画面质量，**不承担相机存活证明** |
+| `detected` | scanner 解码线程 | 某帧解码出一个本搜索尚未记录的新 URL，并已交给 HTTP worker |
+| `resolved` | scanner HTTP worker | 该 URL 的 HTTP 请求成功返回非空物品名 |
+| `resolve_error` | scanner HTTP worker | 该 URL 解析失败（网络、JSON、业务码等），可重试 |
 
-## 9. 上一步导航如何触发二维码搜索
+**相机心跳与超时**：controller 的 `camera_timeout` 只检查属于当前任务的 `frame_seen`。新任务开始时心跳重置并从任务开始获得完整的 `camera_timeout` 宽限；只要原始图像仍到达（哪怕解码线程阻塞、哪怕转向超过 1 秒），就不会报相机超时；图像真正断流超过 `camera_timeout` 才停车进入 `ERROR`。
 
-### 9.1 当前已经实现的接口
-
-QR 包当前只订阅 `/qr_item_search/start`，不直接订阅 `/task1/pickup_arrived`。因此现在人工联调时，到达观察点后直接发送第 6.2 节的 start 消息。
-
-### 9.2 完整系统推荐流程
-
-后续新增独立节点 `task1_orchestrator`，由它拥有整条任务状态：
-
-```text
-语音目标
-  -> 导航到物品区观察点
-  -> pickup_arrived
-  -> orchestrator 发布 QR start
-  -> QR complete（三个物品）
-  -> orchestrator 请求 LLM 分类
-  -> LLM 选中一个物品及目标车间
-  -> orchestrator 发布语音播报
-  -> orchestrator 发布下一导航目标
-```
-
-导航模块到达观察点后应发布：
-
-```bash
-rostopic pub -1 /task1/pickup_arrived std_msgs/String \
-"data: '{\"protocol_version\":1,\"task_id\":\"task-test-001\",\"status\":\"arrived\"}'"
-```
-
-注意：当前仓库还没有 `task1_orchestrator`，所以单独发送该消息不会启动 QR 搜索。现阶段需要随后人工发送 `/qr_item_search/start`；编排器实现后，这个转换将自动完成。
-
-## 10. 与语音系统联调
-
-语音理解模块不应直接控制底盘或 QR 包。它只需发布解析后的目标大类：
-
-```bash
-rostopic pub -1 /voice/target_category std_msgs/String \
-"data: '{\"protocol_version\":1,\"task_id\":\"task-test-001\",\"target_category\":\"食品加工类\",\"raw_text\":\"前往物品领取区，取得食品加工类物品\"}'"
-```
-
-编排器缓存 `target_category`，并保证同一个 `task_id` 贯穿导航、QR、LLM 和播报。二维码包不需要知道目标类别，因为比赛要求先读取全部三个二维码，再由 LLM 从三个候选中选择。
-
-## 11. 与 LLM 联调
-
-只有收到 QR 的 `status: "complete"` 后，编排器才能构造一次 LLM 请求：
-
-```bash
-rostopic pub -1 /llm/classify/request std_msgs/String \
-"data: '{\"protocol_version\":1,\"task_id\":\"task-test-001\",\"target_category\":\"食品加工类\",\"candidates\":[{\"order\":1,\"item_name\":\"香蕉\"},{\"order\":2,\"item_name\":\"毛巾\"},{\"order\":3,\"item_name\":\"手机\"}]}'"
-```
-
-LLM 适配器返回：
-
-```bash
-rostopic pub -1 /llm/classify/result std_msgs/String \
-"data: '{\"protocol_version\":1,\"task_id\":\"task-test-001\",\"status\":\"success\",\"selected_order\":1,\"selected_item\":\"香蕉\",\"target_category\":\"食品加工类\",\"target_workshop\":\"食品加工车间\",\"message\":\"\"}'"
-```
-
-LLM 适配器必须验证：
-
-- `selected_order` 是三个候选之一。
-- `selected_item` 与该序号对应的名称完全一致。
-- 分类失败时返回 `status: "error"` 和非空 `message`，编排器不得继续导航。
-- 同一 `task_id` 的重复请求不得触发第二次推理。
-
-当前 QR 包不会自动发布 `/llm/classify/request`；这是待开发编排器的职责。
-
-## 12. 与语音播报和下一导航联调
-
-LLM 成功后，编排器发布播报文本：
-
-```bash
-rostopic pub -1 /voice/speak std_msgs/String \
-"data: '{\"protocol_version\":1,\"task_id\":\"task-test-001\",\"text\":\"香蕉属于食品大类，应放置在食品加工车间\"}'"
-```
-
-TTS 节点只负责朗读 `text`，不应自行改变物品或车间。
-
-随后编排器发布下一导航目标：
-
-```bash
-rostopic pub -1 /task1/navigation_goal std_msgs/String \
-"data: '{\"protocol_version\":1,\"task_id\":\"task-test-001\",\"target_workshop\":\"食品加工车间\",\"selected_item\":\"香蕉\"}'"
-```
-
-当前仓库没有这两个话题的正式消费者。早期联调可分别使用：
-
-```bash
-rostopic echo /voice/speak
-rostopic echo /task1/navigation_goal
-```
-
-确认消息内容一致，但不要让模拟导航消息实际驱动车辆。
-
-## 13. 后续需要开发的 `task1_orchestrator`
-
-编排器至少需要实现以下状态和规则：
-
-1. 缓存 `/voice/target_category`，按 `task_id` 去重。
-2. 收到同一 `task_id` 的 `pickup_arrived: arrived` 后生成唯一 `search_id`。
-3. 发布一次 `/qr_item_search/start`，等待最多 45 秒。
-4. 仅在 QR `complete` 且恰有三个候选时发布一次 LLM 请求。
-5. 等待 LLM 最多 15 秒；校验选择结果属于候选集合。
-6. 发布一次 `/voice/speak` 和一次 `/task1/navigation_goal`。
-7. 任一阶段失败时停止流程；活动搜索中应发布 `/qr_item_search/stop`。
-8. 重复消息不得造成重复旋转、重复 LLM 请求或重复导航。
-
-建议先使用规则映射模拟 LLM 跑通编排器，再接 Spark X2 API。这样 QR、状态机和导航协议的错误不会与云端调用问题混在一起。
-
-## 14. 最小端到端模拟联调顺序
-
-在真实语音、LLM 和导航尚未完成时：
-
-1. 启动底盘、相机和 QR 包。
-2. 命令行发布 `/voice/target_category`。
-3. 命令行发布 `/task1/pickup_arrived`，记录这是未来编排器的输入。
-4. 现阶段人工发布 `/qr_item_search/start`。
-5. 等待 `/qr_item_search/result` 的 `complete`。
-6. 从结果复制三个 `item_name`，人工构造 `/llm/classify/request`。
-7. 用命令行模拟 `/llm/classify/result`。
-8. 模拟发布 `/voice/speak` 和 `/task1/navigation_goal`，用 `rostopic echo` 核对。
-9. 确认所有消息使用同一个 `task_id`，QR 使用唯一 `search_id`。
-
-通过标准：三个二维码不足时不调用 LLM；三个结果到齐后只调用一次；播报和导航中的物品、类别、车间完全一致。
-
-## 15. 默认参数
+## 13. 参数
 
 | 参数 | 默认值 | 说明 |
 |---|---:|---|
-| `fast_angular_speed` | `0.40 rad/s` | 快速环扫角速度 |
-| `targeted_angular_speed` | `0.20 rad/s` | 定向补扫角速度 |
-| `minimum_effective_speed` | `0.11 rad/s` | 底盘最小有效角速度 |
-| `fast_sweep_angle` | `6.632251 rad` | 快速环扫角度，约 380° |
-| `yaw_tolerance` | `0.035 rad` | 定向到位容差 |
-| `heading_timeout` | `1.0 s` | 航向数据超时 |
-| `camera_timeout` | `1.0 s` | 运动搜索时图像超时 |
-| `search_total_timeout` | `40.0 s` | 单次搜索总超时 |
-| `connect_timeout` | `1.0 s` | HTTP 连接超时 |
-| `read_timeout` | `2.0 s` | HTTP 读取超时 |
-| `http_retries` | `1` | 首次请求失败后的重试次数 |
-| `http_worker_count` | `3` | 并发 HTTP worker 数量 |
+| `step_angle_deg` | 45.0 | 第一圈站点间隔（度），必须整除 360 |
+| `cruise_angular_speed` | 0.50 | 主旋转角速度 rad/s |
+| `approach_angular_speed` | 0.20 | 近目标角速度 rad/s |
+| `approach_zone_deg` | 10.0 | 减速区（度） |
+| `yaw_tolerance_deg` | 2.0 | 到达容差（度） |
+| `settled_angular_speed` | 0.03 | 停稳角速度阈值 rad/s |
+| `settled_duration` | 0.20 | 连续停稳时间 s |
+| `settling_timeout` | 3.0 | 停稳判定超时 s，超时进入 `ERROR` |
+| `scan_window` | 0.60 | 每站最短稳定驻留时间 s（不再控制扫码开关） |
+| `offset_angle_deg` | 22.5 | 第二圈偏移（度） |
+| `max_passes` | 2 | 最大扫描圈数 |
+| `search_total_timeout` | 60.0 | 单次搜索总超时 s |
+| `heading_timeout` | 1.0 | 航向数据超时 s |
+| `camera_timeout` | 1.0 | 原始图像心跳超时 s（只查 `frame_seen`） |
+| `decode_scale` | 1.5 | scanner 内部解码放大倍率（1.0 / 1.5 / 2.0，最大 2.0） |
 | `image_topic` | `/usb_cam/image_raw` | 相机图像话题 |
+| `metrics_dir` | `~/qr_metrics` | 结构化指标输出目录 |
+| `keyframe_dir` | `~/qr_keyframes` | 关键帧输出目录 |
+| `connect_timeout` / `read_timeout` / `http_retries` / `http_worker_count` | 1.0 / 2.0 / 1 / 3 | HTTP 参数（scanner 节点） |
+| `start_debug_stream` | false | 是否启动调试流节点 |
+| `debug_host` / `debug_port` | 0.0.0.0 / 8080 | 调试流监听地址 |
 
-覆盖参数示例：
+`decode_scale` 说明：
+
+- 原始帧总是第一个解码变体；`decode_scale > 1.0` 时在其后追加一个有界放大变体（不修改收到的 ROS 图像），再依次是灰度/CLAHE/阈值变体；放大变体失败会跳过并继续其余路径。同一帧会合并所有变体解出的不同 URL，不会因某个变体先识别出一个二维码而跳过后续变体；收齐三个不同 URL 后才提前结束本帧处理。
+- 默认 1.5 依据本机性能测试：640×480 下放大到 1.5× 的 resize 开销约 0.5 ms，解码开销约 2.7×（2.0× 时约 4.6×）；持续扫码只保留最新帧，不会产生积压。
+- 软件放大**不增加真实采样细节**，只可能改善部分解码器的采样行为；调 `2.0` 前先确认 CPU 与帧率余量。
+
+launch 覆盖示例（所有控制参数均为 launch arg，可从命令行覆盖）：
 
 ```bash
 roslaunch qr_item_search qr_item_search.launch \
-  image_topic:=/usb_cam/image_raw
+  image_topic:=/usb_cam/image_raw \
+  scan_window:=0.60 \
+  cruise_angular_speed:=0.50 \
+  decode_scale:=1.5 \
+  metrics_dir:=/home/ucar/qr_metrics \
+  keyframe_dir:=/home/ucar/qr_keyframes
 ```
 
-注意：当前 launch 只声明了 `image_topic` 为 launch argument；其余参数写在 launch 文件内。若要调整其他参数，请修改 launch 文件并重新启动节点。不要在比赛现场未经空旷地测试直接提高角速度。
-
-## 16. 调参位置与实车调参方法
-
-### 16.1 先分清三类参数
-
-| 参数类别 | 修改位置 | 是否需要重启节点 | 典型参数 |
-|---|---|---|---|
-| QR 搜索控制 | `~/ucar_ws/src/qr_item_search/launch/qr_item_search.launch` | 需要重启 QR launch | 转速、扫描角度、总超时 |
-| QR 网络解析 | 同一个 QR launch 的 `qr_scanner` 节点参数 | 需要重启 QR launch | HTTP 超时、重试、worker 数 |
-| USB 相机硬件 | `/dev/video0` 的 V4L2 controls | 通常立即生效；相机或小车重启后可能恢复 | 对焦、曝光、锐度、白平衡 |
-| 相机分辨率/格式 | `/opt/ros/noetic/share/usb_cam/launch/usb_cam-test.launch` 或相机启动命令 | 需要重启相机 | 宽高、YUYV/MJPG、帧率 |
-
-不要直接修改 `/opt/ros/noetic/share` 下的系统文件作为长期方案，系统包更新时会被覆盖。调试阶段优先使用命令行；参数确定后，应在团队自己的相机 launch 或启动脚本中固化。
-
-### 16.2 QR 搜索参数在哪里改
-
-本包当前参数文件：
-
-```bash
-nano ~/ucar_ws/src/qr_item_search/launch/qr_item_search.launch
-```
-
-当前相关片段：
-
-```xml
-<param name="fast_angular_speed" value="0.40"/>
-<param name="targeted_angular_speed" value="0.20"/>
-<param name="minimum_effective_speed" value="0.11"/>
-<param name="fast_sweep_angle" value="6.632251"/>
-<param name="yaw_tolerance" value="0.035"/>
-<param name="heading_timeout" value="1.0"/>
-<param name="camera_timeout" value="1.0"/>
-<param name="search_total_timeout" value="40.0"/>
-```
-
-保存后不需要重新 `catkin_make`，但必须在原 QR launch 终端按 `Ctrl+C`，再重新执行 `roslaunch`。节点只在启动时读取这些参数，运行中执行 `rosparam set` 不会改变已经构造好的控制器。
-
-分步运行 controller 时，可以临时覆盖参数而不改文件：
+分步运行 controller 时临时覆盖参数：
 
 ```bash
 rosrun qr_item_search item_search_controller_node.py \
-  _fast_angular_speed:=0.40 \
-  _targeted_angular_speed:=0.20 \
-  _search_total_timeout:=60.0
+  _step_angle_deg:=45.0 _cruise_angular_speed:=0.50 _scan_window:=0.60
 ```
 
-### 16.3 本轮建议的 QR 参数
+## 14. 日志与关键帧
 
-从 `search-test-004` 到 `search-test-007` 的结果看，四轮分别解析到 1、2、1、1 个物品。`search-test-005` 在累计 `8.89 rad`（约 509°）识别到第二个二维码，并在约 40 秒结束，证明补扫仍在工作，但调试总超时偏紧。
+- **结构化指标**：每轮搜索结束后在 `metrics_dir/qr_search_runs.jsonl` 追加一行 JSON（UTF-8，中文不转义）。字段包括 `schema`、`task_id`、`search_id`、`config`（全部参数）、`started_at/finished_at/total_seconds`、`terminal_status`、`message`、`state_seconds`、`stations`、`items`。`stations` 中每站至少包含 `pass`、`index`、`target_yaw_deg`、`actual_yaw_deg`、`yaw_error_deg`、`settling_seconds`、`dwell_seconds`、`frame_count`、`quality`、`decoded_url`。
+- **关键帧**：`keyframe_dir` 下只保存两类图片——成功站关键帧 `success_<search_id>_p<圈>_s<站>_<时间戳>.jpg`（二维码位置用绿框标注）和失败站最后一帧 `failed_..._p..._s..._<时间戳>.jpg`。成功关键帧必须是真正产生该 URL 的原始帧，帧所属角度使用采集时的航向（不是解码完成时车身航向）。文件名中的 `search_id` 已做安全化处理，目录与文件名均来自参数，不写死。
+- 指标或关键帧写入失败只记录 warning，不会阻塞速度控制或解码；“本站未识别”不会阻断持续扫码线程。
+- 实车调参时建议同时记录 result、scanner_event 与关键帧，离线核对每站实际航向与图像。
 
-第一轮建议只改一个值：
+## 15. 单变量调参纪律与实车实验顺序
 
-```xml
-<param name="search_total_timeout" value="60.0"/>
+不要同时调整多个变量。默认 45° 只有在有效解码视场不小于 55° 时才进入正式测试；不足时必须先报告并改用 30°（`step_angle_deg:=30.0`），不能用延长驻留时间掩盖覆盖不足。
+
+实车顺序（由 Codex 在部署验收后执行）：
+
+1. **静态预览**：Scanner-only 模式，确认三张码静止可解码、画面不糊不过曝。
+2. **有效解码视场测量**：二维码居中后记录左右两侧仍能连续解码的极限航向，视场须 ≥ 55°（45° 步长）。
+3. **小角度安全旋转**：`step_angle_deg` 保持 45°，先小角度验证转向/停稳/驻留/持续扫码闭环。
+4. **一圈空载**：场地不放码，跑完一圈验证各站转向、停稳与驻留结束都正常，且全程不出现相机超时误报。
+5. **三张码**：放置三张码，跑完整识别流程，检查 `complete` 与关键帧。
+6. **参数矩阵**：固定 45° 与 `scan_window:=0.60`，测试 `cruise_angular_speed` 0.40 / 0.50 / 0.60；固定最优速度，测试 `scan_window` 0.40 / 0.60 / 0.80。每组连续 10 轮，至少 9 轮 3/3 且 10 轮全部安全停稳才合格；合格组合再比较平均、P95 与最慢总耗时。
+
+实验记录表见 `docs/parameter-experiment-template.csv`，表头：
+
+```csv
+date,step_angle_deg,cruise_speed,scan_window,run_index,status,items_found,total_seconds,p95_station_seconds,max_yaw_error_deg,safe_stop,notes
 ```
 
-其余暂时保持：
+## 16. 故障判断
 
-```text
-fast_angular_speed     = 0.40 rad/s
-targeted_angular_speed = 0.20 rad/s
-fast_sweep_angle       = 6.632251 rad（约 380°）
-```
+### 相机断流
 
-原因：相机实测稳定约 30 fps。`0.40 rad/s` 时每帧之间只转约 `0.0133 rad`，即 `0.76°`，不是明显过快。现在降速会增加比赛耗时，却不能验证固定焦距、曝光或二维码尺寸问题。
+- 症状：`result` 为 `error`、`message` 为 `camera timed out`，且是搜索进行中（非刚开始）出现。
+- 确认：`rostopic hz /usb_cam/image_raw` 是否停止；`rostopic echo /qr_item_search/scanner_event` 是否还有 `frame_seen`。
+- 处理：恢复相机节点后，用新的 `search_id` 重新开始。注意：只要 `frame_seen` 仍在到达（例如解码线程卡住、转向持续超过 1 秒），不会触发该错误。
 
-`60 s` 只用于跑通流程和收集数据。三二维码稳定后，应根据实测逐步降回 `45–50 s`，最终再评估是否恢复 `40 s`。
+### 二维码可定位但不可解码
 
-### 16.4 当前相机实际状态
+- 症状：调试流中能看到二维码、OpenCV 能框出四角，但多轮驻留后该方向始终没有 `detected`；关键帧中二维码区域像素不足或模糊。
+- 排查：检查关键帧里二维码区域尺寸（当前实测约 120×130 像素时 OpenCV/pyzbar 均无法恢复内容）；先检查固定焦距、曝光、码面尺寸与距离，再尝试 `decode_scale:=2.0`。软件放大不增加真实采样细节，不能把“放大后仍不可解码”当作已解决。
 
-小车当前 `/dev/video0` 实测为：
+### 网络解析失败
 
-```text
-640 × 480
-YUYV
-约 30 fps
-exposure_auto = 3              自动曝光（光圈优先）
-exposure_auto_priority = 1     自动曝光可优先延长曝光
-focus_auto = 0                 自动对焦关闭
-focus_absolute = 68            固定焦距
-sharpness = 50
-```
+- 症状：`detected` 已发布但 `resolved` 迟迟不来，或出现 `resolve_error`；三个 URL 齐了后停在 `WAITING_HTTP`，最终 `not_found` 且 `message` 含 `items unresolved`。
+- 确认：在小车上用 `curl '<二维码URL>'` 验证网络和 JSON（`code: 200` 且 `result` 非空）。
+- 处理：检查小车网络、服务器可达性与 JSON 格式；单次失败会有限重试，最终失败不会被伪装成完成。
 
-其中最值得先检查的是固定焦距 `68`。二维码位于不同墙边、距离和斜视角不同时，固定焦距可能让一两个码清晰，而另一个码始终不够清晰。
+### 其他常见问题
 
-查看当前值：
+**没有旋转**：检查是否已发送 start；检查 `/odom` 频率与 `/cmd_vel` 订阅；查看 state/result 的错误信息。
 
-```bash
-v4l2-ctl -d /dev/video0 --get-ctrl=focus_auto
-v4l2-ctl -d /dev/video0 --get-ctrl=focus_absolute
-v4l2-ctl -d /dev/video0 --get-ctrl=exposure_auto
-v4l2-ctl -d /dev/video0 --get-ctrl=exposure_auto_priority
-```
+**停在某站一直不进入驻留**：状态停在 `SETTLING` 时，`settled_angular_speed` 阈值过严或里程计角速度噪声过大会触发 `settling timeout` 进入 `ERROR`；检查 `settled_duration` 与 `settling_timeout` 的比值。
 
-查看设备支持的全部控制范围：
+**能看到二维码但没有结果**：确认二维码内容是完整 HTTP/HTTPS URL；确认返回 `code: 200` 且 `result` 非空；手机屏幕展示二维码时提高亮度但避免反光。
 
-```bash
-v4l2-ctl -d /dev/video0 --list-ctrls-menus
-v4l2-ctl -d /dev/video0 --list-formats-ext
-```
+**画面白花或过曝**：避免太阳直射镜头和二维码表面；使用哑光打印纸，保留二维码白边；调整观察点或增加遮光罩。
 
-### 16.5 正确标定并锁定焦距
+**收到 `scanner restarted`**：scanner 在活动搜索中重启后，controller 会安全停车并进入 `ERROR`。确认 scanner 已恢复，然后使用新的 `search_id` 重新开始。
 
-不要在小车旋转时让自动对焦不断搜索。推荐在实际物品区、实际观察距离上先自动找焦，再锁定结果。
+**已结束但节点仍在**：这是正常行为。终态只结束一次搜索，不退出常驻节点。继续测试可直接发送新的 start；准备关机则按第 10 节关闭节点。
 
-1. 停止当前 QR 搜索，确保底盘不动。
-2. 让相机正对一个比赛尺寸的二维码，距离采用比赛观察点到墙面的典型距离。
-3. 打开图像：
-
-```bash
-rqt_image_view /usb_cam/image_raw
-```
-
-4. 临时开启自动对焦：
-
-```bash
-v4l2-ctl -d /dev/video0 --set-ctrl=focus_auto=1
-```
-
-5. 等待 2–3 秒，画面稳定后读取焦距：
-
-```bash
-v4l2-ctl -d /dev/video0 --get-ctrl=focus_absolute
-```
-
-6. 记录得到的数值，例如 `N`；关闭自动对焦并锁定：
-
-```bash
-v4l2-ctl -d /dev/video0 --set-ctrl=focus_auto=0
-v4l2-ctl -d /dev/video0 --set-ctrl=focus_absolute=N
-```
-
-7. 不移动小车，分别让三个二维码处于画面中央、左右边缘和一定斜角，做 Scanner-only 测试。三个码都能在静止状态快速解码后，才开始旋转测试。
-
-若启用自动对焦后 `focus_absolute` 不更新，说明该摄像头驱动没有可靠报告自动焦点。此时以 `68` 为中心，手动小步调整，例如每次只改变 10–20，并用同一距离、同一二维码比较清晰度和解码时间。不要同时改曝光。
-
-### 16.6 曝光调整顺序
-
-当前帧率稳定，因此第一步不建议直接切换全手动曝光。先禁止自动曝光为了亮度而延长曝光：
-
-```bash
-v4l2-ctl -d /dev/video0 --set-ctrl=exposure_auto_priority=0
-```
-
-保留：
-
-```bash
-v4l2-ctl -d /dev/video0 --set-ctrl=exposure_auto=3
-```
-
-然后在相同场地重复测试。若仍有明显运动拖影，再测试手动曝光：
-
-1. 静止面对典型二维码，让自动曝光稳定。
-2. 读取当前曝光：
-
-```bash
-v4l2-ctl -d /dev/video0 --get-ctrl=exposure_absolute
-```
-
-3. 记录值 `E`，切换手动并锁定：
-
-```bash
-v4l2-ctl -d /dev/video0 --set-ctrl=exposure_auto=1
-v4l2-ctl -d /dev/video0 --set-ctrl=exposure_absolute=E
-```
-
-4. 一次只小幅降低曝光，检查二维码黑白块是否仍有足够对比度。曝光太长会拖影，太短会让暗处二维码丢失。
-
-回到自动曝光：
-
-```bash
-v4l2-ctl -d /dev/video0 --set-ctrl=exposure_auto=3
-```
-
-V4L2 修改可能在相机节点或小车重启后恢复默认值。每次测试前都用 `--get-ctrl` 重新确认，最终把确定值放进团队自己的启动流程。
-
-### 16.7 分辨率与格式
-
-当前设备支持：
-
-- `YUYV 640×480 @ 30 fps`：当前配置，解码开销较低。
-- `YUYV 800×600 @ 15 fps`：像素增加但帧率减半，不优先。
-- `MJPG 800×600/1280×720/1920×1080 @ 30 fps`：细节增加，但需要解压且可能增加 CPU 负载和压缩伪影。
-
-第一轮不要同时换分辨率。只有在焦距和曝光调整后，静止画面中的二维码仍然像素过少，才单独测试 `MJPG 1280×720 @ 30 fps`，并同时观察：
-
-```bash
-rostopic hz /usb_cam/image_raw
-top
-```
-
-如果 scanner 处理跟不上，高分辨率反而会减少有效解码次数。
-
-### 16.8 每轮必须保存的诊断数据
-
-当前实现不会保存成功解码的关键帧。相机回调只在内存中保留最新帧，解码后就会被覆盖；最终 result 只包含成功解析的 URL、物品名和航向。因此仅看 `/qr_item_search/result`，无法判断漏码是模糊、过曝、没有进入视野、解码失败还是 HTTP 失败。
-
-下一轮测试至少开三个记录终端：
-
-```bash
-rostopic echo /qr_item_search/result \
-  > ~/qr_result_$(date +%Y%m%d_%H%M%S).log
-```
-
-```bash
-rostopic echo /qr_item_search/scanner_event \
-  > ~/qr_scanner_event_$(date +%Y%m%d_%H%M%S).log
-```
-
-```bash
-rosbag record -O ~/qr_debug_$(date +%Y%m%d_%H%M%S).bag \
-  /usb_cam/image_raw /odom /cmd_vel \
-  /qr_item_search/state /qr_item_search/scanner_event /qr_item_search/result
-```
-
-`rosbag` 图像数据较大，测试结束后立即按 `Ctrl+C`，并检查磁盘：
-
-```bash
-df -h ~
-ls -lh ~/qr_debug_*.bag
-```
-
-有了 bag，才能离线定位每个 `detected_yaw` 对应的相机帧，并比较漏掉二维码的方向。
-
-### 16.9 单变量调参顺序
-
-每次使用相同的三个二维码、相同位置和新的 `search_id`，按顺序测试：
-
-1. 现有 `search-test-004` 至 `007` 作为 40 秒基线；下一轮开始保存 result、scanner_event 和 bag。
-2. 只把搜索总超时改为 `60 s`，建立不容易被提前截断的调试基线。
-3. 保持 60 秒，只标定并锁定焦距；先做静止三二维码测试，再做旋转测试。
-4. 保持其他参数不变，只把 `exposure_auto_priority` 改为 `0`。
-5. 三码稳定后，再分别评估总超时和角速度。
-6. 最后才测试更高分辨率或候选二维码停车方案。
-
-每个配置至少连续测试 5 次，记录成功数量、总耗时、每个二维码航向和失败原因。不要用某一次偶然成功作为最终参数。
-
-### 16.10 当前连续扫描设计的限制与下一版方向
-
-当前图像链路是“latest frame”模型：
-
-```text
-相机 30 fps
-  -> 回调只保留内存中的最新帧
-  -> 单独解码线程取走最新帧
-  -> pyzbar 尝试完整解码 URL
-  -> 成功后只发布 URL、航向和质量
-  -> 图像被后续帧覆盖
-```
-
-它不会自动截图，也没有保存“第一次成功解码帧”。单元测试和静态图片测试证明了解码器能工作，实车测试证明至少有部分二维码被成功解码，但没有保留对应实车关键帧。调参阶段应先使用 rosbag 补齐这项证据；后续可增加可配置的关键帧保存功能，默认关闭，避免比赛时持续写盘。
-
-单纯在 pyzbar 已经完整解码 URL 后停车，对“漏掉的二维码”帮助有限，因为最困难的一步已经完成。更有效的下一版是两阶段视觉：
-
-1. 连续旋转时使用较轻量的候选检测，只要求发现二维码外框或三个定位点，不要求已经解出 URL。
-2. 候选连续出现 2 帧后，controller 立即减速并停车。
-3. 等画面稳定约 `0.2–0.5 s`，保存候选关键帧。
-4. 对静止图像执行原图、灰度、CLAHE、自适应阈值和必要的透视矫正解码。
-5. 成功则记录 URL 并恢复旋转；失败则在有限等待后恢复旋转，避免被假候选永久卡住。
-
-推荐状态机扩展：
-
-```text
-FAST_SWEEP
-  -> CANDIDATE_BRAKE
-  -> STATIC_DECODE
-      -> FAST_SWEEP          成功或候选超时，继续找剩余二维码
-      -> WAITING_HTTP        三个 URL 都已取得
-```
-
-候选检测可以使用 OpenCV `QRCodeDetector.detect()` 或轮廓/定位点检测；完整内容仍可由当前 pyzbar/ZBar 解码。这样 OpenCV 只负责“看见疑似二维码”，pyzbar 负责“读取内容”，不会要求更换当前已经验证过的解码后端。
-
-在实现该状态前，应先完成本节的焦距、曝光和数据记录实验。如果三个二维码在静止状态都不能稳定解码，停车状态机不会解决根本问题；必须先修正相机、码面尺寸、距离或光照。
-
-## 17. 常见问题排查
-
-### 没有旋转
-
-- 检查是否已经发送 start，而不只是启动 launch。
-- 检查 `/odom` 是否有数据且频率稳定。
-- 检查 `/qr_item_search/state` 和 `/qr_item_search/result` 的错误信息。
-- 检查底盘驱动是否订阅 `/cmd_vel`。
-
-### 能看到二维码但没有结果
-
-- 确认二维码内容是完整的 HTTP/HTTPS URL。
-- 在小车上用 `curl '<二维码URL>'` 验证网络和 JSON。
-- 确认返回 `code: 200` 且 `result` 非空。
-- 手机屏幕展示二维码时提高亮度但避免反光，保持屏幕与镜头尽量正对。
-
-### 画面白花或过曝
-
-- 避免太阳直射镜头和二维码表面。
-- 使用哑光打印纸，保留二维码白边。
-- 调整观察点或增加遮光罩，让曝光稳定后再测试。
-
-### 收到 `scanner restarted`
-
-scanner 在活动搜索中重启后，controller 会安全停车并进入 `ERROR`。确认 scanner 已恢复，然后使用新的 `search_id` 重新开始，不要重发旧 start。
-
-### 已结束但节点仍在
-
-这是正常行为。`complete/not_found/error/stopped` 只结束一次搜索，不退出常驻节点。继续测试可直接发送新的 start；准备关机则按第 7 节关闭节点。
-
-## 18. Windows 本地测试
+## 17. Windows 本地测试
 
 在仓库或 worktree 根目录运行：
 
@@ -728,7 +429,7 @@ Set-Location $package
 subst Q: /d
 ```
 
-图像测试还需要与当前 Python 匹配的 NumPy 和 OpenCV。
+图像与关键帧测试需要与当前 Python 匹配的 NumPy 和 OpenCV。
 
 小车端测试：
 
@@ -738,19 +439,30 @@ PYTHONPATH=~/ucar_ws/src/qr_item_search/src \
 python3 -m unittest discover -s test -p 'test_*.py' -q
 ```
 
+## 18. 与编排器联调的 topic 协议（protocol v1，保持不变）
+
+- 订阅：`/qr_item_search/start`、`/qr_item_search/stop`（String JSON）
+- 发布：`/qr_item_search/state`、`/qr_item_search/result`、`/qr_item_search/scanner_control`、`/qr_item_search/scanner_event`（String JSON）
+- 调试旁路（新增，不影响协议）：`/qr_item_search/debug_snapshot`（String JSON，仅调试流节点订阅）
+- `protocol_version` 恒为 `1`；`task_id`、`search_id` 原样贯穿；完整成功仍要求三个不同 URL 均解析出非空 `item_name`。
+- 旧 `capture_id/capture_after/pass_index/station_index` 字段：scanner 仍会解析（向后兼容），但不再用于拒绝同一搜索任务中的解码结果；`pass_index/station_index` 用于关键帧标注。
+- 只有收到 `status: "complete"` 后，编排器才能构造 LLM 分类请求（`selected_order` 必须是三个候选之一）。
+
 ## 19. 比赛现场检查清单
 
-- [ ] `ssh ucar@172.20.10.4` 可连接。
+- [ ] `ssh ucar@192.168.1.109` 可连接。
 - [ ] 二维码三个 URL 均可由小车访问并返回合法 JSON。
 - [ ] `/odom` 和 `/usb_cam/image_raw` 持续有数据。
 - [ ] 相机无明显过曝、失焦或强反光。
-- [ ] QR 两个节点已启动，状态为 `IDLE`。
+- [ ] QR 节点已启动，状态为 `IDLE`。
 - [ ] 小车旋转范围已清空，急停可触达。
 - [ ] 本次使用新的 `task_id/search_id`。
-- [ ] 同时观察 state、result 和必要的图像画面。
+- [ ] 同时观察 state、result，必要时开调试流。
 - [ ] 结束后先停止搜索，再关闭 QR、相机和底盘节点。
+- [ ] 指标与关键帧目录有本轮记录。
 
 更详细的协议与设计：
 
+- [定点停扫重构设计（旧，部分废止）](../../../docs/superpowers/specs/2026-08-08-qr-stop-and-scan-design.md)
+- [定点停扫实施计划（旧，部分废止）](../../../docs/superpowers/plans/2026-08-08-qr-stop-and-scan.md)
 - [子任务 1 最小集成协议](../../../docs/superpowers/specs/2026-07-19-task1-minimal-integration-protocol.md)
-- [连续环扫设计](../../../docs/superpowers/specs/2026-07-19-continuous-qr-sweep-design.md)

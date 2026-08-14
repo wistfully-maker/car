@@ -7,13 +7,20 @@ from qr_item_search.search_state import (
     SearchMachine,
 )
 
+EXPECTED_ACTIVE = frozenset({
+    "INITIAL_SCAN", "TURNING", "SETTLING", "SCANNING",
+    "OFFSET_PASS", "WAITING_HTTP",
+})
 
 ALL_STATES = frozenset(
     {
         "IDLE",
-        "FAST_SWEEP",
+        "INITIAL_SCAN",
+        "TURNING",
+        "SETTLING",
+        "SCANNING",
+        "OFFSET_PASS",
         "WAITING_HTTP",
-        "TARGETED_RESCAN",
         "COMPLETE",
         "NOT_FOUND",
         "ERROR",
@@ -29,10 +36,7 @@ class SearchMachineTest(unittest.TestCase):
         return machine
 
     def test_exposes_immutable_state_sets(self):
-        self.assertEqual(
-            frozenset({"FAST_SWEEP", "WAITING_HTTP", "TARGETED_RESCAN"}),
-            ACTIVE,
-        )
+        self.assertEqual(EXPECTED_ACTIVE, ACTIVE)
         self.assertEqual(
             frozenset({"IDLE", "COMPLETE", "NOT_FOUND", "ERROR", "STOPPED"}),
             RESTARTABLE,
@@ -44,18 +48,36 @@ class SearchMachineTest(unittest.TestCase):
         with self.assertRaises(AttributeError):
             SearchMachine().ACTIVE = frozenset()
 
-    def test_has_no_fixed_wall_api(self):
+    def test_nominal_station_cycle(self):
         machine = SearchMachine()
+        machine.start()
+        self.assertEqual("INITIAL_SCAN", machine.state)
+        machine.scan_finished()
+        self.assertEqual("TURNING", machine.state)
+        machine.heading_reached()
+        self.assertEqual("SETTLING", machine.state)
+        machine.settled()
+        self.assertEqual("SCANNING", machine.state)
 
-        self.assertFalse(hasattr(machine, "wall_count"))
-        self.assertFalse(hasattr(machine, "wall_index"))
+    def test_all_urls_wait_for_http(self):
+        machine = SearchMachine()
+        machine.start()
+        machine.urls_collected()
+        self.assertEqual("WAITING_HTTP", machine.state)
+
+    def test_has_no_continuous_sweep_api(self):
+        machine = SearchMachine()
+        self.assertFalse(hasattr(machine, "fast_sweep_finished"))
+        self.assertFalse(hasattr(machine, "resume_rescan"))
+        self.assertFalse(hasattr(machine, "rescan_finished"))
         for old_event in (
             "turn_reached",
-            "settled",
             "observation_succeeded",
             "observation_failed",
             "scan_timeout",
             "match_decision",
+            "wall_count",
+            "wall_index",
         ):
             with self.subTest(old_event=old_event):
                 self.assertFalse(hasattr(machine, old_event))
@@ -67,7 +89,7 @@ class SearchMachineTest(unittest.TestCase):
             machine = self.machine_in(source)
             with self.subTest(source=source):
                 machine.start()
-                self.assertEqual("FAST_SWEEP", machine.state)
+                self.assertEqual("INITIAL_SCAN", machine.state)
 
     def test_start_rejects_every_active_state(self):
         for source in ACTIVE:
@@ -75,24 +97,39 @@ class SearchMachineTest(unittest.TestCase):
             with self.subTest(source=source):
                 self.assert_invalid(machine, "start")
 
-    def test_single_source_events_accept_only_their_legal_sources(self):
-        cases = (
-            ("fast_sweep_finished", {"FAST_SWEEP"}, "TARGETED_RESCAN"),
-            ("resume_rescan", {"WAITING_HTTP"}, "TARGETED_RESCAN"),
-            ("rescan_finished", {"TARGETED_RESCAN"}, "NOT_FOUND"),
-        )
-        for event, sources, destination in cases:
-            for source in ALL_STATES:
-                machine = self.machine_in(source)
-                with self.subTest(event=event, source=source):
-                    if source in sources:
-                        getattr(machine, event)()
-                        self.assertEqual(destination, machine.state)
-                    else:
-                        self.assert_invalid(machine, event)
+    def test_scan_finished_turns_from_initial_or_scanning_only(self):
+        legal = {"INITIAL_SCAN", "SCANNING"}
+        for source in ALL_STATES:
+            machine = self.machine_in(source)
+            with self.subTest(source=source):
+                if source in legal:
+                    machine.scan_finished()
+                    self.assertEqual("TURNING", machine.state)
+                else:
+                    self.assert_invalid(machine, "scan_finished")
 
-    def test_urls_collected_accepts_both_sweep_states_only(self):
-        legal = {"FAST_SWEEP", "TARGETED_RESCAN"}
+    def test_heading_reached_from_turning_only(self):
+        for source in ALL_STATES:
+            machine = self.machine_in(source)
+            with self.subTest(source=source):
+                if source == "TURNING":
+                    machine.heading_reached()
+                    self.assertEqual("SETTLING", machine.state)
+                else:
+                    self.assert_invalid(machine, "heading_reached")
+
+    def test_settled_from_settling_only(self):
+        for source in ALL_STATES:
+            machine = self.machine_in(source)
+            with self.subTest(source=source):
+                if source == "SETTLING":
+                    machine.settled()
+                    self.assertEqual("SCANNING", machine.state)
+                else:
+                    self.assert_invalid(machine, "settled")
+
+    def test_urls_collected_waits_for_http_from_scan_states(self):
+        legal = {"INITIAL_SCAN", "TURNING", "SETTLING", "SCANNING", "OFFSET_PASS"}
         for source in ALL_STATES:
             machine = self.machine_in(source)
             with self.subTest(source=source):
@@ -101,6 +138,38 @@ class SearchMachineTest(unittest.TestCase):
                     self.assertEqual("WAITING_HTTP", machine.state)
                 else:
                     self.assert_invalid(machine, "urls_collected")
+
+    def test_pass_finished_enters_offset_pass_once(self):
+        machine = self.machine_at_scanning()
+        machine.pass_finished()
+        self.assertEqual("OFFSET_PASS", machine.state)
+
+    def test_offset_pass_started_resumes_turning(self):
+        machine = self.machine_at_scanning()
+        machine.pass_finished()
+        machine.offset_pass_started()
+        self.assertEqual("TURNING", machine.state)
+
+    def test_scan_exhausted_reports_not_found_from_scanning(self):
+        machine = self.machine_at_scanning()
+        machine.scan_exhausted()
+        self.assertEqual("NOT_FOUND", machine.state)
+
+    def test_scan_exhausted_rejected_when_not_in_scanning(self):
+        for source in ALL_STATES:
+            machine = self.machine_in(source)
+            with self.subTest(source=source):
+                if source == "SCANNING":
+                    continue
+                self.assert_invalid(machine, "scan_exhausted")
+
+    def machine_at_scanning(self):
+        machine = SearchMachine()
+        machine.start()
+        machine.scan_finished()
+        machine.heading_reached()
+        machine.settled()
+        return machine
 
     def test_items_resolved_completes_from_every_active_state_only(self):
         self.assert_active_event("items_resolved", "COMPLETE")

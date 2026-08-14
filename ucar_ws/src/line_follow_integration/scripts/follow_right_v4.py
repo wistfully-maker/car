@@ -144,7 +144,7 @@ class FollowRightV4:
             if sum(rf)/len(rf)>thr:
                 if not self.stop_front_found:
                     rospy.loginfo("🛑 前白线!")
-                    self.rotate(16, 0.3); rospy.sleep(0.3)  # 右道逆时针16°
+                    self.rotate(14, 0.3); rospy.sleep(0.3)  # 右道逆时针16°
                     self.stop_front_found=True; return False
                 elif self.stop_fps>=self.stop_fps_thr:
                     rospy.loginfo("🛑 后白线! 停车!"); return True

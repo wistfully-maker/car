@@ -75,3 +75,6 @@ TebLocalPlannerROS:
   visualize_hc_graph: false
   viapoints_all_candidates: true
   switching_blocking_period: 0.0
+  holonomic_robot: true
+  max_vel_y: 0.35
+  acc_lim_y: 0.35

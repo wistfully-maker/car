@@ -69,3 +69,32 @@ def directed_angular_command(error, speed, tolerance, min_speed=0.0):
         return 0.0, True
     magnitude = max(min_speed, min(speed, abs(error)))
     return math.copysign(magnitude, error), False
+
+
+def staged_angular_command(error, cruise_speed, approach_speed,
+                           approach_zone_rad, tolerance_rad):
+    """Return (speed, reached) for fixed-angle station approach.
+
+    Within ``tolerance_rad`` the command is zero and the station is reached;
+    inside ``approach_zone_rad`` the command is ``approach_speed`` in the
+    direction of the error (including a low-speed reverse when the target
+    was overshot); otherwise ``cruise_speed`` is used.
+    """
+    error = _finite_number(error, "error")
+    cruise_speed = _finite_number(cruise_speed, "cruise_speed")
+    approach_speed = _finite_number(approach_speed, "approach_speed")
+    approach_zone_rad = _finite_number(approach_zone_rad, "approach_zone_rad")
+    tolerance_rad = _finite_number(tolerance_rad, "tolerance_rad")
+    if cruise_speed <= 0 or approach_speed <= 0:
+        raise ValueError("speeds must be positive")
+    if tolerance_rad < 0 or approach_zone_rad < 0:
+        raise ValueError("zones must be non-negative")
+    if approach_zone_rad < tolerance_rad:
+        raise ValueError("approach_zone_rad must not be smaller than tolerance_rad")
+    if abs(error) <= tolerance_rad:
+        return 0.0, True
+    if abs(error) <= approach_zone_rad:
+        magnitude = approach_speed
+    else:
+        magnitude = cruise_speed
+    return math.copysign(magnitude, error), False

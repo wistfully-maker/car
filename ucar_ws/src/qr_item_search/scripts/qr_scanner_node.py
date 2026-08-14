@@ -2,10 +2,12 @@
 import json
 import math
 import threading
+import time
 import uuid
 
 from qr_item_search.image_quality import decode_variants, measure_quality
-from qr_item_search.qr_decode import UniqueQrDecoder
+from qr_item_search.keyframes import KeyframeSaver
+from qr_item_search.qr_decode import UniqueQrDecoder, pyzbar_backend_with_rect
 from qr_item_search.qr_payload import ItemResolver
 from qr_item_search.scanner_logic import ScannerLogic
 
@@ -21,6 +23,8 @@ def main():
     decoder_event = threading.Event()
     stop_event = threading.Event()
     current_identity = [None, None]
+    last_frame_seen = [0.0]
+    frame_seen_interval = 0.2
     publisher = rospy.Publisher("/qr_item_search/scanner_event", String, queue_size=10, latch=True)
     session_id = str(uuid.uuid4())
 
@@ -29,7 +33,34 @@ def main():
         value["scanner_session"] = session_id
         publisher.publish(String(data=json.dumps(value, ensure_ascii=False)))
 
+    keyframe_dir = rospy.get_param("~keyframe_dir", "")
+    keyframes = None
+    if keyframe_dir:
+        keyframes = KeyframeSaver(
+            output_dir=keyframe_dir,
+            warning=rospy.logwarn,
+            error_handler=rospy.logerr,
+        )
+
+    def keyframe_sink(frame, urls, quality, yaw, task_id, search_id, meta):
+        if keyframes is None:
+            return
+        pass_index, station_index = meta if meta is not None else (None, None)
+        rects = []
+        try:
+            rects = [rect for url, rect in pyzbar_backend_with_rect(frame) if url in urls]
+        except Exception as error:
+            rospy.logwarn("keyframe rect decode failed: %s", error)
+        keyframes.save("success", frame, rects, task_id, search_id, pass_index, station_index)
+
+    def failed_station_sink(frame, task_id, search_id, meta):
+        if keyframes is None:
+            return
+        pass_index, station_index = meta if meta is not None else (None, None)
+        keyframes.save("failed", frame, [], task_id, search_id, pass_index, station_index)
+
     worker_count = rospy.get_param("~http_worker_count", 3)
+    decode_scale = rospy.get_param("~decode_scale", 1.5)
     logic = ScannerLogic(
         decoder=UniqueQrDecoder(),
         resolver=ItemResolver(
@@ -39,11 +70,14 @@ def main():
         ),
         event_publisher=publish,
         quality_function=measure_quality,
-        variant_function=decode_variants,
+        variant_function=lambda image, enhanced: decode_variants(
+            image, enhanced, decode_scale=decode_scale),
         worker_count=worker_count,
         expected_count=3,
         warning=rospy.logwarn,
         error_handler=rospy.logerr,
+        keyframe_sink=keyframe_sink,
+        failed_station_sink=failed_station_sink,
     )
 
     def control_callback(message):
@@ -63,6 +97,19 @@ def main():
                 raise ValueError("detected_yaw must be finite")
             if (not task_id) != (not search_id):
                 raise ValueError("scanner control identity must be both empty or both non-empty")
+            capture_id = value.get("capture_id")
+            capture_after = value.get("capture_after")
+            pass_index = value.get("pass_index")
+            station_index = value.get("station_index")
+            if capture_id is not None and (type(capture_id) is not int or capture_id < 1):
+                raise ValueError("capture_id must be a positive integer")
+            if capture_after is not None and (isinstance(capture_after, bool)
+                    or not isinstance(capture_after, (int, float)) or not math.isfinite(capture_after)):
+                raise ValueError("capture_after must be finite")
+            if pass_index is not None and (type(pass_index) is not int or pass_index < 0):
+                raise ValueError("pass_index must be a non-negative integer")
+            if station_index is not None and (type(station_index) is not int or station_index < 0):
+                raise ValueError("station_index must be a non-negative integer")
             if task_id == "" and search_id == "":
                 logic.set_control(False, False, 0.0, False)
                 current_identity[:] = [None, None]
@@ -70,15 +117,25 @@ def main():
             if [task_id, search_id] != current_identity:
                 logic.reset_search(task_id, search_id)
                 current_identity[:] = [task_id, search_id]
-            logic.set_control(enabled, enhanced, yaw, retry_failed=retry)
+            logic.set_control(enabled, enhanced, yaw, retry_failed=retry,
+                              capture_id=capture_id, capture_after=capture_after,
+                              pass_index=pass_index, station_index=station_index)
         except Exception as error:
             rospy.logwarn("invalid scanner control: %s", error)
 
     def image_callback(message):
         try:
             image = bridge.imgmsg_to_cv2(message, "bgr8")
-            if logic.submit_frame(image):
+            stamp = message.header.stamp.to_sec()
+            if logic.submit_frame(image, stamp=stamp):
                 decoder_event.set()
+                now = time.monotonic()
+                if now - last_frame_seen[0] >= frame_seen_interval:
+                    last_frame_seen[0] = now
+                    publish({"protocol_version": 1, "event": "frame_seen",
+                             "task_id": current_identity[0] or "",
+                             "search_id": current_identity[1] or "",
+                             "detected_yaw": 0.0})
         except Exception as error:
             rospy.logwarn("scanner image callback failed: %s", error)
 
@@ -107,6 +164,8 @@ def main():
             logic.set_control(False, False, 0.0, False)
         except Exception as error:
             rospy.logerr("scanner shutdown failed: %s", error)
+        if keyframes is not None:
+            keyframes.shutdown()
         decoder_event.set()
 
     rospy.on_shutdown(shutdown)

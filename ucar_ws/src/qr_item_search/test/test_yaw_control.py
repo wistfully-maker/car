@@ -5,6 +5,7 @@ from qr_item_search.yaw_control import (
     angular_command,
     directed_angular_command,
     normalize_angle,
+    staged_angular_command,
 )
 
 
@@ -143,6 +144,62 @@ class DirectedAngularCommandTest(unittest.TestCase):
             with self.subTest(parameters=parameters):
                 with self.assertRaises(ValueError):
                     directed_angular_command(*parameters)
+
+
+class StagedAngularCommandTest(unittest.TestCase):
+    def test_zero_within_tolerance(self):
+        speed, reached = staged_angular_command(
+            math.radians(1.0), 0.5, 0.2, math.radians(10.0), math.radians(2.0))
+        self.assertEqual((0.0, True), (speed, reached))
+
+    def test_approach_speed_inside_deceleration_zone(self):
+        speed, reached = staged_angular_command(
+            math.radians(6.0), 0.5, 0.2, math.radians(10.0), math.radians(2.0))
+        self.assertAlmostEqual(0.2, speed)
+        self.assertFalse(reached)
+
+    def test_cruise_speed_outside_deceleration_zone(self):
+        speed, reached = staged_angular_command(
+            math.radians(12.0), 0.5, 0.2, math.radians(10.0), math.radians(2.0))
+        self.assertAlmostEqual(0.5, speed)
+        self.assertFalse(reached)
+
+    def test_overshoot_commands_low_speed_reverse(self):
+        speed, reached = staged_angular_command(
+            -math.radians(4.0), 0.5, 0.2, math.radians(10.0), math.radians(2.0))
+        self.assertAlmostEqual(-0.2, speed)
+        self.assertFalse(reached)
+
+    def test_sign_follows_error_outside_zone(self):
+        speed, _ = staged_angular_command(
+            -math.radians(30.0), 0.5, 0.2, math.radians(10.0), math.radians(2.0))
+        self.assertAlmostEqual(-0.5, speed)
+
+    def test_tolerance_boundary_is_inclusive(self):
+        tolerance = math.radians(2.0)
+        speed, reached = staged_angular_command(
+            tolerance, 0.5, 0.2, math.radians(10.0), tolerance)
+        self.assertEqual((0.0, True), (speed, reached))
+
+    def test_rejects_invalid_parameters(self):
+        valid = dict(cruise_speed=0.5, approach_speed=0.2,
+                     approach_zone_rad=math.radians(10.0), tolerance_rad=math.radians(2.0))
+        for name in valid:
+            for value in (True, False, math.nan, math.inf, -math.inf):
+                parameters = dict(valid)
+                parameters[name] = value
+                with self.subTest(name=name, value=value):
+                    with self.assertRaises(ValueError):
+                        staged_angular_command(0.0, **parameters)
+        for parameters in (
+            (0.0, 0.0, 0.2, math.radians(10.0), math.radians(2.0)),
+            (0.0, 0.5, 0.0, math.radians(10.0), math.radians(2.0)),
+            (0.0, 0.5, 0.2, math.radians(1.0), math.radians(2.0)),
+            (0.0, 0.5, 0.2, math.radians(10.0), -0.1),
+        ):
+            with self.subTest(parameters=parameters):
+                with self.assertRaises(ValueError):
+                    staged_angular_command(*parameters)
 
 
 if __name__ == "__main__":

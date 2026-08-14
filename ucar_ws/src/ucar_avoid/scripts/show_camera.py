@@ -10,29 +10,33 @@ class CameraViewer:
     def __init__(self):
         rospy.init_node('camera_viewer', anonymous=True)
         self.bridge = CvBridge()
-        
-        # 订阅摄像头话题（根据实际情况修改话题名）
-        self.sub = rospy.Subscriber('/usb_cam/image_raw', Image, self.callback)
-        
-        # 启动 OpenCV 窗口线程
-        cv2.startWindowThread()
-        cv2.namedWindow('Camera View', cv2.WINDOW_NORMAL)
-        cv2.resizeWindow('Camera View', 640, 480)
-        
-        rospy.loginfo("Camera viewer started. Press Ctrl+C to exit.")
-    
-    def callback(self, msg):
+        # 订阅摄像头话题
+        self.sub = rospy.Subscriber('/usb_cam/image_raw', Image, self.image_callback)
+        rospy.loginfo("Camera viewer started. Press 'q' in the window to quit.")
+
+    def image_callback(self, msg):
         try:
+            # 将ROS图像转换为OpenCV图像（BGR格式）
             cv_image = self.bridge.imgmsg_to_cv2(msg, "bgr8")
-            cv2.imshow('Camera View', cv_image)
-            cv2.waitKey(1)
         except Exception as e:
-            rospy.logwarn("Display error: %s", e)
+            rospy.logerr("Conversion error: %s", e)
+            return
+
+        # 显示图像
+        cv2.imshow("Camera View", cv_image)
+        # 等待按键，1ms 超时以保持响应
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord('q'):
+            rospy.signal_shutdown("User quit")
+
+    def run(self):
+        rospy.spin()
+        cv2.destroyAllWindows()
 
 if __name__ == '__main__':
     try:
         viewer = CameraViewer()
-        rospy.spin()
+        viewer.run()
     except rospy.ROSInterruptException:
         pass
     finally:

@@ -37,6 +37,31 @@ class ScannerLogicTest(unittest.TestCase):
         self.assertFalse(self.logic.process_latest_frame())
         self.quality.assert_not_called()
 
+    def test_slow_decode_crossing_station_boundary_is_accepted(self):
+        entered = threading.Event()
+        release = threading.Event()
+
+        def slow_decode(_frame):
+            entered.set()
+            self.assertTrue(release.wait(2.0))
+            return ["https://stale.example"]
+
+        self.decoder.process.side_effect = slow_decode
+        self.logic.set_control(True, True, 0.0, pass_index=0, station_index=0)
+        self.assertTrue(self.logic.submit_frame("frame", stamp=10.1))
+        worker = threading.Thread(target=self.logic.process_latest_frame)
+        worker.start()
+        self.assertTrue(entered.wait(1.0))
+
+        self.logic.set_control(True, True, 0.5, pass_index=0, station_index=1)
+        release.set()
+        worker.join(2.0)
+
+        self.assertFalse(worker.is_alive())
+        events = [call[0][0]["event"] for call in self.publisher.call_args_list]
+        self.assertIn("detected", events)
+        self.assertEqual(1, self.logic.jobs.qsize())
+
     def test_detects_three_urls_in_order_and_http_pending_allows_next_frame(self):
         self.decoder.process.side_effect = [["https://a", "https://b", "https://c"], ["https://d"]]
         self._process("one")
@@ -68,14 +93,18 @@ class ScannerLogicTest(unittest.TestCase):
         self.assertEqual(1, self.logic.jobs.qsize())
         self.assertEqual(1, self.logic.jobs.get_nowait().order)
 
-    def test_quality_and_enhanced_short_circuit(self):
+    def test_enhanced_variants_merge_distinct_urls_from_same_frame(self):
         self.logic.set_control(True, True, 2)
         self.quality.return_value = {"brightness": 1.0, "overexposed": 0.0, "sharpness": 2.0}
         self.variants.side_effect = None
         self.variants.return_value = ["one", "two", "three"]
-        self.decoder.process.side_effect = [[], ["https://a"]]
+        self.decoder.process.side_effect = [["https://a"], ["https://b"], []]
         self._process()
-        self.assertEqual(["one", "two"], [call[0][0] for call in self.decoder.process.call_args_list])
+        self.assertEqual(["one", "two", "three"],
+                         [call[0][0] for call in self.decoder.process.call_args_list])
+        self.assertEqual(2, self.logic.jobs.qsize())
+        self.assertEqual(["https://a", "https://b"],
+                         [self.logic.jobs.get_nowait().url for _ in range(2)])
         quality = [call[0][0] for call in self.publisher.call_args_list if call[0][0]["event"] == "quality"][0]
         self.assertEqual("quality", quality["event"])
         self.assertEqual(1.0, quality["brightness"])

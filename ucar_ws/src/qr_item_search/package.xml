@@ -2,7 +2,7 @@
 <package format="2">
   <name>qr_item_search</name>
   <version>0.1.0</version>
-  <description>Continuous four-edge QR item search for U-CAR-02</description>
+  <description>Fixed-angle stop-and-scan QR item search for U-CAR-02</description>
 
   <maintainer email="ucar@example.com">U-CAR Team</maintainer>
   <license>BSD-3-Clause</license>

@@ -97,7 +97,7 @@ stage2_creeping = False              # Stage 2 cmd_vel 慢速逼近标志
 # 航点
 FIND_POINTS_LIST = [
     (-0.812845, -2.44196, 0.0, 1.0),
-    (0.771455, -2.44196, 0.0, 1.0),
+    (0.721455, -2.44196, 0.0, 1.0),
     (2.2843, -2.43094, 0.0, 1.0),
 ]
 waypoint_memory = WaypointMemory(len(FIND_POINTS_LIST))
@@ -712,7 +712,7 @@ def LidarCallback(msg):
 
         if dist_forward_item > board_center_to_park_dist + 0.05:
             cmd = Twist()
-            cmd.linear.x = 0.10
+            cmd.linear.x = 0.2
             cmd_vel_pub.publish(cmd)
         else:
             cmd_vel_pub.publish(Twist())
@@ -1098,3 +1098,4 @@ if __name__ == "__main__":
 
     rospy.loginfo("[mission] Waiting for /task/stop_mission_goal (no auto motion)")
     rospy.spin()
+
