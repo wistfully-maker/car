@@ -261,3 +261,32 @@ rostopic pub -1 /voice/speak_done std_msgs/String '{
 返回 `failure`（带 `reason`）、`/voice/speak_done` 返回 `error`，都应进入 `ERROR` 且
 最后运动模式为 `IDLE`。`direction_selected` 之前注入 `success` 不推进；错误
 `task_id`/`goal_id` 与重复消息不推进、不重复发布。
+
+## 11. Gazebo 软门控无运动模拟
+
+本节只验证状态机和 topic，不启动 TCP、Gazebo、导航或速度节点。启动子 launch 时增加：
+
+```bash
+roslaunch task_orchestrator task_orchestrator.launch \
+  enable_tts_bridge:=false gazebo_phase_enabled:=true timeout_gazebo:=330
+```
+
+按前文推进到 `/task/simulation_arrived status=arrived` 后，应进入 `WAITING_GAZEBO`，
+`/task/motion_mode` 为 `IDLE`，并看到一次 `/task/gazebo/start`。记录其中真实 task/goal，
+再任选一种结果：
+
+```bash
+# success
+rostopic pub -1 /task/gazebo/complete std_msgs/String \
+  "data: '{\"protocol_version\":1,\"task_id\":\"<TASK_ID>\",\"goal_id\":\"<GAZEBO_GOAL_ID>\",\"status\":\"success\"}'"
+
+# Gazebo 失败：仍应播报并接第三部分
+rostopic pub -1 /task/gazebo/complete std_msgs/String \
+  "data: '{\"protocol_version\":1,\"task_id\":\"<TASK_ID>\",\"goal_id\":\"<GAZEBO_GOAL_ID>\",\"status\":\"failure\",\"reason\":\"manual_test\"}'"
+```
+
+两种结果都进入 `WAITING_SIMULATION_SPEECH`；错误 identity 和重复 complete 不推进。
+完全不发 complete 时，330 秒后也应软超时进入同一播报。真实电脑端
+`gazebo_task_bridge` 与小车使用不同 ROS Master，通过 TCP 1525 通信；其内部只发布
+`/task_controller/start` 并等待 `/task_controller/done` 的本任务 `False -> True`，不接触
+任何小车运动 topic。

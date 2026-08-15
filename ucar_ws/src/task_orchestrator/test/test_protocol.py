@@ -13,6 +13,7 @@ from task_orchestrator.protocol import (
     parse_arrival,
     parse_cancel,
     parse_dependencies_ready,
+    parse_gazebo_complete,
     parse_llm_result,
     parse_navigation_handoff_status,
     parse_qr_result,
@@ -27,6 +28,35 @@ def encode(value):
 
 
 class ProtocolTests(unittest.TestCase):
+    def test_gazebo_complete_accepts_only_correlated_success_or_failure(self):
+        success = {
+            "protocol_version": 1,
+            "task_id": "task-1",
+            "goal_id": "gazebo-1",
+            "status": "success",
+        }
+        self.assertEqual(
+            "success",
+            parse_gazebo_complete(encode(success), "task-1", "gazebo-1")["status"],
+        )
+        failure = dict(success, status="failure", reason="controller timeout")
+        self.assertEqual(
+            "controller timeout",
+            parse_gazebo_complete(encode(failure), "task-1", "gazebo-1")["reason"],
+        )
+        for invalid in (
+            dict(success, protocol_version=2),
+            dict(success, task_id="stale"),
+            dict(success, goal_id="stale"),
+            dict(success, status="done"),
+            dict(success, status="failure"),
+            dict(success, status="failure", reason="  "),
+            dict(success, status="failure", reason=123),
+        ):
+            with self.subTest(invalid=invalid):
+                with self.assertRaises(ProtocolError):
+                    parse_gazebo_complete(encode(invalid), "task-1", "gazebo-1")
+
     def test_navigation_handoff_status_is_correlated_and_bounded(self):
         ready = {
             "protocol_version": 1, "task_id": "task-001",

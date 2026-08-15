@@ -219,6 +219,7 @@ if [[ "$master_available" == true ]]; then
   [[ "${flags[start_llm]}" == true ]] && conflicts+=(/spark_llm_node)
   if [[ "${flags[start_orchestrator]}" == true ]]; then
     conflicts+=(/task_orchestrator /voice_task_adapter /tts_bridge)
+    conflicts+=(/gazebo_tcp_bridge_server)
   fi
   [[ "${flags[start_fast_nav_adapter]}" == true ]] && conflicts+=(/fast_nav_adapter)
   [[ "${flags[start_readiness_gate]}" == true ]] && conflicts+=(/readiness_gate)

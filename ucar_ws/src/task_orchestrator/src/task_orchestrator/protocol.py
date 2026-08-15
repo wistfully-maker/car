@@ -109,6 +109,23 @@ def parse_arrival(raw_json, expected_task_id, expected_goal_id):
     return message
 
 
+def parse_gazebo_complete(raw_json, expected_task_id, expected_goal_id):
+    message = load_object(raw_json)
+    _require_identity(message, "task_id", expected_task_id)
+    _require_identity(message, "goal_id", expected_goal_id)
+    status = require_text(message.get("status"), "status")
+    if status not in ("success", "failure"):
+        raise ProtocolError("gazebo status must be success or failure")
+    if status == "failure":
+        raw_reason = message.get("reason")
+        message["reason"] = require_text(raw_reason, "reason")
+        if raw_reason != message["reason"]:
+            raise ProtocolError("reason must not contain surrounding whitespace")
+    elif "reason" in message:
+        raise ProtocolError("success must not include reason")
+    return message
+
+
 def parse_navigation_handoff_status(
     raw_json, expected_task_id, expected_goal_id
 ):

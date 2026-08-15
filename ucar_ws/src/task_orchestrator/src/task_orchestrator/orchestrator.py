@@ -22,6 +22,7 @@ class TaskOrchestrator:
     DELIVERY_HANDED_OFF = "DELIVERY_HANDED_OFF"
     NAVIGATING_TO_WORKSHOP = "NAVIGATING_TO_WORKSHOP"
     NAVIGATING_TO_SIM_WORKSHOP = "NAVIGATING_TO_SIM_WORKSHOP"
+    WAITING_GAZEBO = "WAITING_GAZEBO"
     NAVIGATING_LINE_START = "NAVIGATING_LINE_START"
     WAITING_LINE_DIRECTION = "WAITING_LINE_DIRECTION"
     LINE_FOLLOWING = "LINE_FOLLOWING"
@@ -42,6 +43,7 @@ class TaskOrchestrator:
             DELIVERY_HANDED_OFF,
             NAVIGATING_TO_WORKSHOP,
             NAVIGATING_TO_SIM_WORKSHOP,
+            WAITING_GAZEBO,
             NAVIGATING_LINE_START,
             WAITING_LINE_DIRECTION,
             LINE_FOLLOWING,
@@ -62,6 +64,7 @@ class TaskOrchestrator:
         DELIVERY_HANDED_OFF: "delivery_navigation",
         NAVIGATING_TO_WORKSHOP: "delivery_navigation",
         NAVIGATING_TO_SIM_WORKSHOP: "simulation_navigation",
+        WAITING_GAZEBO: "gazebo",
         NAVIGATING_LINE_START: "line_navigation",
         WAITING_LINE_DIRECTION: "line_direction",
         LINE_FOLLOWING: "line_follow",
@@ -69,12 +72,14 @@ class TaskOrchestrator:
     }
 
     def __init__(self, outputs, clock, id_factory, timeouts,
-                 simulation_phase_enabled=False, line_start_goal=None):
+                 simulation_phase_enabled=False, gazebo_phase_enabled=False,
+                 line_start_goal=None):
         self._outputs = outputs
         self._clock = clock
         self._id_factory = id_factory
         self._timeouts = dict(timeouts)
         self.simulation_phase_enabled = bool(simulation_phase_enabled)
+        self.gazebo_phase_enabled = bool(gazebo_phase_enabled)
         self._line_start_goal = self._validate_line_start_goal(line_start_goal)
         self.state = self.IDLE
         self.task = None
@@ -373,11 +378,11 @@ class TaskOrchestrator:
             ),
         )
 
-    def _start_speech(self, state, text):
+    def _start_speech(self, state, text, status_message=""):
         speech_id = self._id_factory()
         self.task["speech_id"] = speech_id
         self._transition(state)
-        self._publish_status("running")
+        self._publish_status("running", status_message)
         self._emit(
             "publish_speech",
             {
@@ -486,13 +491,44 @@ class TaskOrchestrator:
         if message["status"] == "failed":
             self._fail(message["message"])
             return
+        if self.gazebo_phase_enabled:
+            goal_id = self._id_factory()
+            self.task["gazebo_goal_id"] = goal_id
+            self._transition(self.WAITING_GAZEBO)
+            self._publish_status("running")
+            self._emit(
+                "publish_gazebo_start",
+                {
+                    "protocol_version": 1,
+                    "task_id": self.task["task_id"],
+                    "goal_id": goal_id,
+                    "selected_item": self.task["simulation"]["selected_item"],
+                    "target_category": self.task["simulation"]["category"],
+                    "target_workshop": self.task["simulation"]["workshop"],
+                },
+            )
+            return
+        self._finish_gazebo_gate()
+
+    def _finish_gazebo_gate(self, diagnostic=""):
         self._start_speech(
             self.WAITING_SIMULATION_SPEECH,
             format_simulation_delivery_speech(
                 self.task["simulation"]["selected_item"],
                 self.task["simulation"]["workshop"],
             ),
+            diagnostic,
         )
+
+    def on_gazebo_complete(self, message):
+        if self.state != self.WAITING_GAZEBO:
+            return
+        if not self._matches(message, "goal_id", "gazebo_goal_id"):
+            return
+        diagnostic = ""
+        if message["status"] == "failure":
+            diagnostic = "gazebo failure: %s" % message.get("reason", "unknown")
+        self._finish_gazebo_gate(diagnostic)
 
     def on_cancel(self, message):
         if self.state not in self._ACTIVE_STATES:
@@ -514,4 +550,7 @@ class TaskOrchestrator:
         if self._clock() < self.deadline:
             return
         timed_out_state = self.state
+        if timed_out_state == self.WAITING_GAZEBO:
+            self._finish_gazebo_gate("gazebo timeout")
+            return
         self._fail("timeout in state %s" % timed_out_state)

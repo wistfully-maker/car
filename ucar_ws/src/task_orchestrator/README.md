@@ -39,7 +39,9 @@ stop 导航栈：实物车间识别、动态避障导航与停车后回传 `/tas
  -> /task/delivery_arrived -> WAITING_DELIVERY_SPEECH
  -> /voice/speak：“已将{实物}放入{实物车间}” -> 匹配 /voice/speak_done success
  -> /task/simulation_navigation_goal -> NAVIGATING_TO_SIM_WORKSHOP -> stop 栈 Phase 2
- -> /task/simulation_arrived -> WAITING_SIMULATION_SPEECH
+ -> /task/simulation_arrived -> WAITING_GAZEBO（IDLE）
+ -> /task/gazebo/start -> TCP 1525 -> 电脑 Gazebo -> /task/gazebo/complete
+ -> success / failure / timeout 软汇合 -> WAITING_SIMULATION_SPEECH
  -> /voice/speak：“仿真任务已完成，已将{仿真物品}放入{仿真车间}”
  -> 匹配 /voice/speak_done success -> COMPLETE
 ```
@@ -224,8 +226,9 @@ rostopic echo /task/delivery_navigation_goal
 
 状态依次应为 `CHECKING_DEPENDENCIES`、`NAVIGATING_TO_PICKUP`、`WAITING_QR`、
 `WAITING_LLM`、`WAITING_SPEECH`、`DELIVERY_HANDED_OFF`、`NAVIGATING_TO_WORKSHOP`、
-`WAITING_DELIVERY_SPEECH`、`NAVIGATING_TO_SIM_WORKSHOP`、
-`WAITING_SIMULATION_SPEECH`、`COMPLETE`。readiness 回执示例：
+`WAITING_DELIVERY_SPEECH`、`NAVIGATING_TO_SIM_WORKSHOP`、`WAITING_GAZEBO`、
+`WAITING_SIMULATION_SPEECH`、`NAVIGATING_LINE_START`、`WAITING_LINE_DIRECTION`、
+`LINE_FOLLOWING`、`WAITING_FINAL_SPEECH`、`COMPLETE`。readiness 回执示例：
 
 ```json
 {"protocol_version":1,"task_id":"task-...","status":"ready"}
@@ -290,8 +293,9 @@ rostopic echo -n 1 /cmd_vel             # 六个分量均为 0
 
 默认第二部分已接入时，supervisor 会在安全交接后启动 stop 栈并继续两次导航与停车。第一次
 `/task/delivery_arrived` 只触发实物停车播报；必须收到匹配的 `/voice/speak_done success` 才发布
-`/task/simulation_navigation_goal`。第二次 `/task/simulation_arrived` 只触发最终播报；同样必须收到
-匹配的成功回执才进入 `COMPLETE`。关闭 `start_navigation_handoff` 回滚到第一部分时，流程才停在
+`/task/simulation_navigation_goal`。第二次 `/task/simulation_arrived` 先进入 Gazebo 软门控，
+其 success/failure/timeout 都触发原仿真播报；匹配的成功语音回执随后进入第三部分。
+关闭 `start_navigation_handoff` 回滚到第一部分时，流程才停在
 `DELIVERY_HANDED_OFF`。任何到达或语音回执都不得人工伪造来证明实车完成。
 
 identity 必须从上一阶段实际输出复制，不能猜。旧 `task_id`、错 `goal_id/search_id/request_id/speech_id`
@@ -301,7 +305,7 @@ identity 必须从上一阶段实际输出复制，不能猜。旧 `task_id`、�
 
 | 文件/命名空间 | 当前关键值 | 修改方式 |
 |---|---|---|
-| `task_orchestrator/config/orchestrator.yaml` `timeouts` | dependency 120、pickup 300、QR 120、LLM 120、speech 60、delivery 300、cancel 15 秒 | 节点启动时读取；改 YAML 后重启整个 root |
+| `task_orchestrator/config/orchestrator.yaml` `timeouts` | dependency 120、pickup 300、QR 120、LLM 120、speech 60、delivery 300、Gazebo 330、cancel 15 秒 | 节点启动时读取；改 YAML 后重启整个 root |
 | 同文件 `fast_nav_adapter` | action 300、settle 0.5、线速度停止阈值 0.03、角速度停止阈值 0.05 | 启动读取，重启 |
 | 同文件 `readiness_gate` | 消息最大龄 3、检查周期 1、TF/action 探测 0.05、日志 10 秒；frame 与节点/planner 路径见文件 | 启动读取，重启 |
 | 同文件 `velocity_arbiter` | source timeout 0.3、周期 0.05、线速度绝对上限 1.0、角速度绝对上限 2.0 | 启动读取，重启 |
@@ -650,3 +654,36 @@ rostopic echo /cmd_vel/line_follow
 
 实车看护验收逐层放行：导航起点与停车姿态 → IDLE 下验证两路图像 → 红灯等待与方向锁定
 → 单独放行 `/cmd_vel/line_follow` → 最终停车线与单次“任务完成”播报 → 全流程。
+
+## 11. 电脑 Gazebo 软门控（待部署）
+
+第二部分仿真车间停车成功后，新增流程为：
+
+```text
+/task/simulation_arrived
+ -> WAITING_GAZEBO（motion mode = IDLE）
+ -> /task/gazebo/start
+ -> TCP 端口 1525 -> 电脑 gazebo_task_bridge
+ -> /task_controller/start
+ -> /task_controller/done 的本任务 False -> True
+ -> /task/gazebo/complete
+ -> 原仿真结果播报
+ -> 第三部分
+```
+
+小车和电脑使用**不同 ROS Master**，只通过 TCP 交换 protocol v1 JSON；电脑端不得连接
+小车 ROS Master。车端总 launch 默认开启桥接 server，电脑端使用独立包
+`gazebo_task_bridge`，并强制 `car3/mission.launch enable_tcp:=false`，禁止原
+`sim_tcp_client.py` 同时连接。
+
+车端外层超时 `timeout_gazebo=330` 秒，电脑内部任务超时 300 秒。Gazebo 失败、TCP
+断线或超时是软失败：留下诊断后仍执行原仿真播报并进入第三部分；物理停车失败、人工取消
+和 TTS 失败仍是硬失败。两个外部 ROS topic 都是非 latch：
+
+```text
+/task/gazebo/start     std_msgs/String JSON（车端发布）
+/task/gazebo/complete  std_msgs/String JSON（车端 TCP bridge 发布）
+```
+
+正式部署时应给 `gazebo_bridge_allowed_client_ip:=<电脑IP>`；空字符串允许任意来源，仅适合
+受控局域网首次联调。修改 IP、端口或超时后必须停止并重启根 launch。

@@ -17,6 +17,7 @@ TIMEOUTS = {
     "speech": 60.0,
     "delivery_navigation": 300.0,
     "simulation_navigation": 300.0,
+    "gazebo": 330.0,
     "line_navigation": 310.0,
     "line_direction": 35.0,
     "line_follow": 125.0,
@@ -33,11 +34,10 @@ LINE_START_GOAL = {
 
 
 class Harness:
-    def __init__(self, simulation_phase_enabled=False):
+    def __init__(self, simulation_phase_enabled=False, gazebo_phase_enabled=False):
         self.outputs = []
         self.now = [1000.0]
-        self.ids = iter(
-            [
+        ids = [
                 "pickup-1",
                 "search-1",
                 "llm-1",
@@ -51,13 +51,16 @@ class Harness:
                 "final-speech-1",
                 "unused-12",
             ]
-        )
+        if gazebo_phase_enabled:
+            ids.insert(ids.index("simulation-speech-1"), "gazebo-1")
+        self.ids = iter(ids)
         self.orch = TaskOrchestrator(
             self.outputs,
             lambda: self.now[0],
             lambda: next(self.ids),
             dict(TIMEOUTS),
             simulation_phase_enabled=simulation_phase_enabled,
+            gazebo_phase_enabled=gazebo_phase_enabled,
             line_start_goal=dict(LINE_START_GOAL),
         )
 
@@ -189,6 +192,17 @@ class Harness:
             }
         )
 
+    def gazebo_complete(self, goal_id="gazebo-1", status="success", reason=""):
+        message = {
+            "protocol_version": 1,
+            "task_id": "task-1",
+            "goal_id": goal_id,
+            "status": status,
+        }
+        if status == "failure":
+            message["reason"] = reason or "gazebo failed"
+        self.orch.on_gazebo_complete(message)
+
     def line_navigation_arrived(self, goal_id="line-nav-1", status="arrived"):
         self.orch.on_line_navigation_arrived(
             {
@@ -245,6 +259,10 @@ class Harness:
         if state == "NAVIGATING_TO_SIM_WORKSHOP":
             return
         self.simulation_arrived()
+        if state == "WAITING_GAZEBO":
+            return
+        if self.orch.state == "WAITING_GAZEBO":
+            self.gazebo_complete()
         if state == "WAITING_SIMULATION_SPEECH":
             return
         self.speech_done()
@@ -669,6 +687,72 @@ class OrchestratorDualWorkshopTests(unittest.TestCase):
         goal_count = len(h.actions("publish_simulation_navigation_goal"))
         h.speech_done(speech_id="delivery-speech-1")
         self.assertEqual(goal_count, len(h.actions("publish_simulation_navigation_goal")))
+
+
+class GazeboSoftGateTests(unittest.TestCase):
+    def _waiting(self):
+        h = Harness(simulation_phase_enabled=True, gazebo_phase_enabled=True)
+        h.reach("WAITING_GAZEBO")
+        return h
+
+    def test_arrival_publishes_one_correlated_start_before_speech(self):
+        h = self._waiting()
+        self.assertEqual("WAITING_GAZEBO", h.orch.state)
+        self.assertEqual("IDLE", h.actions("publish_motion_mode")[-1])
+        self.assertEqual(2, len(h.actions("publish_speech")))
+        self.assertEqual(
+            [{
+                "protocol_version": 1,
+                "task_id": "task-1",
+                "goal_id": "gazebo-1",
+                "selected_item": "毛巾",
+                "target_category": "日用品",
+                "target_workshop": "日用品加工车间",
+            }],
+            h.actions("publish_gazebo_start"),
+        )
+
+    def test_success_and_failure_both_start_original_speech_once(self):
+        for status in ("success", "failure"):
+            with self.subTest(status=status):
+                h = self._waiting()
+                h.gazebo_complete(status=status, reason="scene failed")
+                self.assertEqual("WAITING_SIMULATION_SPEECH", h.orch.state)
+                self.assertEqual(3, len(h.actions("publish_speech")))
+                self.assertEqual(
+                    "仿真任务已完成，已将毛巾放入日用品加工车间",
+                    h.actions("publish_speech")[-1]["text"],
+                )
+                h.gazebo_complete(status=status, reason="duplicate")
+                self.assertEqual(3, len(h.actions("publish_speech")))
+
+    def test_timeout_is_soft_and_keeps_phase3_opportunity(self):
+        h = self._waiting()
+        h.now[0] = h.orch.deadline + 0.01
+        h.orch.tick()
+        self.assertEqual("WAITING_SIMULATION_SPEECH", h.orch.state)
+        self.assertIn("gazebo timeout", h.actions("publish_status")[-1]["message"])
+        h.speech_done()
+        self.assertEqual("NAVIGATING_LINE_START", h.orch.state)
+        self.assertEqual(1, len(h.actions("publish_line_navigation_goal")))
+
+    def test_stale_complete_does_not_advance(self):
+        h = self._waiting()
+        h.orch.on_gazebo_complete({
+            "protocol_version": 1,
+            "task_id": "task-other",
+            "goal_id": "gazebo-1",
+            "status": "success",
+        })
+        h.gazebo_complete(goal_id="stale-goal")
+        self.assertEqual("WAITING_GAZEBO", h.orch.state)
+        self.assertEqual(2, len(h.actions("publish_speech")))
+
+    def test_cancel_during_gazebo_wait_remains_hard_stop(self):
+        h = self._waiting()
+        h.orch.on_cancel({"task_id": "task-1", "reason": "operator_cancel"})
+        self.assertEqual("CANCELLED", h.orch.state)
+        self.assertEqual("IDLE", h.actions("publish_motion_mode")[-1])
 
 
 class Phase3LineFollowTests(unittest.TestCase):

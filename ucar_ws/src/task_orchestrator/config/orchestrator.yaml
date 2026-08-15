@@ -6,6 +6,8 @@ timeouts:
   speech: 60.0
   delivery_navigation: 300.0
   simulation_navigation: 300.0
+  # 电脑端内部任务 300 秒；外层多留 30 秒处理网络与回传。
+  gazebo: 330.0
   # 第三阶段外层超时严格大于 line_follow_integration 内部 300/30/120 秒。
   line_navigation: 310.0
   line_direction: 35.0
@@ -16,6 +18,15 @@ timeouts:
 # true 时实物停车确认后发布 /task/simulation_navigation_goal，
 # 等待 /task/simulation_arrived 后完成。
 simulation_phase_enabled: false
+
+# 电脑 Gazebo 软门控。子 launch 默认关闭，总 launch 显式开启。
+gazebo_phase_enabled: false
+
+gazebo_tcp_bridge:
+  bind_host: 0.0.0.0
+  port: 1525
+  allowed_client_ip: ""
+  max_frame_bytes: 8192
 
 voice_adapter:
   debounce_seconds: 2.0

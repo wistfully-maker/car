@@ -367,3 +367,19 @@ Codex 在 `a2d43379e050a817a42a66262c65815746302d0f` 上复核后发现并修正
 修正后全量本地回归：`line_follow_integration 61`、`task_orchestrator 322`
 （其中 31 项动态 Bash 测试因本机无可用 Bash 跳过）、`stop 113`、`llm_spark 11`。
 仍未执行车端 catkin 编译、ROS 运行时 topic 模拟或实车运动验收。
+
+## 15. Gazebo 软门控本地实施检查点（2026-08-14）
+
+- 采用双 ROS Master + TCP 隔离；车端 server 默认端口 1525，电脑端独立包为
+  `integration/gazebo_task_bridge`，未修改 `car3`。
+- 状态机新增 `WAITING_GAZEBO`。车端外层超时 330 秒；Gazebo success、failure、断线和
+  timeout 都继续原仿真播报及第三部分，取消/TTS/物理停车失败仍硬失败。
+- 外部 start/complete 使用 protocol v1、`task_id + goal_id` 关联；电脑内部类别映射为
+  `食品/日用品/电子产品 -> food/daily/electronics`。
+- 针对 `/task_controller/done` 的 latched Bool，电脑端必须观察当前任务的
+  `False -> True` 才回 success。
+- 权威电脑包已复制到
+  `D:\program_sec\智能车\gazebo_ws333\gazebo_ws333\src\gazebo_task_bridge`，源文件哈希一致；
+  Windows 无 catkin，因此只完成 Python、localhost socket 和 XML/package 验证。
+- 本检查点明确停在部署之前：没有 SSH、没有车端备份/覆盖/编译/启动，也没有 Gazebo 场景
+  或实车验收。部署时只允许白名单同步 `task_orchestrator`，不得覆盖车端已实测 V5 巡线文件。

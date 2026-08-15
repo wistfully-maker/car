@@ -21,6 +21,7 @@ from task_orchestrator.protocol import (
     parse_arrival,
     parse_cancel,
     parse_dependencies_ready,
+    parse_gazebo_complete,
     parse_llm_result,
     parse_line_status,
     parse_navigation_handoff_status,
@@ -38,6 +39,7 @@ DEFAULT_TIMEOUTS = {
     "speech": 60.0,
     "delivery_navigation": 300.0,
     "simulation_navigation": 300.0,
+    "gazebo": 330.0,
     "line_navigation": 310.0,
     "line_direction": 35.0,
     "line_follow": 125.0,
@@ -73,6 +75,9 @@ def _make_publishers():
         ),
         "publish_simulation_navigation_goal": rospy.Publisher(
             "/task/simulation_navigation_goal", String, queue_size=10
+        ),
+        "publish_gazebo_start": rospy.Publisher(
+            "/task/gazebo/start", String, queue_size=10, latch=False
         ),
         "publish_line_navigation_goal": rospy.Publisher(
             "/task/line_navigation_goal", String, queue_size=10
@@ -330,6 +335,23 @@ def _subscribe(orchestrator, outputs, publishers, callback_lock):
         ),
     )
     rospy.Subscriber(
+        "/task/gazebo/complete",
+        String,
+        _callback(
+            orchestrator,
+            outputs,
+            publishers,
+            lambda raw: parse_gazebo_complete(
+                raw,
+                orchestrator.task["task_id"],
+                orchestrator.task["gazebo_goal_id"],
+            ),
+            orchestrator.on_gazebo_complete,
+            callback_lock,
+            TaskOrchestrator.WAITING_GAZEBO,
+        ),
+    )
+    rospy.Subscriber(
         "/task/line_navigation_arrived",
         String,
         _callback(
@@ -390,6 +412,7 @@ def _subscribe(orchestrator, outputs, publishers, callback_lock):
                 TaskOrchestrator.DELIVERY_HANDED_OFF,
                 TaskOrchestrator.NAVIGATING_TO_WORKSHOP,
                 TaskOrchestrator.NAVIGATING_TO_SIM_WORKSHOP,
+                TaskOrchestrator.WAITING_GAZEBO,
                 TaskOrchestrator.NAVIGATING_LINE_START,
                 TaskOrchestrator.WAITING_LINE_DIRECTION,
                 TaskOrchestrator.LINE_FOLLOWING,
@@ -407,6 +430,9 @@ def main():
     simulation_phase_enabled = bool(
         rospy.get_param("~simulation_phase_enabled", False)
     )
+    gazebo_phase_enabled = bool(
+        rospy.get_param("~gazebo_phase_enabled", False)
+    )
     line_start_goal = rospy.get_param("~line_start_goal", None)
     orchestrator = TaskOrchestrator(
         outputs,
@@ -414,6 +440,7 @@ def main():
         lambda: uuid.uuid4().hex,
         timeouts,
         simulation_phase_enabled=simulation_phase_enabled,
+        gazebo_phase_enabled=gazebo_phase_enabled,
         line_start_goal=line_start_goal,
     )
     publishers = _make_publishers()

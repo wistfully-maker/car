@@ -464,6 +464,30 @@ class CompetitionBringupTests(unittest.TestCase):
             forwarded["simulation_phase_enabled"],
         )
 
+    def test_gazebo_soft_gate_and_tcp_server_are_forwarded(self):
+        args = {arg.attrib["name"]: arg.attrib.get("default")
+                for arg in self.root.findall("arg")}
+        self.assertEqual("true", args["gazebo_phase_enabled"])
+        self.assertEqual("330.0", args["timeout_gazebo"])
+        self.assertEqual("0.0.0.0", args["gazebo_bridge_bind_host"])
+        self.assertEqual("1525", args["gazebo_bridge_port"])
+        orchestrator_include = next(
+            include for group in self.root.findall("group")
+            if group.attrib.get("if") == "$(arg start_orchestrator)"
+            for include in group.findall("include")
+        )
+        forwarded = {arg.attrib["name"]: arg.attrib["value"]
+                     for arg in orchestrator_include.findall("arg")}
+        self.assertEqual("$(arg gazebo_phase_enabled)",
+                         forwarded["enable_gazebo_bridge_server"])
+        self.assertEqual("$(arg gazebo_phase_enabled)",
+                         forwarded["gazebo_phase_enabled"])
+        self.assertEqual("$(arg timeout_gazebo)", forwarded["timeout_gazebo"])
+        self.assertEqual("$(arg gazebo_bridge_bind_host)",
+                         forwarded["gazebo_bridge_bind_host"])
+        self.assertEqual("$(arg gazebo_bridge_port)",
+                         forwarded["gazebo_bridge_port"])
+
     def test_has_one_shared_camera_and_remaps_qr_velocity(self):
         cameras = [node for node in self.root.iter("node")
                    if node.attrib.get("pkg") == "usb_cam"]

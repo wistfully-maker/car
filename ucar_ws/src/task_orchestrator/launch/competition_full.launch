@@ -47,6 +47,11 @@
   <arg name="phase3_config"
        default="$(find line_follow_integration)/config/phase3.yaml"/>
   <arg name="simulation_phase_enabled" default="true"/>
+  <arg name="gazebo_phase_enabled" default="true"/>
+  <arg name="gazebo_bridge_bind_host" default="0.0.0.0"/>
+  <arg name="gazebo_bridge_port" default="1525"/>
+  <arg name="gazebo_bridge_allowed_client_ip" default=""/>
+  <arg name="gazebo_bridge_max_frame_bytes" default="8192"/>
   <arg name="legacy_nav_launch"
        default="$(find task_orchestrator)/launch/legacy_navigation_include.launch"/>
   <arg name="stop_integration_launch"
@@ -89,6 +94,7 @@
   <arg name="timeout_qr_search" default="150.0"/>
   <arg name="timeout_llm_classification" default="120.0"/>
   <arg name="timeout_speech" default="60.0"/>
+  <arg name="timeout_gazebo" default="330.0"/>
   <arg name="timeout_line_navigation" default="310.0"/>
   <arg name="timeout_line_direction" default="35.0"/>
   <arg name="timeout_line_follow" default="125.0"/>
@@ -177,13 +183,26 @@
       <arg name="enable_fast_nav_adapter" value="false"/>
       <arg name="enable_readiness_gate" value="false"/>
       <arg name="enable_velocity_arbiter" value="false"/>
+      <arg name="enable_gazebo_bridge_server"
+           value="$(arg gazebo_phase_enabled)"/>
       <arg name="simulation_phase_enabled"
            value="$(arg simulation_phase_enabled)"/>
+      <arg name="gazebo_phase_enabled"
+           value="$(arg gazebo_phase_enabled)"/>
+      <arg name="gazebo_bridge_bind_host"
+           value="$(arg gazebo_bridge_bind_host)"/>
+      <arg name="gazebo_bridge_port"
+           value="$(arg gazebo_bridge_port)"/>
+      <arg name="gazebo_bridge_allowed_client_ip"
+           value="$(arg gazebo_bridge_allowed_client_ip)"/>
+      <arg name="gazebo_bridge_max_frame_bytes"
+           value="$(arg gazebo_bridge_max_frame_bytes)"/>
       <arg name="timeout_dependency_ready" value="$(arg timeout_dependency_ready)"/>
       <arg name="timeout_pickup_navigation" value="$(arg timeout_pickup_navigation)"/>
       <arg name="timeout_qr_search" value="$(arg timeout_qr_search)"/>
       <arg name="timeout_llm_classification" value="$(arg timeout_llm_classification)"/>
       <arg name="timeout_speech" value="$(arg timeout_speech)"/>
+      <arg name="timeout_gazebo" value="$(arg timeout_gazebo)"/>
       <arg name="phase3_config" value="$(arg phase3_config)"/>
       <arg name="timeout_line_navigation" value="$(arg timeout_line_navigation)"/>
       <arg name="timeout_line_direction" value="$(arg timeout_line_direction)"/>

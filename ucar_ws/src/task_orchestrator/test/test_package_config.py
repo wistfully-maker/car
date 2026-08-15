@@ -33,6 +33,7 @@ class PackageConfigTests(unittest.TestCase):
             "scripts/fast_nav_adapter_node.py",
             "scripts/system_readiness_gate_node.py",
             "scripts/velocity_arbiter_node.py",
+            "scripts/gazebo_tcp_bridge_server_node.py",
             "test/manual_simulation.md",
         ):
             self.assertTrue((ROOT / relative).is_file(), relative)
@@ -72,6 +73,7 @@ class PackageConfigTests(unittest.TestCase):
                 "/task/simulation_navigation_goal",
                 "/task/line_navigation_goal",
                 "/task/line_follow/start",
+                "/task/gazebo/start",
                 "/task/motion_mode",
             },
             publisher_topics,
@@ -90,6 +92,7 @@ class PackageConfigTests(unittest.TestCase):
                 "/task/simulation_arrived",
                 "/task/line_navigation_arrived",
                 "/task/line_follow/status",
+                "/task/gazebo/complete",
             },
             subscriber_topics,
         )
@@ -100,7 +103,7 @@ class PackageConfigTests(unittest.TestCase):
         self.assertEqual(
             {"task_orchestrator", "voice_task_adapter", "tts_bridge",
              "fast_nav_adapter", "readiness_gate", "velocity_arbiter",
-             "navigation_handoff_supervisor"},
+             "navigation_handoff_supervisor", "gazebo_tcp_bridge_server"},
             set(nodes),
         )
         for node in nodes.values():
@@ -120,6 +123,7 @@ class PackageConfigTests(unittest.TestCase):
             "parse_speech_done",
             "parse_cancel",
             "parse_line_status",
+            "parse_gazebo_complete",
         ):
             self.assertIn(parser, source)
         self.assertNotIn("orch._transition", source)
@@ -198,6 +202,7 @@ class PackageConfigTests(unittest.TestCase):
             "fast_nav_adapter_node.py",
             "system_readiness_gate_node.py",
             "velocity_arbiter_node.py",
+            "gazebo_tcp_bridge_server_node.py",
         ):
             if ("scripts/%s" % script) in cmake:
                 self.assertTrue((ROOT / "scripts" / script).is_file(), script)
@@ -443,6 +448,53 @@ class PackageConfigTests(unittest.TestCase):
         self.assertGreater(310.0, 300.0)
         self.assertGreater(35.0, 30.0)
         self.assertGreater(125.0, 120.0)
+
+    def test_gazebo_soft_gate_configuration_and_tcp_server_are_explicit(self):
+        config = yaml.safe_load(
+            (ROOT / "config/orchestrator.yaml").read_text(encoding="utf-8")
+        )
+        self.assertEqual(330.0, config["timeouts"]["gazebo"])
+        self.assertFalse(config["gazebo_phase_enabled"])
+        bridge = config["gazebo_tcp_bridge"]
+        self.assertEqual("0.0.0.0", bridge["bind_host"])
+        self.assertEqual(1525, bridge["port"])
+        self.assertEqual(8192, bridge["max_frame_bytes"])
+
+        launch = ET.parse(ROOT / "launch/task_orchestrator.launch").getroot()
+        args = {node.attrib["name"]: node.attrib["default"] for node in launch.findall("arg")}
+        self.assertEqual("false", args["gazebo_phase_enabled"])
+        self.assertEqual("330.0", args["timeout_gazebo"])
+        self.assertEqual("false", args["enable_gazebo_bridge_server"])
+        self.assertEqual("1525", args["gazebo_bridge_port"])
+
+        server = (ROOT / "scripts/gazebo_tcp_bridge_server_node.py").read_text(
+            encoding="utf-8"
+        )
+        for required in (
+            '"/task/gazebo/start"', '"/task/gazebo/complete"',
+            '"~bind_host"', '"~port"', '"~allowed_client_ip"',
+            '"~max_frame_bytes"',
+        ):
+            self.assertIn(required, server)
+        for forbidden in ("/cmd_vel", "/task/line_navigation_goal", "/voice/speak"):
+            self.assertNotIn(forbidden, server)
+        start_script = (ROOT / "scripts/start_competition.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("conflicts+=(/gazebo_tcp_bridge_server)", start_script)
+
+    def test_gazebo_operator_docs_cover_isolated_soft_gate(self):
+        combined = "\n".join(
+            (ROOT / relative).read_text(encoding="utf-8")
+            for relative in ("README.md", "test/manual_simulation.md")
+        )
+        for required in (
+            "WAITING_GAZEBO", "/task/gazebo/start", "/task/gazebo/complete",
+            "1525", "330", "不同 ROS Master", "TCP",
+            "gazebo_task_bridge", "task_controller/done", "False -> True",
+            "Gazebo 失败", "第三部分",
+        ):
+            self.assertIn(required, combined)
 
     def test_phase3_operator_documentation_covers_full_timeline(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")

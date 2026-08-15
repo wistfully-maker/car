@@ -104,8 +104,8 @@ class VehicleCharacterizationTests(unittest.TestCase):
         self.assertEqual(
             [
                 (-0.812845, -2.44196, 0.0, 1.0),
-                (0.721455, -2.44196, 0.0, 1.0),
-                (2.2843, -2.43094, 0.0, 1.0),
+                (0.771455, -2.44196, 0.0, 1.0),
+                (1.7843, -2.43094, 0.0, 1.0),
             ],
             waypoints,
         )
@@ -133,7 +133,7 @@ class VehicleCharacterizationTests(unittest.TestCase):
             "lidar_processing_flag = True",      # Stage 1 启用 LiDAR
             "rotate_speed(angle, 0.3)",          # Stage 3 PCA 旋转对正
             "cmd.linear.y = 0.3 if camera_deg > 0 else -0.3",  # Stage 4 Y 微调
-            "cmd.linear.x = 0.2",                # Stage 2 慢速逼近
+            "cmd.linear.x = 0.10",               # Stage 2 慢速逼近
             "cmd.linear.x = 0.13",               # Stage 5 X 微调
             "search_item_stage = 6",             # 完成阶段
             "dist_forward_item > board_center_to_park_dist + 0.05",

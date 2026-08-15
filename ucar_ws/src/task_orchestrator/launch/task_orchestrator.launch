@@ -6,7 +6,13 @@
   <arg name="enable_readiness_gate" default="false"/>
   <arg name="enable_velocity_arbiter" default="false"/>
   <arg name="enable_navigation_handoff_supervisor" default="false"/>
+  <arg name="enable_gazebo_bridge_server" default="false"/>
   <arg name="simulation_phase_enabled" default="false"/>
+  <arg name="gazebo_phase_enabled" default="false"/>
+  <arg name="gazebo_bridge_bind_host" default="0.0.0.0"/>
+  <arg name="gazebo_bridge_port" default="1525"/>
+  <arg name="gazebo_bridge_allowed_client_ip" default=""/>
+  <arg name="gazebo_bridge_max_frame_bytes" default="8192"/>
   <arg name="legacy_nav_launch"
        default="$(find task_orchestrator)/launch/legacy_navigation_include.launch"/>
   <arg name="stop_integration_launch"
@@ -19,6 +25,7 @@
   <arg name="timeout_qr_search" default="120.0"/>
   <arg name="timeout_llm_classification" default="120.0"/>
   <arg name="timeout_speech" default="60.0"/>
+  <arg name="timeout_gazebo" default="330.0"/>
   <!-- 第三阶段外层超时，严格大于 line_follow_integration 内部 300/30/120 秒。
        phase3_config 由根 launch 转发；默认指向 line_follow_integration 的
        phase3.yaml，避免在本 launch 复制 pose 字面量。 -->
@@ -46,6 +53,7 @@
     <param name="timeouts/llm_classification"
            value="$(arg timeout_llm_classification)"/>
     <param name="timeouts/speech" value="$(arg timeout_speech)"/>
+    <param name="timeouts/gazebo" value="$(arg timeout_gazebo)"/>
     <param name="timeouts/line_navigation"
            value="$(arg timeout_line_navigation)"/>
     <param name="timeouts/line_direction"
@@ -54,6 +62,8 @@
            value="$(arg timeout_line_follow)"/>
     <param name="simulation_phase_enabled"
            value="$(arg simulation_phase_enabled)"/>
+    <param name="gazebo_phase_enabled"
+           value="$(arg gazebo_phase_enabled)"/>
   </node>
   <node pkg="task_orchestrator"
         type="voice_task_adapter_node.py"
@@ -106,5 +116,21 @@
            value="$(arg legacy_nav_launch)"/>
     <param name="navigation_handoff_supervisor/stop_integration_launch"
            value="$(arg stop_integration_launch)"/>
+  </node>
+  <node pkg="task_orchestrator"
+        type="gazebo_tcp_bridge_server_node.py"
+        name="gazebo_tcp_bridge_server"
+        output="screen"
+        if="$(arg enable_gazebo_bridge_server)">
+    <rosparam command="load"
+              file="$(find task_orchestrator)/config/orchestrator.yaml"/>
+    <param name="bind_host"
+           value="$(arg gazebo_bridge_bind_host)"/>
+    <param name="port"
+           value="$(arg gazebo_bridge_port)"/>
+    <param name="allowed_client_ip"
+           value="$(arg gazebo_bridge_allowed_client_ip)"/>
+    <param name="max_frame_bytes"
+           value="$(arg gazebo_bridge_max_frame_bytes)"/>
   </node>
 </launch>
