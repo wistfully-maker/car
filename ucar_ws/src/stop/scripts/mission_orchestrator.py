@@ -38,6 +38,8 @@ import numpy as np
 import cv2
 import cv_bridge
 import rospy
+import tf2_ros
+from tf.transformations import quaternion_from_euler, quaternion_multiply, quaternion_matrix
 
 from actionlib_msgs.msg import GoalID
 from sensor_msgs.msg import Image, LaserScan
@@ -92,13 +94,13 @@ dist_forward_item = 0.7
 x_align_tolerance = 0.50
 y_align_tolerance = 12
 mission_done_called = False          # 防重复播报
-stage2_creeping = False              # Stage 2 cmd_vel 慢速逼近标志
+stage2_creeping = False              # Stage 2 导航进行中标志（屏蔽 OCR，避免打断 move_base）
 
 # 航点
 FIND_POINTS_LIST = [
-    (-0.812845, -2.44196, 0.0, 1.0),
-    (0.721455, -2.44196, 0.0, 1.0),
-    (2.2843, -2.43094, 0.0, 1.0),
+    (-0.812845, -2.44196, 0.7071, 0.7071),
+    (0.691455, -2.44196, 0.3827, 0.9239),
+    (2.2843, -2.43094, 0.7071, 0.7071),
 ]
 waypoint_memory = WaypointMemory(len(FIND_POINTS_LIST))
 physical_point_index = None
@@ -121,6 +123,10 @@ lidar_offset_deg = 1.5
 # 导航
 navigation_failed_count = 0
 max_navigation_retries = 2
+
+# TF（transform_frame_to_map 用）
+tf_buffer = None
+tf_listener = None
 
 # ROS 发布者（全局）
 goal_pub = None
@@ -260,6 +266,84 @@ def calculate_point_C(Bx, By, dx_dir, dy_dir, BC_length):
     return (Bx - ux * BC_length, By - uy * BC_length)
 
 
+def transform_frame_to_map(x, y, Ax, Ay, source_frame, source_stamp=None):
+    """通过 TF 将 source_frame 下的点 (x,y) 与朝向 (Ax,Ay) 转到 map 系。
+
+    返回 ((pos_x, pos_y, 0.0), (ori_x, ori_y, ori_z, ori_w))；失败返回 (None, None)。
+    """
+    global tf_buffer, tf_listener
+
+    if tf_buffer is None:
+        tf_buffer = tf2_ros.Buffer(rospy.Duration(10.0))
+        tf_listener = tf2_ros.TransformListener(tf_buffer)
+        rospy.sleep(0.2)
+
+    rate = rospy.Rate(10)
+    last_pos, last_ori = None, None
+
+    while not rospy.is_shutdown():
+        try:
+            if Ax == 0 and Ay == 0:
+                rospy.logerr("[tf] Direction vector (Ax, Ay) is zero")
+                return None, None
+
+            source_frame = source_frame.strip("/")
+            yaw = math.atan2(Ay, Ax)
+            q_source = quaternion_from_euler(0, 0, yaw)
+
+            use_scan_stamp = (
+                source_stamp is not None and
+                not (source_stamp.secs == 0 and source_stamp.nsecs == 0)
+            )
+            lookup_time = source_stamp if use_scan_stamp else rospy.Time(0)
+
+            try:
+                transform = tf_buffer.lookup_transform(
+                    "map", source_frame, lookup_time, rospy.Duration(1.0))
+            except (tf2_ros.LookupException,
+                    tf2_ros.ConnectivityException,
+                    tf2_ros.ExtrapolationException) as e:
+                if use_scan_stamp:
+                    rospy.logwarn("[tf] Stamp lookup failed, retry latest: %s", e)
+                    transform = tf_buffer.lookup_transform(
+                        "map", source_frame, rospy.Time(0), rospy.Duration(1.0))
+                else:
+                    raise
+
+            trans = transform.transform.translation
+            rot = transform.transform.rotation
+            q_map_base = [rot.x, rot.y, rot.z, rot.w]
+            t_map_base = [trans.x, trans.y, trans.z]
+
+            R = quaternion_matrix(q_map_base)[:3, :3]
+            p_base = [x, y, 0.0]
+            p_rotated = [
+                R[0][0] * p_base[0] + R[0][1] * p_base[1] + R[0][2] * p_base[2],
+                R[1][0] * p_base[0] + R[1][1] * p_base[1] + R[1][2] * p_base[2],
+                R[2][0] * p_base[0] + R[2][1] * p_base[1] + R[2][2] * p_base[2],
+            ]
+            p_map = [
+                p_rotated[0] + t_map_base[0],
+                p_rotated[1] + t_map_base[1],
+                p_rotated[2] + t_map_base[2],
+            ]
+
+            q_map = quaternion_multiply(q_map_base, q_source)
+
+            rospy.loginfo("[tf] %s -> map: (%.2f, %.2f)",
+                          source_frame, p_map[0], p_map[1])
+            last_pos = (p_map[0], p_map[1], 0.0)
+            last_ori = (0.0, 0.0, q_map[2], q_map[3])
+            return last_pos, last_ori
+        except (tf2_ros.LookupException,
+                tf2_ros.ConnectivityException,
+                tf2_ros.ExtrapolationException) as e:
+            rospy.logwarn("[tf] Transform failed: %s", e)
+
+        rate.sleep()
+    return last_pos, last_ori
+
+
 def vector_to_angle(nx, ny):
     if math.isclose(nx, 0.0, abs_tol=1e-9) and math.isclose(ny, 0.0, abs_tol=1e-9):
         raise ValueError("Zero vector")
@@ -290,7 +374,7 @@ def rotate_speed(angle_degrees, speed):
 
 
 def find_item_rotate():
-    rotate_speed(72, 1.5)
+    rotate_speed(60, 1.5)
     rospy.sleep(0.5)
     rospy.loginfo("  Rotation complete")
 
@@ -428,10 +512,10 @@ def switch_to_phase2():
     _set_mode("MANUAL")
     rospy.loginfo("[Phase 2] Backing up 0.5m to clear wall...")
     cmd = Twist()
-    cmd.linear.x = -0.12
+    cmd.linear.x = -0.25
     start = rospy.Time.now()
     rate = rospy.Rate(20)
-    while not rospy.is_shutdown() and (rospy.Time.now() - start) < rospy.Duration(4.5):
+    while not rospy.is_shutdown() and (rospy.Time.now() - start) < rospy.Duration(1.6):
         cmd_vel_pub.publish(cmd)
         rate.sleep()
     cmd_vel_pub.publish(Twist())
@@ -640,6 +724,7 @@ def boxes_callback(msg):
 def goal_callback(msg):
     global current_point_index, isNavPointReached, navigation_failed_count
     global max_navigation_retries, is_searching_item, search_item_stage
+    global stage2_creeping
 
     if not is_searching_item:
         return
@@ -656,6 +741,7 @@ def goal_callback(msg):
         rospy.sleep(0.5)
         if search_item_stage == 2:
             search_item_stage = 3
+            stage2_creeping = False    # 结束 Stage 2 导航屏蔽
             rospy.loginfo("  Arrived at pickup point")
         isNavPointReached = True
 
@@ -698,28 +784,6 @@ def LidarCallback(msg):
     global stage2_creeping, rotate_num
 
     if not is_searching_item:
-        return
-
-    # ==== Stage 2: cmd_vel 慢速逼近（不用 move_base，避免全局规划失败）====
-    if stage2_creeping:
-        _set_mode("MANUAL")
-        n = len(msg.ranges)
-        c = n // 2
-        front_dists = [msg.ranges[i] for i in range(c - 1, c + 2)
-                       if 0 < msg.ranges[i] < float('inf')]
-        if front_dists:
-            dist_forward_item = min(front_dists)
-
-        if dist_forward_item > board_center_to_park_dist + 0.05:
-            cmd = Twist()
-            cmd.linear.x = 0.2
-            cmd_vel_pub.publish(cmd)
-        else:
-            cmd_vel_pub.publish(Twist())
-            rospy.loginfo("[Stage 2] Approach done (dist=%.3f)", dist_forward_item)
-            stage2_creeping = False
-            search_item_stage = 3
-            isBoxesCallbackFinished = True
         return
 
     # ==== Stage 5: X 轴直行微调 ====
@@ -766,10 +830,13 @@ def LidarCallback(msg):
     if len(valid_points) < 2 or B_point is None:
         rospy.logwarn("[Lidar] Insufficient points (%d)", len(valid_points))
         if search_item_stage == 2:
-            # PCA 点数不够也往前走——板子斜着但只要在视野里就逼近
-            rospy.logwarn("[Stage 2] PCA failed, approach blindly anyway")
+            # PCA 点数不够 → 转一点角度重新扫（同 item_finder，不再盲走）
+            rospy.logwarn("[Stage 2] PCA insufficient points (%d), rotate & rescan", len(valid_points))
             lidar_processing_flag = False
-            stage2_creeping = True
+            search_item_stage = 0
+            rotate_num += 1
+            find_item_rotate()
+            isBoxesCallbackFinished = True
         else:
             rospy.logwarn("[Lidar] Skip yaw, go to Y fine")
             search_item_stage = 4
@@ -777,17 +844,32 @@ def LidarCallback(msg):
             lidar_processing_flag = False
         return
 
-    # ==== Stage 2: PCA 确认方向 → 直接往前走（不旋转，斜着也直走）====
+    # ==== Stage 2: PCA 确认方向 → 计算停车点 C → move_base 导航前往 ====
     if search_item_stage == 2:
         (nx, ny), _ = calculate_external_normal(*valid_points)
         rospy.loginfo("[Stage 2] PCA: normal=(%.3f,%.3f) B=(%.3f,%.3f)",
                       nx, ny, B_point[0], B_point[1])
-        rospy.loginfo("[Stage 2] Approach directly (target=%.2fm)", board_center_to_park_dist)
+
+        BC_length = board_center_to_park_dist
+        C_point = calculate_point_C(B_point[0], B_point[1], nx, ny, BC_length)
+        rospy.loginfo("[Stage 2] Park point C=(%.3f,%.3f), navigate via move_base",
+                      C_point[0], C_point[1])
 
         cmd_vel_pub.publish(Twist())
         rospy.sleep(0.2)
 
-        stage2_creeping = True
+        try:
+            laser_frame = msg.header.frame_id if msg.header.frame_id else "laser_frame"
+            position_map, orientation_quat = transform_frame_to_map(
+                C_point[0], C_point[1], nx, ny, laser_frame, msg.header.stamp)
+            if position_map is None:
+                raise RuntimeError("transform_frame_to_map returned None")
+            x, y = position_map[0], position_map[1]
+            z, w = orientation_quat[2], orientation_quat[3]
+            stage2_creeping = True     # 导航期间屏蔽 OCR，避免被打断重置
+            go_point(x, y, z, w)
+        except Exception as e:
+            rospy.logerr_throttle(1, "[Stage 2] Transform failed: %s", e)
         lidar_processing_flag = False
 
     # ==== Stage 3: PCA 旋转对正 ====

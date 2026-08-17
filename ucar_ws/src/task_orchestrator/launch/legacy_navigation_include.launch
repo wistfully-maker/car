@@ -8,10 +8,26 @@
   -->
   <arg name="start_base" default="false" />
   <arg name="start_lidar" default="false" />
+  <!-- 导航模式：differential（默认，vendor 参数原样）| omni（applier 注入全向参数） -->
+  <arg name="navigation_mode" default="differential" />
 
   <include file="$(find ucar_fast_nav)/launch/pickup_navigation.launch">
     <arg name="start_base" value="$(arg start_base)" />
     <arg name="start_lidar" value="$(arg start_lidar)" />
     <arg name="cmd_vel_topic" value="/cmd_vel/navigation" />
   </include>
+
+  <!-- 全向模式：不复制、不改写 vendor launch，参数经 dynamic_reconfigure
+       一次性注入；applier 随本 roslaunch 进程组被 supervisor 一起回收。 -->
+  <group if="$(eval arg('navigation_mode') == 'omni')">
+    <rosparam command="load"
+              file="$(find task_orchestrator)/config/omni_fast_nav_teb.yaml"
+              ns="/omni_fast_nav" />
+    <node pkg="task_orchestrator"
+          type="omni_teb_applier_node.py"
+          name="omni_teb_applier"
+          output="screen">
+      <param name="config_path" value="/omni_fast_nav/pickup_teb" />
+    </node>
+  </group>
 </launch>

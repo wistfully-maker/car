@@ -26,6 +26,7 @@ catkin_install_python(PROGRAMS
   scripts/velocity_arbiter_node.py
   scripts/navigation_handoff_supervisor_node.py
   scripts/gazebo_tcp_bridge_server_node.py
+  scripts/omni_teb_applier_node.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

@@ -1,0 +1,78 @@
+TebLocalPlannerROS:
+  odom_topic: odom
+  map_frame: map
+  transform_tolerance: 0.5
+
+  max_vel_x: 0.35
+  max_vel_x_backwards: 0.05
+  max_vel_y: 0.10
+  max_vel_theta: 0.80
+  max_vel_trans: 0.35
+  
+  acc_lim_x: 1.0
+  acc_lim_y: 1.0
+  acc_lim_theta: 1.50
+  
+  min_turning_radius: 0.0
+
+  footprint_model:
+    type: polygon
+    vertices:
+      - [0.160, -0.120]
+      - [0.160, 0.120]
+      - [-0.160, 0.120]
+      - [-0.160, -0.120]
+
+  xy_goal_tolerance: 0.15
+  yaw_goal_tolerance: 0.15
+  free_goal_vel: true
+  complete_global_plan: true
+
+  min_obstacle_dist: 0.08
+  inflation_dist: 0.14
+  include_costmap_obstacles: true
+  costmap_obstacles_behind_robot_dist: 0.50
+  obstacle_poses_affected: 10
+
+  dt_ref: 0.25
+  dt_hysteresis: 0.10
+  teb_autosize: true
+  min_samples: 7
+  max_samples: 35
+
+  global_plan_overwrite_orientation: false
+  global_plan_viapoint_sep: 0.30
+  allow_init_with_backwards_motion: false
+  max_global_plan_lookahead_dist: 2.0
+  
+  feasibility_check_no_poses: 8
+  shrink_horizon_backup: true
+  shrink_horizon_min_duration: 3.0
+
+  enable_homotopy_class_planning: false
+  enable_multithreading: false
+
+  no_inner_iterations: 4
+  no_outer_iterations: 2
+  penalty_epsilon: 0.02
+  weight_kinematics_nh: 1.0
+  weight_kinematics_turning_radius: 0.0
+  weight_kinematics_forward_drive: 20.0
+  
+  weight_acc_lim_x: 1.0
+  weight_acc_lim_y: 1.0
+  weight_acc_lim_theta: 2.0
+  weight_max_vel_x: 2.0
+  weight_max_vel_y: 2.0
+  weight_max_vel_theta: 1.0
+  
+  weight_shortest_path: 0.0
+  weight_optimaltime: 5.0
+  weight_obstacle: 40.0
+  weight_viapoint: 2.0
+  weight_adapt_factor: 1.10
+  
+  weight_inflation: 0.50
+  via_points_ordered: true
+
+ 

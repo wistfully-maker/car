@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>ocr_wall_reader</name>
+  <version>0.1.0</version>
+  <description>Use OCR API through a USB camera to recognise Chinese/English wall text.</description>
+
+  <maintainer email="ucar@example.com">U-CAR Team</maintainer>
+  <license>BSD-3-Clause</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <depend>rospy</depend>
+  <depend>std_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>cv_bridge</depend>
+
+  <exec_depend>python3-requests</exec_depend>
+  <exec_depend>python3-opencv</exec_depend>
+</package>

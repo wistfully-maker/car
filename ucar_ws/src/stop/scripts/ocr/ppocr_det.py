@@ -44,7 +44,7 @@ POSTPROCESS_CONFIG = {
         'thresh': 0.3,
         'box_thresh': 0.6,
         'max_candidates': 1000,
-        'unclip_ratio': 1.5,
+        'unclip_ratio': 2.0,
         'use_dilation': False,
         'score_mode': 'fast',
     }

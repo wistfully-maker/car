@@ -38,7 +38,7 @@ class PackageConfigTest(unittest.TestCase):
             "step_angle_deg": "45.0", "cruise_angular_speed": "0.50",
             "approach_angular_speed": "0.20", "approach_zone_deg": "10.0",
             "yaw_tolerance_deg": "2.0", "settled_angular_speed": "0.03",
-            "settled_duration": "0.20", "scan_window": "1.0",
+            "settled_duration": "0.20", "scan_window": "0.60",
             "offset_angle_deg": "22.5", "max_passes": "2",
             "search_total_timeout": "60.0", "settling_timeout": "3.0",
             "heading_timeout": "1.0", "camera_timeout": "1.0",

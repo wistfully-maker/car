@@ -687,3 +687,69 @@ rostopic echo /cmd_vel/line_follow
 
 正式部署时应给 `gazebo_bridge_allowed_client_ip:=<电脑IP>`；空字符串允许任意来源，仅适合
 受控局域网首次联调。修改 IP、端口或超时后必须停止并重启根 launch。
+
+## 12. 导航模式开关：差速基线 / 全向版（A/B 不耦合）
+
+根 launch 新增顶层开关 `navigation_mode`，差速版（车端已验证基线）为默认，
+全向版为独立配置层，两者**不互相覆盖任何文件**：
+
+```bash
+# 差速版（默认，与 2026-08-14 车端基线行为完全一致）
+./src/task_orchestrator/scripts/start_competition.sh
+
+# 全向版（同一入口，只加一个参数）
+./src/task_orchestrator/scripts/start_competition.sh navigation_mode:=omni
+```
+
+### 12.1 参数来源（两套互不影响）
+
+| 段 | 差速版（默认） | 全向版（navigation_mode:=omni） |
+|---|---|---|
+| 取货段 TEB | `ucar_fast_nav` 自带 vendor 配置（原样） | 启动后由 `omni_teb_applier` 经 dynamic_reconfigure 注入 `task_orchestrator/config/omni_fast_nav_teb.yaml` |
+| 停车段 TEB | `ucar_nav/launch/config/move_base/*.yaml`（原样） | `stop/config/omni/*.yaml`（mission_integration 直接加载） |
+| 停车段膨胀层 | 全局 0.05 / 局部 0.25（原样） | 全局与局部均为 0.28 m、cost_scaling_factor 3.0 |
+| 地图/AMCL/OCR/停车算法/协议 | 完全相同，不复制不改写 | 同左 |
+
+全向版定稿值（2026-08-15 实车实测：落地 vy 0.5 干净、0.6 打滑；vz 1.5 干净；
+斜移合速度 0.71 干净、0.85 打滑）：
+
+```text
+holonomic_robot=true  max_vel_x=0.60(停车)/0.80(取货)  max_vel_y=0.45
+max_vel_theta=1.20  max_vel_x_backwards=0.30
+acc_lim_x=0.50  acc_lim_y=0.50  acc_lim_theta=1.50
+weight_kinematics_nh=1.0  weight_kinematics_forward_drive=1.0
+weight_optimaltime=1.0  weight_obstacle=60(停车段)
+```
+
+`navigation_mode` 非 `omni` 的任何值（含空值、拼写错误）一律回落差速配置，
+fail-closed。`omni_teb_applier` 成功注入后发布 `/navigation/omni_teb_status`
+（`applied` 或 `failed:*`），且只注入一次、随后自行退出，绝不在交接后 stop 栈的
+move_base 上重复应用。
+
+### 12.2 全向版实车 A/B 步骤（必须有人看护）
+
+1. 先跑差速版全程一遍确认基线正常，再切全向版，一次只换 `navigation_mode`
+   这一个变量
+2. 全向版首次验证顺序：架空驱动轮 → 看 `/navigation/omni_teb_status` 为
+   `applied` → 落地空旷区跑取货段（重点观察是否蹭墙/振荡）→ 停车段（膨胀半径
+   变大后确认三个航点间窄道仍可达）→ 全程
+3. 全程中持续观察：
+
+```bash
+rostopic echo /navigation/omni_teb_status
+rostopic echo /task/navigation_handoff_status
+rostopic info /cmd_vel                # 唯一 owner 仍必须是 /velocity_arbiter
+rostopic hz /cmd_vel/navigation       # 全向模式下应频繁出现非零 linear.y
+```
+
+4. 出现蹭墙/振荡/打滑立即 `/task/cancel` 或机械急停，切回差速版排查；
+   TEB 参数与膨胀层都在对应 YAML，**改完必须重启根 launch 才生效**
+
+### 12.3 已知限制
+
+- fast-nav 段 vendor 配置的 `footprint_model`（point）与停车段全向配置保持
+  一致（point），未改 polygon（单次实车对比曾更差，作为后续实验项）
+- applier 只在 fast-nav 段启动时注入一次；若该段 move_base 中途重启，
+  不会自动重注入（stop 栈有自己的全向 YAML，不受影响）
+- 交接、地图、AMCL、停车算法在本阶段不做任何改动；"统一导航栈消除 10 秒交接"
+  与"全向停车"是后续独立任务

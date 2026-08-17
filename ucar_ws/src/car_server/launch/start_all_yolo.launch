@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<launch>
+    <!-- 底盘驱动 -->
+    <include file="$(find car_server)/launch/auto_line.launch" />
+
+    <!-- 摄像头 -->
+    <node name="usb_cam" pkg="usb_cam" type="usb_cam_node" output="screen">
+        <param name="video_device" value="/dev/video0" />
+        <param name="image_width" value="640" />
+        <param name="image_height" value="480" />
+        <param name="pixel_format" value="yuyv" />
+        <param name="framerate" value="15" />
+    </node>
+
+    <!-- YOLO交通标志检测(常驻) -->
+    <node name="yolo_server" pkg="car_server" type="yolo_server.py" output="screen" />
+</launch>

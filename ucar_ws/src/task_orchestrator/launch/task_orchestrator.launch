@@ -17,6 +17,10 @@
        default="$(find task_orchestrator)/launch/legacy_navigation_include.launch"/>
   <arg name="stop_integration_launch"
        default="$(find stop)/launch/mission_integration.launch"/>
+  <!-- 导航模式透传（differential 默认不传额外参数；omni 由根 launch 注入）。
+       空串 = 不向 roslaunch 命令追加任何参数。 -->
+  <arg name="legacy_nav_mode" default=""/>
+  <arg name="stop_integration_nav_mode" default=""/>
 
   <!-- 阶段超时：competition_full.launch 显式覆盖；默认值镜像
        orchestrator.yaml，私有 <param> 在 rosparam load 之后覆盖同 key。 -->
@@ -116,6 +120,10 @@
            value="$(arg legacy_nav_launch)"/>
     <param name="navigation_handoff_supervisor/stop_integration_launch"
            value="$(arg stop_integration_launch)"/>
+    <param name="navigation_handoff_supervisor/legacy_nav_mode"
+           value="$(arg legacy_nav_mode)"/>
+    <param name="navigation_handoff_supervisor/stop_integration_nav_mode"
+           value="$(arg stop_integration_nav_mode)"/>
   </node>
   <node pkg="task_orchestrator"
         type="gazebo_tcp_bridge_server_node.py"

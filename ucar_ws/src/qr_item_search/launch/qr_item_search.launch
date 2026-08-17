@@ -5,7 +5,7 @@
   <arg name="debug_port" default="8080"/>
   <arg name="metrics_dir" default="$(env HOME)/qr_metrics"/>
   <arg name="keyframe_dir" default="$(env HOME)/qr_keyframes"/>
-  <arg name="decode_scale" default="1.5"/>
+  <arg name="decode_scale" default="1.0"/>
   <arg name="step_angle_deg" default="45.0"/>
   <arg name="cruise_angular_speed" default="0.50"/>
   <arg name="approach_angular_speed" default="0.20"/>

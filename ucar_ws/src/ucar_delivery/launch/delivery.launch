@@ -1,0 +1,57 @@
+<launch>
+  <!--
+    ucar_delivery 组件 launch：只启动 ucar_delivery 自身 4 个节点
+    （delivery_mission / sign_adapter / frame_detector / parking_controller）。
+
+    - 不启动导航栈、不启动本地 velocity mux；
+    - 不启动相机、激光、底盘驱动；唯一相机话题由外部提供（默认
+      /usb_cam/image_raw），本包不修改任何相机设备参数；
+    - 命令发布边界：delivery_mission 只发布 /cmd_vel/delivery_manual，
+      parking_controller 只发布 /cmd_vel/delivery_parking；
+      最终 /cmd_vel 由 delivery_velocity_mux_node（standalone 模式）发布。
+
+    导航栈（navigation_stack.launch）与 velocity mux 由
+    delivery_standalone.launch 提供。
+  -->
+  <arg name="move_base_action" default="move_base"/>
+  <arg name="camera_topic" default="/usb_cam/image_raw"/>
+  <arg name="scan_topic" default="/scan"/>
+  <arg name="odom_topic" default="/odom"/>
+  <arg name="cmd_vel_manual" default="/cmd_vel/delivery_manual"/>
+  <arg name="cmd_vel_parking" default="/cmd_vel/delivery_parking"/>
+  <arg name="motion_mode" default="/ucar_delivery/motion_mode"/>
+  <arg name="sign_backend" default="fake"/>
+
+  <node pkg="ucar_delivery" type="delivery_mission_node.py"
+        name="delivery_mission" output="screen">
+    <rosparam command="load" file="$(find ucar_delivery)/config/delivery.yaml"/>
+    <param name="move_base_action" value="$(arg move_base_action)"/>
+    <param name="topics/camera" value="$(arg camera_topic)"/>
+    <param name="topics/scan" value="$(arg scan_topic)"/>
+    <param name="topics/odom" value="$(arg odom_topic)"/>
+    <param name="topics/cmd_vel_manual" value="$(arg cmd_vel_manual)"/>
+    <param name="topics/cmd_vel_parking" value="$(arg cmd_vel_parking)"/>
+    <param name="topics/motion_mode" value="$(arg motion_mode)"/>
+  </node>
+
+  <node pkg="ucar_delivery" type="sign_adapter_node.py"
+        name="delivery_sign_adapter" output="screen">
+    <rosparam command="load" file="$(find ucar_delivery)/config/delivery.yaml"/>
+    <param name="topics/camera" value="$(arg camera_topic)"/>
+    <param name="sign_detector/backend" value="$(arg sign_backend)"/>
+  </node>
+
+  <node pkg="ucar_delivery" type="frame_detector_node.py"
+        name="delivery_frame_detector" output="screen">
+    <rosparam command="load" file="$(find ucar_delivery)/config/delivery.yaml"/>
+    <param name="topics/camera" value="$(arg camera_topic)"/>
+  </node>
+
+  <node pkg="ucar_delivery" type="parking_controller_node.py"
+        name="delivery_parking_controller" output="screen">
+    <rosparam command="load" file="$(find ucar_delivery)/config/delivery.yaml"/>
+    <param name="topics/scan" value="$(arg scan_topic)"/>
+    <param name="topics/odom" value="$(arg odom_topic)"/>
+    <param name="topics/cmd_vel_parking" value="$(arg cmd_vel_parking)"/>
+  </node>
+</launch>

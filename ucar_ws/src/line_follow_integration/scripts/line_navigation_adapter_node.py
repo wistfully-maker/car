@@ -4,6 +4,10 @@
 按 fast_nav_adapter_node.py 的模式实现：generation 保护、settled-odom 检测、
 300 秒超时、/task/cancel、过期回调抑制与每个身份一次终态到达。
 MoveBaseGoal 直接使用传入 pose 的 frame_id/x/y/qz/qw。
+
+精准停车：当 ~precision_parking 配置存在时启用两段式导航——先到最终点
+正后方 approach_offset 的中间点，再用 dynamic_reconfigure 把 TEB 限速
+并收紧容差，低速爬完最后一小段；结束后恢复原 TEB 参数。
 """
 
 import json
@@ -11,6 +15,7 @@ import threading
 import time
 
 import actionlib
+import dynamic_reconfigure.client
 import rospy
 from actionlib_msgs.msg import GoalStatus
 from geometry_msgs.msg import Twist
@@ -18,6 +23,11 @@ from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
 from nav_msgs.msg import Odometry
 from std_msgs.msg import String
 
+from line_follow_integration.precision_parking import (
+    approach_parameters,
+    approach_pose,
+    creep_parameters,
+)
 from line_follow_integration.protocol import (
     ProtocolError,
     build_arrival,
@@ -156,6 +166,39 @@ class LineNavigationAdapter:
         self._action_identity = None
         self._action_started = None
         self._current_pose = None
+        self._settling_since = None
+        # 精准停车配置：缺失即单段导航（原行为）。
+        precision = rospy.get_param("~precision_parking", None)
+        self._approach_offset = None
+        self._approach_params = None
+        self._creep_params = None
+        if precision is not None:
+            if not isinstance(precision, dict):
+                raise ValueError("precision_parking must be a mapping")
+            offset = precision.get("approach_offset")
+            if (
+                isinstance(offset, bool)
+                or not isinstance(offset, (int, float))
+                or not 0.0 < offset <= 0.5
+            ):
+                raise ValueError(
+                    "precision_parking approach_offset must be in (0, 0.5]"
+                )
+            self._approach_offset = float(offset)
+            approach_raw = precision.get("approach_teb")
+            if approach_raw is not None:
+                self._approach_params = approach_parameters(approach_raw)
+            self._creep_params = creep_parameters(
+                precision.get("creep_teb")
+            )
+        self._reconfigure_namespace = rospy.get_param(
+            "~line_navigation_adapter/reconfigure_namespace",
+            "/move_base/TebLocalPlannerROS",
+        )
+        self._creep_send_delay = float(
+            rospy.get_param("~line_navigation_adapter/creep_send_delay", 0.3)
+        )
+        self._teb_before = None
         self._publisher = rospy.Publisher(
             "/task/line_navigation_arrived", String, queue_size=10
         )
@@ -197,6 +240,43 @@ class LineNavigationAdapter:
         goal.target_pose.pose.orientation.w = pose["qw"]
         return goal
 
+    def _capture_teb(self):
+        """记录恢复基准：只在第一次重配前捕获原始 TEB 参数。"""
+        if self._teb_before is not None:
+            return
+        client = dynamic_reconfigure.client.Client(
+            self._reconfigure_namespace, timeout=2.0
+        )
+        self._teb_before = client.get_configuration()
+
+    def _apply_approach(self):
+        """中间点段：放宽松朝向容差，防止 TEB 在中间点死磕 yaw。"""
+        client = dynamic_reconfigure.client.Client(
+            self._reconfigure_namespace, timeout=2.0
+        )
+        self._capture_teb()
+        client.update_configuration(self._approach_params)
+
+    def _apply_creep(self):
+        """限速紧容差：记录当前 TEB 参数后注入 creep 档。"""
+        client = dynamic_reconfigure.client.Client(
+            self._reconfigure_namespace, timeout=2.0
+        )
+        self._capture_teb()
+        client.update_configuration(self._creep_params)
+
+    def _restore_teb(self):
+        if self._teb_before is None:
+            return
+        try:
+            client = dynamic_reconfigure.client.Client(
+                self._reconfigure_namespace, timeout=2.0
+            )
+            client.update_configuration(self._teb_before)
+        except Exception as exc:
+            rospy.logwarn("failed to restore TEB parameters: %s", exc)
+        self._teb_before = None
+
     def _on_goal(self, message):
         try:
             parsed = parse_navigation_goal(message.data)
@@ -221,17 +301,44 @@ class LineNavigationAdapter:
                 ):
                     return
                 self._detector.reset()
-                self._phase = "navigating"
+                self._current_pose = dict(parsed["pose"])
+                if self._approach_offset is not None:
+                    self._phase = "navigating_approach"
+                    target_pose = approach_pose(
+                        parsed["pose"], self._approach_offset
+                    )
+                    rospy.loginfo(
+                        "line nav %s: two-stage start, approach=(%.3f, %.3f)",
+                        identity["goal_id"], target_pose["x"], target_pose["y"],
+                    )
+                else:
+                    self._phase = "navigating"
+                    target_pose = dict(parsed["pose"])
                 self._action_identity = dict(identity, generation=generation)
                 self._action_started = rospy.get_time()
-                self._current_pose = dict(parsed["pose"])
-                goal = self._move_base_goal(self._current_pose)
+                self._settling_since = None
+                goal = self._move_base_goal(target_pose)
             if old_identity is not None:
                 self._client.cancel_goal()
             if not still_current():
                 return
             if not self._set_stop_mode("NAVIGATION"):
                 raise RuntimeError("failed to enable stop navigation mode")
+            if self._approach_params is not None:
+                try:
+                    self._apply_approach()
+                    rospy.loginfo(
+                        "line nav %s: approach yaw relaxed", identity["goal_id"]
+                    )
+                except Exception as exc:
+                    payload = self._fail_generation(
+                        generation,
+                        "failed to apply approach parameters: %s" % exc,
+                    )
+                    self._restore_teb()
+                    self._set_stop_mode("IDLE")
+                    self._publish(payload)
+                    return
             self._client.send_goal(
                 goal,
                 done_cb=lambda status, result: self._on_done(
@@ -270,6 +377,7 @@ class LineNavigationAdapter:
 
     def _on_done(self, generation, task_id, goal_id, status, _result):
         payload = None
+        next_goal = None
         with self._lock:
             if self._action_identity != {
                 "task_id": task_id,
@@ -278,20 +386,75 @@ class LineNavigationAdapter:
             }:
                 return
             if status == GoalStatus.SUCCEEDED:
-                self._phase = "settling"
+                if self._phase == "navigating_approach":
+                    # 中间点到达：限速紧容差后发最终点。
+                    self._phase = "creeping"
+                    next_goal = self._move_base_goal(self._current_pose)
+                    rospy.loginfo(
+                        "line nav %s: approach done, entering creep", goal_id
+                    )
+                else:
+                    self._phase = "settling"
+                    self._settling_since = rospy.get_time()
+                    self._detector.reset()
+                    rospy.loginfo(
+                        "line nav %s: final goal done, settling", goal_id
+                    )
+            else:
+                payload = self._session.complete(
+                    task_id, goal_id, False,
+                    "move_base finished with status %s" % status,
+                )
                 self._detector.reset()
+                self._phase = "idle"
+                self._action_identity = None
+                self._action_started = None
+                self._current_pose = None
+        if payload is not None:
+            self._restore_teb()
+            self._set_stop_mode("IDLE")
+            self._publish(payload)
+            return
+        if next_goal is None:
+            # 最终点到达（creeping）或普通单段到达：进入 settling，无后续目标。
+            return
+        # 不能在旧目标的 done 回调里直接 send_goal：actionlib 客户端此时还在
+        # 处理 ACTIVE->DONE 转换，会触发 comm state/DONE twice 竞态并把新目标的
+        # 回调搞乱。延迟到客户端完全进入 DONE 后再发（独立线程）。
+        threading.Thread(
+            target=self._send_creep_goal,
+            args=(generation, task_id, goal_id, next_goal),
+            daemon=True,
+        ).start()
+
+    def _send_creep_goal(self, generation, task_id, goal_id, goal):
+        if self._creep_send_delay > 0:
+            time.sleep(self._creep_send_delay)
+        with self._lock:
+            if self._action_identity != {
+                "task_id": task_id,
+                "goal_id": goal_id,
+                "generation": generation,
+            }:
                 return
-            payload = self._session.complete(
-                task_id, goal_id, False,
-                "move_base finished with status %s" % status,
+        try:
+            self._apply_creep()
+            rospy.loginfo(
+                "line nav %s: creep applied, sending final goal", goal_id
             )
-            self._detector.reset()
-            self._phase = "idle"
-            self._action_identity = None
-            self._action_started = None
-            self._current_pose = None
-        self._set_stop_mode("IDLE")
-        self._publish(payload)
+            self._client.send_goal(
+                goal,
+                done_cb=lambda status, result: self._on_done(
+                    generation, task_id, goal_id, status, result
+                ),
+            )
+        except Exception as exc:
+            payload = self._fail_generation(
+                generation, "failed to apply creep parameters: %s" % exc
+            )
+            self._restore_teb()
+            self._set_stop_mode("IDLE")
+            self._publish(payload)
 
     def _on_odom(self, message):
         payload = None
@@ -315,6 +478,43 @@ class LineNavigationAdapter:
             self._action_identity = None
             self._action_started = None
             self._current_pose = None
+            self._settling_since = None
+        if payload is not None:
+            rospy.loginfo(
+                "line nav: settled, publishing arrived"
+            )
+        self._restore_teb()
+        self._set_stop_mode("IDLE")
+        self._publish(payload)
+
+    def _settle_fallback(self):
+        """settling 兜底：move_base 已 SUCCEEDED 后 5 秒仍未完成停稳检测，
+        直接按到达处理，防止检测器异常卡死整条流程。"""
+        payload = None
+        with self._lock:
+            if (
+                self._phase != "settling"
+                or self._settling_since is None
+                or rospy.get_time() - self._settling_since < 5.0
+            ):
+                return
+            identity = self._session.active_identity
+            if identity is not None:
+                payload = self._session.complete(
+                    identity["task_id"], identity["goal_id"], True
+                )
+            self._detector.reset()
+            self._phase = "idle"
+            self._action_identity = None
+            self._action_started = None
+            self._current_pose = None
+            self._settling_since = None
+        if payload is not None:
+            rospy.logwarn(
+                "line nav: settle detector did not complete, "
+                "falling back to arrived"
+            )
+        self._restore_teb()
         self._set_stop_mode("IDLE")
         self._publish(payload)
 
@@ -350,13 +550,19 @@ class LineNavigationAdapter:
         except Exception as exc:
             rospy.logerr("move_base line navigation cancel failed: %s", exc)
         if result[0] is not None:
+            self._restore_teb()
             self._set_stop_mode("IDLE")
         self._publish(result[0])
 
     def _on_timer(self, _event):
         with self._lock:
+            settling = self._phase == "settling"
+        if settling:
+            self._settle_fallback()
+        with self._lock:
             if (
-                self._phase not in ("navigating", "settling")
+                self._phase
+                not in ("navigating", "navigating_approach", "creeping", "settling")
                 or self._action_started is None
             ):
                 return
@@ -389,6 +595,7 @@ class LineNavigationAdapter:
             rospy.logerr("move_base line navigation timeout cancel failed: %s",
                          exc)
         if result[0] is not None:
+            self._restore_teb()
             self._set_stop_mode("IDLE")
         self._publish(result[0])
 
@@ -417,6 +624,7 @@ class LineNavigationAdapter:
         except Exception as exc:
             rospy.logerr("move_base line navigation shutdown cancel failed: %s",
                          exc)
+        self._restore_teb()
         self._set_stop_mode("IDLE")
 
 

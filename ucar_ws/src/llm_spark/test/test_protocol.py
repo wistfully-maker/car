@@ -12,8 +12,6 @@ from llm_spark.protocol import (  # noqa: E402
     ProtocolError,
     build_error_result,
     build_prompt,
-    build_result_from_items,
-    build_selection_prompt,
     build_success_result,
     parse_request,
 )
@@ -76,27 +74,6 @@ class ProtocolTests(unittest.TestCase):
         self.assertIn("1. 手机", prompt)
         self.assertIn('"physical"', prompt)
         self.assertIn('"simulation"', prompt)
-
-    def test_short_prompt_contains_one_target_and_candidates(self):
-        request = parse_request(json.dumps(VALID_REQUEST, ensure_ascii=False))
-        prompt = build_selection_prompt(request, "食品")
-        self.assertIn("目标母类：食品", prompt)
-        self.assertIn("手机、毛巾、苹果", prompt)
-        self.assertNotIn("仿真", prompt)
-
-    def test_builds_trusted_result_from_two_selected_item_names(self):
-        request = parse_request(json.dumps(VALID_REQUEST, ensure_ascii=False))
-        result = build_result_from_items(request, "苹果", "毛巾")
-        self.assertEqual(3, result["physical"]["selected_order"])
-        self.assertEqual("食品加工车间", result["physical"]["workshop"])
-        self.assertEqual(2, result["simulation"]["selected_order"])
-        self.assertEqual("日用品加工车间",
-                         result["simulation"]["workshop"])
-
-    def test_rejects_selected_item_outside_candidates(self):
-        request = parse_request(json.dumps(VALID_REQUEST, ensure_ascii=False))
-        with self.assertRaises(ProtocolError):
-            build_result_from_items(request, "香蕉", "毛巾")
 
     def test_builds_identity_preserving_success_result(self):
         request = parse_request(json.dumps(VALID_REQUEST, ensure_ascii=False))

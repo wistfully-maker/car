@@ -1,0 +1,7 @@
+<launch>
+    <node name="map_server" pkg="map_server" type="map_server" args="/home/ucar/ucar_ws/src/ucar_nav/maps/map_new.yaml"/>
+    <node name="rviz" pkg="rviz" type="rviz" args="-d $(find waterplus_map_tools)/rviz/editwaypoints.rviz" required="true"/>
+    <node name="base_to_laser_broadcaster" pkg="tf2_ros" type="static_transform_publisher" args="0 0 0 0 0 0 /base_link /laser_link 100"/>
+    <node name="wp_edit_node" pkg="waterplus_map_tools" type="wp_edit_node" output="screen"/>
+</launch>
+

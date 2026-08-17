@@ -1,0 +1,9 @@
+向左走|往左走|左走|向左转|左转|往左转|向左:AA0200FF:/audio/offline.wav
+向右走|往右走|右走|向右转|右转|往右转|向右:AA0300FF:/audio/offline.wav
+向前走|往前走|前走|前进|往前|向前:AA0100FF:/audio/offline.wav
+向后走|往后走|后走|后退|往后|向后:AA0400FF:/audio/offline.wav
+前往物品领取区|去物品领取区|去领取物品|领取物品|物品领取|前往物品:AA0500FF:/audio/offline.wav
+取得|拿到|抓取|抓起|拿|抓:AA0600FF:/audio/offline.wav
+放置在仓库|放到仓库|放在仓库|放入仓库|仓库|放置:AA0700FF:/audio/offline.wav
+停止|停下|停:AA0000FF:/audio/offline.wav
+

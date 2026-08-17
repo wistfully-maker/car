@@ -1,0 +1,72 @@
+<launch>
+  <arg name="map_file" default="$(find ucar_nav)/maps/map.yaml"/>
+  <arg name="map_image" default="$(find ucar_nav)/maps/map.pgm"/>
+  <arg name="waypoint_file"
+       default="$(find ucar_waypoint_nav)/config/pickup_waypoints.yaml"/>
+  <arg name="global_planner" default="global_planner"/>
+  <arg name="start_navigation_stack" default="true"/>
+
+  <group if="$(arg start_navigation_stack)">
+    <group if="$(eval arg('global_planner') == 'global_planner')">
+      <param name="/move_base/base_global_planner"
+             value="global_planner/GlobalPlanner"/>
+      <rosparam command="load"
+                file="$(find ucar_waypoint_nav)/config/global_planner.yaml"
+                ns="/move_base"/>
+    </group>
+
+    <group if="$(eval arg('global_planner') == 'navfn')">
+      <param name="/move_base/base_global_planner"
+             value="navfn/NavfnROS"/>
+      <rosparam command="load"
+                file="$(find ucar_waypoint_nav)/config/navfn.yaml"
+                ns="/move_base"/>
+    </group>
+
+    <param name="/move_base/base_local_planner"
+           value="teb_local_planner/TebLocalPlannerROS"/>
+    <rosparam command="load"
+              file="$(find ucar_waypoint_nav)/config/teb.yaml"
+              ns="/move_base"/>
+    <rosparam command="load"
+              file="$(find ucar_waypoint_nav)/config/controller.yaml"
+              ns="/move_base"/>
+    <rosparam command="load"
+              file="$(find ucar_nav)/config/costmap/common_teb.yaml"
+              ns="/move_base/global_costmap"/>
+    <rosparam command="load"
+              file="$(find ucar_nav)/config/costmap/common_teb.yaml"
+              ns="/move_base/local_costmap"/>
+    <rosparam command="load"
+              file="$(find ucar_nav)/config/costmap/global_teb.yaml"
+              ns="/move_base"/>
+    <rosparam command="load"
+              file="$(find ucar_nav)/config/costmap/local_teb.yaml"
+              ns="/move_base"/>
+    <!-- lidar_loc版本统一使用map，避免map路径转换到odom时发生未来外推 -->
+    <param name="/move_base/local_costmap/global_frame" value="map"/>
+    
+    <node name="map_server" pkg="map_server" type="map_server"
+          args="$(arg map_file)" output="screen">
+      <param name="frame_id" value="map"/>
+    </node>
+    <node name="lidar_loc" pkg="jie_ware" type="lidar_loc" output="screen">
+      <param name="base_frame" value="base_link"/>
+      <param name="odom_frame" value="odom"/>
+      <param name="laser_frame" value="laser_frame"/>
+      <param name="laser_topic" value="scan"/>
+    </node>
+    <node name="move_base" pkg="move_base" type="move_base"
+          output="screen" respawn="false"/>
+  </group>
+
+  <node name="ucar_waypoint_route_manager"
+        pkg="ucar_waypoint_nav"
+        type="waypoint_route_manager.py"
+        output="screen">
+    <param name="waypoint_file" value="$(arg waypoint_file)"/>
+    <param name="map_image" value="$(arg map_image)"/>
+    <rosparam command="load"
+              file="$(find ucar_waypoint_nav)/config/manager.yaml"/>
+  </node>
+</launch>

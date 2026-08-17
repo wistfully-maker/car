@@ -13,9 +13,13 @@
   <arg name="initial_pose_y"   default="0.0" />
   <arg name="initial_pose_yaw" default="0.0" />
 
+  <!-- ====== 导航模式：differential（车端已验证基线，默认）| omni（全向版） ======
+       非 omni 的任何值一律回落差速基线，fail-closed。 -->
+  <arg name="navigation_mode" default="differential" />
+
   <!-- ====== OCR 扫描 / PCA 停车参数（车端已验证默认值不变） ====== -->
   <arg name="max_rotations"       default="6" />
-  <arg name="target_distance"     default="0.20" />
+  <arg name="target_distance"     default="0.42" />
   <arg name="x_align_tolerance"   default="0.50" />
   <arg name="y_align_tolerance"   default="12" />
   <arg name="auto_start_delay"    default="3.0" />
@@ -28,19 +32,32 @@
   </node>
   <include file="$(find ucar_nav)/launch/config/amcl/amcl_omni.launch" />
 
+  <!-- ====== move_base 参数集：按导航模式二选一。
+        rosparam 必须先于 move_base 节点加载（绝对 ns 直指 /move_base）。 ====== -->
+  <group if="$(eval arg('navigation_mode') == 'omni')">
+    <rosparam file="$(find stop)/config/omni/move_base_params.yaml" command="load" ns="/move_base" />
+    <rosparam file="$(find stop)/config/omni/costmap_common_params.yaml" command="load" ns="/move_base/global_costmap" />
+    <rosparam file="$(find stop)/config/omni/costmap_common_params.yaml" command="load" ns="/move_base/local_costmap" />
+    <rosparam file="$(find stop)/config/omni/global_planner_params.yaml" command="load" ns="/move_base" />
+    <rosparam file="$(find stop)/config/omni/teb_local_planner_params.yaml" command="load" ns="/move_base" />
+    <rosparam file="$(find stop)/config/omni/local_costmap_params.yaml" command="load" ns="/move_base" />
+    <rosparam file="$(find stop)/config/omni/global_costmap_params.yaml" command="load" ns="/move_base" />
+  </group>
+  <group unless="$(eval arg('navigation_mode') == 'omni')">
+    <rosparam file="$(find ucar_nav)/launch/config/move_base/move_base_params.yaml" command="load" ns="/move_base" />
+    <rosparam file="$(find ucar_nav)/launch/config/move_base/costmap_common_params.yaml" command="load" ns="/move_base/global_costmap" />
+    <rosparam file="$(find ucar_nav)/launch/config/move_base/costmap_common_params.yaml" command="load" ns="/move_base/local_costmap" />
+    <rosparam file="$(find ucar_nav)/launch/config/move_base/global_planner_params.yaml" command="load" ns="/move_base" />
+    <rosparam file="$(find ucar_nav)/launch/config/move_base/teb_local_planner_params.yaml" command="load" ns="/move_base" />
+    <rosparam file="$(find ucar_nav)/launch/config/move_base/local_costmap_params.yaml" command="load" ns="/move_base" />
+    <rosparam file="$(find ucar_nav)/launch/config/move_base/global_costmap_params.yaml" command="load" ns="/move_base" />
+  </group>
+
   <!-- ====== move_base + TEB 动态避障（导航速度发往隔离 topic） ====== -->
   <node pkg="move_base" type="move_base" respawn="false" name="move_base" output="screen">
     <param name="base_global_planner" value="global_planner/GlobalPlanner"/>
     <param name="base_local_planner" value="teb_local_planner/TebLocalPlannerROS"/>
     <remap from="cmd_vel" to="/cmd_vel/stop_navigation"/>
-
-    <rosparam file="$(find ucar_nav)/launch/config/move_base/move_base_params.yaml" command="load" />
-    <rosparam file="$(find ucar_nav)/launch/config/move_base/costmap_common_params.yaml" command="load" ns="global_costmap" />
-    <rosparam file="$(find ucar_nav)/launch/config/move_base/costmap_common_params.yaml" command="load" ns="local_costmap" />
-    <rosparam file="$(find ucar_nav)/launch/config/move_base/global_planner_params.yaml" command="load" />
-    <rosparam file="$(find ucar_nav)/launch/config/move_base/teb_local_planner_params.yaml" command="load" />
-    <rosparam file="$(find ucar_nav)/launch/config/move_base/local_costmap_params.yaml" command="load" />
-    <rosparam file="$(find ucar_nav)/launch/config/move_base/global_costmap_params.yaml" command="load" />
   </node>
 
   <!-- ====== OCR 节点 (RKNN NPU) ====== -->

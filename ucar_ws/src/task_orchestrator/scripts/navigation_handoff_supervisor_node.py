@@ -203,6 +203,10 @@ class StopStackReadinessProbe:
             missing.append("%s is not live" % self._ocr_node)
         if not self._move_base_available():
             missing.append("move_base action unavailable")
+        if missing:
+            rospy.logwarn_throttle(
+                2.0, "stop stack NOT ready, missing: %s", "; ".join(missing)
+            )
         return not missing
 
 
@@ -217,13 +221,15 @@ class NavigationHandoffDriver:
         self._actions = actions
         self._goal = None
         self._active_probe = None
+        self._release_on_ready = True
 
     @property
     def machine(self):
         return self._machine
 
-    def start(self, goal):
+    def start(self, goal, release_on_ready=True):
         self._goal = goal
+        self._release_on_ready = bool(release_on_ready)
         effects = self._machine.start(goal["task_id"], goal["goal_id"])
         self._drive(effects)
         return effects
@@ -300,8 +306,13 @@ class NavigationHandoffDriver:
 
     def _effect_release_task(self, payload):
         # 先授权 stop 来源运动，再放行任务；模式切换本身先发零速度。
-        self._actions.publish_motion_mode("STOP_NAVIGATION")
-        self._actions.release_task(payload, self._goal)
+        # 延迟放行模式（交接与 LLM 并行）下只发 ready 状态，stop 任务目标
+        # 由编排器在 LLM 完成后直接发布 /task/stop_mission_goal。
+        if self._release_on_ready:
+            self._actions.publish_motion_mode("STOP_NAVIGATION")
+        self._actions.release_task(
+            payload, self._goal, defer=not self._release_on_ready
+        )
 
     def _effect_publish_diagnostic(self, payload):
         self._actions.publish_diagnostic(payload)
@@ -499,21 +510,23 @@ class _RosHandoffActions:
             rospy.logerr("stop readiness probe failed: %s", exc)
             return False
 
-    def release_task(self, payload, goal):
-        message = {
-            "protocol_version": 1,
-            "task_id": payload["task_id"],
-            "goal_id": payload["goal_id"],
-            "target_workshop": goal["target_workshop"],
-            "selected_item": goal["selected_item"],
-            "physical_goal_id": payload["goal_id"],
-            "physical": {
-                "target_workshop": goal["target_workshop"],
-                "selected_item": goal["selected_item"],
-            },
-        }
+    def release_task(self, payload, goal, defer=False):
         try:
             self._publish_handoff_status(payload, "ready", "")
+            if defer:
+                return
+            message = {
+                "protocol_version": 1,
+                "task_id": payload["task_id"],
+                "goal_id": payload["goal_id"],
+                "target_workshop": goal["target_workshop"],
+                "selected_item": goal["selected_item"],
+                "physical_goal_id": payload["goal_id"],
+                "physical": {
+                    "target_workshop": goal["target_workshop"],
+                    "selected_item": goal["selected_item"],
+                },
+            }
             self._release_pub.publish(
                 String(data=json.dumps(message, ensure_ascii=False))
             )
@@ -633,6 +646,12 @@ class NavigationHandoffSupervisorNode:
             self._on_goal,
             queue_size=1,
         )
+        rospy.Subscriber(
+            "/task/navigation_handoff_goal",
+            String,
+            self._on_handoff_goal,
+            queue_size=1,
+        )
         rospy.Subscriber("/odom", Odometry, self._on_odom, queue_size=1)
         self._timer = rospy.Timer(
             rospy.Duration(self._config["readiness_poll_period"]),
@@ -706,6 +725,32 @@ class NavigationHandoffSupervisorNode:
             if self._driver.start(goal):
                 rospy.loginfo(
                     "navigation handoff started for %s/%s",
+                    goal["task_id"],
+                    goal["goal_id"],
+                )
+
+    def _on_handoff_goal(self, message):
+        """交接提前触发（QR 完成即发）：只做导航栈切换，不释放任务目标。
+
+        stop 任务目标由编排器在 LLM 完成后直接发布 /task/stop_mission_goal。
+        """
+        try:
+            goal = load_object(message.data)
+            for field in ("task_id", "goal_id"):
+                raw = goal.get(field)
+                value = require_text(raw, field)
+                if raw != value:
+                    raise ProtocolError(
+                        "%s must not contain surrounding whitespace" % field
+                    )
+                goal[field] = value
+        except (ProtocolError, TypeError, ValueError) as exc:
+            rospy.logwarn("ignored invalid handoff goal: %s", exc)
+            return
+        with self._lock:
+            if self._driver.start(goal, release_on_ready=False):
+                rospy.loginfo(
+                    "deferred navigation handoff started for %s/%s",
                     goal["task_id"],
                     goal["goal_id"],
                 )

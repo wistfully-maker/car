@@ -21,6 +21,22 @@ effect 翻译成真实的动作。
 import math
 
 
+def navigation_mode_launch_arg(mode):
+    """Return the roslaunch argument list for a navigation mode.
+
+    未设置（None 或空串）时返回 []，保持差速基线命令完全不变；非法输入
+    （空白、非文本）抛 ValueError，防止把不可信内容拼进 roslaunch 命令。
+    """
+    if mode is None or mode == "":
+        return []
+    if not isinstance(mode, str) or not mode.strip():
+        raise ValueError("navigation mode must be non-empty text or empty")
+    stripped = mode.strip()
+    if stripped != mode or any(ch.isspace() for ch in stripped):
+        raise ValueError("navigation mode must not contain whitespace")
+    return ["navigation_mode:=" + stripped]
+
+
 class HandoffObservation:
     """带可选身份的事件基类；身份不匹配的观察一律忽略。"""
 

@@ -73,6 +73,12 @@ def _make_publishers():
         "publish_delivery_goal": rospy.Publisher(
             "/task/delivery_navigation_goal", String, queue_size=10
         ),
+        "publish_handoff_goal": rospy.Publisher(
+            "/task/navigation_handoff_goal", String, queue_size=10
+        ),
+        "publish_stop_mission_goal": rospy.Publisher(
+            "/task/stop_mission_goal", String, queue_size=10
+        ),
         "publish_simulation_navigation_goal": rospy.Publisher(
             "/task/simulation_navigation_goal", String, queue_size=10
         ),
@@ -297,7 +303,14 @@ def _subscribe(orchestrator, outputs, publishers, callback_lock):
             ),
             orchestrator.on_navigation_handoff_status,
             callback_lock,
-            TaskOrchestrator.DELIVERY_HANDED_OFF,
+            (
+                # 交接与 LLM 并行：ready 可能在 LLM/TTS 期间到达，
+                # 三个状态都必须放行，否则 ready 被丢弃导致卡在
+                # DELIVERY_HANDED_OFF。
+                TaskOrchestrator.WAITING_LLM,
+                TaskOrchestrator.WAITING_SPEECH,
+                TaskOrchestrator.DELIVERY_HANDED_OFF,
+            ),
         ),
     )
     rospy.Subscriber(

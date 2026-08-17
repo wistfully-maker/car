@@ -1,0 +1,215 @@
+# ucar_delivery 双阶段配送全部环境相关参数。
+# 坐标系：map（AMCL 全局）-> odom -> base_link -> laser_frame。
+# 视点/车间映射/增益等全部在这里配置，禁止硬编码到代码。
+
+mission:
+  # 每个阶段要访问的搜索视点数量（视点坐标在 viewpoints 中按阶段定义）
+  viewpoint_count: 3
+  viewpoint_max_retries: 2
+
+# 搜索视点（map 系，move_base goal）。实车部署前必须按场地地图标定，
+# 每个视点应能覆盖不同朝向的目标车间标牌。
+viewpoints:
+  physical:
+    - {x: -0.8, y: -2.4, yaw: 0.0}
+    - {x: -1.6, y: -3.2, yaw: 1.2}
+    - {x: -2.2, y: -2.4, yaw: 2.4}
+  simulation:
+    - {x: 0.8, y: -2.4, yaw: 3.1}
+    - {x: 1.6, y: -3.2, yaw: 4.3}
+    - {x: 2.2, y: -2.4, yaw: 5.4}
+
+timeouts:
+  navigation: 120.0
+  sign_search: 60.0
+  sign_align: 30.0
+  staging_estimate: 30.0
+  staging_navigation: 120.0
+  frame_acquire: 45.0
+  frame_align: 30.0
+  frame_center: 30.0
+  approach: 60.0
+  final_stop: 30.0
+  verify: 15.0
+  safe_stop: 10.0
+
+nav_supervisor:
+  action_timeout: 120.0
+  cancel_timeout: 10.0
+  settle_time: 0.5
+  # staging 到达后除固定 settle_time 外，还必须连续满足里程计近零。
+  settle_timeout: 5.0
+  odom_timeout: 0.5
+  settle_velocity_threshold: 0.02
+  settle_angular_threshold: 0.05
+  settle_stable_duration: 0.5
+  goal_tolerance_xy: 0.15
+  goal_tolerance_yaw: 0.20
+
+sign_detector:
+  min_confidence: 0.6
+  confirm_frames: 3
+  ocr_confirm_frames: 1
+  max_image_age: 1.0
+  # 像素 bbox -> 激光系 bearing/half-width 的相机标定参数（实车待标定）。
+  # camera_center_x 应为相机光轴像素横坐标，camera_focal_px = fx（单位 px）。
+  camera_center_x: 320.0
+  camera_focal_px: 500.0
+  # fake = 本地确定性后端（订阅 /task/delivery_sign_fake 注入）；
+  # vehicle = 车上 ~/ucar_ws/src/yolo_biao/infer.py + ~/ucar_ws/src/ocr/ocr_infer.py。
+  backend: fake
+  # vehicle 后端导入模块名（与车上文件契约一致）
+  vehicle_backend_module: yolo_biao.infer
+  vehicle_ocr_module: ocr.ocr_infer
+  target_aliases:
+    电子产品加工车间: 电子产品生产车间
+
+# 动态观察点：视觉限定雷达估计 + 连续一致确认 + 有界重试。
+# 这些是安全初始值，不是实车最优值；现场调参一次只改一个变量并保存前后证据。
+staging_pose:
+  enabled: true
+  # 相机与雷达安装 yaw 偏差（deg）：compensated_bearing = detection_bearing + offset
+  camera_lidar_yaw_offset_deg: 0.0
+  # 视觉半宽之外的扇区余量（deg）
+  bearing_margin_deg: 2.0
+  min_valid_points: 8
+  min_inliers: 6
+  # 前缘拟合残差上限（m）
+  max_fit_residual: 0.04
+  # 距离离群过滤窗口（m）
+  max_range_spread: 0.50
+  # 观察点距目标表面的后退距离（m）
+  staging_distance: 0.70
+  # 观察点到机器人距离的上下限（m）
+  min_staging_travel: 0.15
+  max_staging_travel: 2.00
+  # 连续一致确认：连续 N 次估计落在阈值内才发送 staging goal
+  estimation_confirmations: 3
+  estimation_consistency_xy: 0.10
+  estimation_consistency_yaw_deg: 8.0
+  # 当前点估计失败的最大重试次数（重新对正后重采样）
+  staging_estimation_max_retries: 3
+  # staging 导航失败的最大重试次数
+  staging_navigation_max_retries: 2
+  # 预留：ROS1 tf.TransformListener.lookupTransform 没有 timeout 参数，
+  # 本节点按 scan 帧时间戳查询 TF（无对应时间即失败）；该值仅在迁移
+  # tf2_ros Buffer.lookup_transform 时使用。
+  tf_timeout: 0.5
+  # 最新 scan 的最大年龄（s），超出视为不可信
+  max_scan_age: 0.5
+
+frame_detector:
+  gray_threshold: 180
+  min_line_pixels: 60
+  min_col_pixels: 60
+  min_boundaries: 2
+  # 检测 ROI（像素，全图坐标）。ROI 外目标不会触发检测。
+  roi_x_min: 0
+  roi_x_max: 640
+  roi_y_min: 120
+  roi_y_max: 480
+  # 横线行跨度超过该值视为大片白色（杂物/过曝），一致性扣分
+  max_line_thickness: 20
+  # 单帧几何置信度阈值：低于该值不产生 frame_detected
+  min_geometry_confidence: 0.65
+  # 开闭运算迭代次数；细线在开运算下会损失边缘像素，默认关闭
+  morph_iterations: 0
+  # 可选 HSV 白色约束（低饱和 + 高明度），滤彩色杂物
+  use_hsv: false
+  hsv_sat_max: 60.0
+  hsv_value_min: 180.0
+  # 透视一致性容差：远端宽度允许比近端宽的比例/像素
+  perspective_tolerance: 0.2
+  perspective_tolerance_px: 15.0
+  # 多帧滞回：连续确认帧数、丢失宽限帧数
+  acquire_confirm_frames: 3
+  lost_grace_frames: 2
+  # 近区判定线（front_boundary_y >= 该值视为近区）；近区丢框立即标志
+  near_zone_front_y: 380.0
+  near_zone_loss_is_fatal: true
+
+parking_controller:
+  k_yaw: 0.8
+  k_lateral: 0.5
+  max_linear: 0.15
+  max_angular: 0.4
+  max_linear_y: 0.0
+  angular_deadband: 2.0
+  center_deadband_px: 8.0
+  yaw_deadband_px: 6.0
+  min_linear: 0.01
+  min_angular: 0.01
+  accel_linear: 0.3
+  accel_angular: 1.2
+  approach_speed: 0.08
+  consecutive_frames: 3
+  max_frame_age: 0.5
+  # differential = 差速底盘（无横移）；holonomic 且 max_linear_y>0 才启用横移
+  chassis_capability: differential
+  visual_stop_front_y: 420.0
+  verify_duration: 1.0
+  velocity_threshold: 0.02
+  # 远区丢框后允许的重获时限（s）；超时仍未重获则安全失败
+  frame_reacquire_timeout: 1.0
+  # 近区判定线（front_boundary_y >= 该值视为近区，像素）
+  near_zone_front_y: 380.0
+  # 近区丢框立即失败（true），禁止继续盲走
+  near_zone_loss_is_fatal: true
+
+lidar_safety:
+  # 默认关闭：只有完成扇形覆盖/位姿/有限值验证后才能启用
+  enabled: false
+  front_sector_deg: 60.0
+  min_range: 0.05
+  max_range: 8.0
+  safety_stop_distance: 0.25
+  target_stop_distance: 0.30
+
+sign_search:
+  # 视点驻留搜索旋转角速度（SEARCH_SIGN 状态，受 sign_search 超时与
+  # 标牌确认随时中断；禁止大速度/长时间开环旋转）
+  angular_speed: 0.35
+
+sign_align:
+  angular_gain: 0.6
+  max_angular: 0.3
+  tolerance_rad: 0.06
+  confirm_frames: 3
+  # 有界：旋转修正最大累计时长（超时由 timeouts.sign_align 兜底）
+  max_accumulated_time: 20.0
+
+velocity_mux:
+  # 独立模式下的唯一最终 /cmd_vel 发布者（fail-closed）。
+  source_timeout: 0.3
+  publish_rate: 20.0
+
+# 运行时 topic/frame 名（launch 可覆盖）
+topics:
+  camera: /usb_cam/image_raw
+  scan: /scan
+  odom: /odom
+  cmd_vel: /cmd_vel
+  cmd_vel_navigation: /cmd_vel/delivery_navigation
+  cmd_vel_manual: /cmd_vel/delivery_manual
+  cmd_vel_parking: /cmd_vel/delivery_parking
+  motion_mode: /ucar_delivery/motion_mode
+  delivery_goal: /task/delivery_navigation_goal
+  simulation_goal: /task/simulation_navigation_goal
+  delivery_arrived: /task/delivery_arrived
+  simulation_arrived: /task/simulation_arrived
+  delivery_status: /task/delivery_status
+  sign_start: /task/delivery_sign_start
+  sign_found: /task/delivery_sign_found
+  sign_fake: /task/delivery_sign_fake
+  frame_start: /task/delivery_frame_start
+  frame_observation: /task/delivery_frame_observation
+  parking_start: /task/delivery_parking_start
+  parking_progress: /task/delivery_parking_progress
+  parking_result: /task/delivery_parking_result
+
+frames:
+  map: map
+  odom: odom
+  base: base_link
+  laser: laser_frame
+  camera: camera_link

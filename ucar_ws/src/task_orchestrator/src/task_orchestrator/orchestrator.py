@@ -256,6 +256,20 @@ class TaskOrchestrator:
             return
 
         self.task["qr_items"] = list(message["items"])
+        # 提前启动导航交接（与 LLM 并行）：交接不需要车间信息，
+        # 只以 task_id/goal_id 关联；stop 任务目标等 LLM 完成后由本机
+        # 直接发布 /task/stop_mission_goal。
+        delivery_goal_id = self._id_factory()
+        self.task["delivery_goal_id"] = delivery_goal_id
+        self.task["handoff_ready"] = False
+        self._emit(
+            "publish_handoff_goal",
+            {
+                "protocol_version": 1,
+                "task_id": self.task["task_id"],
+                "goal_id": delivery_goal_id,
+            },
+        )
         request_id = self._id_factory()
         self.task["request_id"] = request_id
         candidates = [
@@ -343,21 +357,32 @@ class TaskOrchestrator:
             self._complete()
             return
 
-        goal_id = self._id_factory()
-        self.task["delivery_goal_id"] = goal_id
-        # 本阶段终点：TTS 完成后发布避障导航交接消息，但不授予任何运动权限；
-        # 状态停留在 DELIVERY_HANDED_OFF（motion mode 保持 IDLE），等待未来
-        # 避障导航模块接入后通过 /task/delivery_arrived 继续。
+        goal_id = self.task["delivery_goal_id"]
+        # 交接已在 QR 完成时提前启动（与 LLM 并行）。交接未就绪时停在
+        # DELIVERY_HANDED_OFF 等待 ready（motion mode 保持 IDLE）；
+        # 已就绪则立即放行 stop 任务目标。
         self._transition(self.DELIVERY_HANDED_OFF)
         self._publish_status("running")
+        if self.task.get("handoff_ready"):
+            self._publish_stop_mission_goal()
+
+    def _publish_stop_mission_goal(self):
+        goal_id = self.task["delivery_goal_id"]
+        self._transition(self.NAVIGATING_TO_WORKSHOP)
+        self._publish_status("running")
         self._emit(
-            "publish_delivery_goal",
+            "publish_stop_mission_goal",
             {
                 "protocol_version": 1,
                 "task_id": self.task["task_id"],
                 "goal_id": goal_id,
                 "target_workshop": self.task["physical"]["workshop"],
                 "selected_item": self.task["physical"]["selected_item"],
+                "physical_goal_id": goal_id,
+                "physical": {
+                    "target_workshop": self.task["physical"]["workshop"],
+                    "selected_item": self.task["physical"]["selected_item"],
+                },
             },
         )
 
@@ -473,15 +498,22 @@ class TaskOrchestrator:
         self._publish_status("complete")
 
     def on_navigation_handoff_status(self, message):
-        if self.state != self.DELIVERY_HANDED_OFF:
+        # 交接在 QR 完成时提前启动，ready 可能在 LLM/TTS 期间到达；
+        # 只有 DELIVERY_HANDED_OFF 且已 ready 才放行 stop 任务目标。
+        if self.state not in (
+            self.WAITING_LLM,
+            self.WAITING_SPEECH,
+            self.DELIVERY_HANDED_OFF,
+        ):
             return
         if not self._matches(message, "goal_id", "delivery_goal_id"):
             return
         if message["status"] == "failed":
             self._fail(message.get("message") or "navigation handoff failed")
             return
-        self._transition(self.NAVIGATING_TO_WORKSHOP)
-        self._publish_status("running")
+        self.task["handoff_ready"] = True
+        if self.state == self.DELIVERY_HANDED_OFF:
+            self._publish_stop_mission_goal()
 
     def on_simulation_arrived(self, message):
         if self.state != self.NAVIGATING_TO_SIM_WORKSHOP:

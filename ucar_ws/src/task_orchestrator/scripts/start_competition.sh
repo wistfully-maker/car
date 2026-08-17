@@ -145,8 +145,13 @@ check_device() {
       probe_stdout+="$line"$'\n'
     fi
   done <<<"$probe_output"
-  if [[ "$probe_rc" -eq 0 && "$probe_stdout" =~ ^[[:space:]]*[0-9]+([[:space:]]+[0-9]+)*[[:space:]]*$ ]]; then
-    die "$label device is busy: $device (owner PID:${probe_stdout})"
+  # fuser/lsof 返回 0 即表示有进程占用。车端 fuser 实测占用时可能不打印
+  # PID（rc=0 且无输出），因此 rc=0 无论有无输出一律按 busy 处理（fail-closed）。
+  if [[ "$probe_rc" -eq 0 ]]; then
+    if [[ -n "$probe_stdout" ]]; then
+      die "$label device is busy: $device (owner PID:${probe_stdout%$'\n'})"
+    fi
+    die "$label device is busy: $device (owner PID not reported by $probe_tool)"
   fi
   if [[ "$probe_rc" -eq 1 && -z "$probe_stderr" && -z "$probe_stdout" ]]; then
     return 0

@@ -5,6 +5,21 @@ line_start_goal:
   qz: -0.7044294777312331
   qw: 0.7097739857893512
 
+# 两段式精准停车：先导航到最终点正后方的中间点，再低速紧容差爬行。
+# 缺失本段或字段非法时按单段导航（原行为）处理，不启用精准停车。
+precision_parking:
+  approach_offset: 0.25
+  approach_teb:
+    yaw_goal_tolerance: 0.6
+  creep_teb:
+    max_vel_x: 0.08
+    acc_lim_x: 0.30
+    max_vel_theta: 0.60
+    acc_lim_theta: 1.00
+    xy_goal_tolerance: 0.03
+    yaw_goal_tolerance: 0.10
+    free_goal_vel: false
+
 camera:
   input_topic: /usb_cam/image_raw
   line_topic: /line_follow/image_raw

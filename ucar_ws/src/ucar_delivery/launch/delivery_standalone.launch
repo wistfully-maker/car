@@ -1,0 +1,39 @@
+<launch>
+  <!--
+    独立配送根 launch（本阶段唯一交付入口）：
+      - 恰好一条导航栈：ucar_nav/navigation_stack.launch（map_server + AMCL
+        + move_base），move_base 输出隔离到 /cmd_vel/delivery_navigation；
+      - 恰好一次 ucar_delivery/delivery.launch（4 个配送组件）；
+      - 恰好一个 delivery_velocity_mux_node：三个隔离源
+        （navigation/manual/parking）经私有运动模式选通为最终 /cmd_vel。
+
+    外部必须提供（本 launch 不拥有硬件）：
+      - base 底盘驱动（最终 /cmd_vel 的执行者）；
+      - 2D 激光驱动（/scan）；
+      - 唯一公共相机（默认 /usb_cam/image_raw）。
+
+    本阶段不支持自动链接仿真车间阶段：物理配送与仿真车间是两次独立运行，
+    分别通过 /task/delivery_navigation_goal 与 /task/simulation_navigation_goal
+    触发，结果发布到 /task/delivery_arrived 与 /task/simulation_arrived。
+  -->
+  <arg name="map_file" default="$(find ucar_nav)/maps/map.yaml"/>
+  <arg name="navigation_profile" default="navfn_teb_corner"/>
+  <arg name="cmd_vel_topic" default="/cmd_vel/delivery_navigation"/>
+  <arg name="sign_backend" default="fake"/>
+
+  <include file="$(find ucar_nav)/launch/navigation_stack.launch">
+    <arg name="map_file" value="$(arg map_file)"/>
+    <arg name="navigation_profile" value="$(arg navigation_profile)"/>
+    <arg name="cmd_vel_topic" value="$(arg cmd_vel_topic)"/>
+  </include>
+
+  <include file="$(find ucar_delivery)/launch/delivery.launch">
+    <arg name="sign_backend" value="$(arg sign_backend)"/>
+  </include>
+
+  <node pkg="ucar_delivery" type="delivery_velocity_mux_node.py"
+        name="delivery_velocity_mux" output="screen">
+    <rosparam command="load" file="$(find ucar_delivery)/config/delivery.yaml"/>
+    <param name="topics/cmd_vel_navigation" value="$(arg cmd_vel_topic)"/>
+  </node>
+</launch>

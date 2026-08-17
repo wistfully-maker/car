@@ -56,6 +56,9 @@
        default="$(find task_orchestrator)/launch/legacy_navigation_include.launch"/>
   <arg name="stop_integration_launch"
        default="$(find stop)/launch/mission_integration.launch"/>
+  <!-- 导航模式：differential（车端已验证基线，默认）| omni（全向版配置层）。
+       通过 supervisor 转发给两个导航栈；非 omni 值一律回落差速基线。 -->
+  <arg name="navigation_mode" default="differential"/>
 
   <!-- QR 全局参数：qr_ 前缀 + 显式转发给 qr_item_search.launch（915aa37 契约）。
        qr_scan_window 默认 1.0 s 为实车解码更稳定的驻留值。 -->
@@ -129,6 +132,18 @@
         <arg name="start_lidar" value="$(arg start_lidar)"/>
         <arg name="cmd_vel_topic" value="/cmd_vel/navigation"/>
       </include>
+    </group>
+    <!-- 非交接 + 全向模式：fast-nav 段经 dynamic_reconfigure 注入全向参数。 -->
+    <group if="$(eval arg('navigation_mode') == 'omni' and arg('start_navigation_handoff') == 'false' and arg('start_fast_nav'))">
+      <rosparam command="load"
+                file="$(find task_orchestrator)/config/omni_fast_nav_teb.yaml"
+                ns="/omni_fast_nav"/>
+      <node pkg="task_orchestrator"
+            type="omni_teb_applier_node.py"
+            name="omni_teb_applier"
+            output="screen">
+        <param name="config_path" value="/omni_fast_nav/pickup_teb"/>
+      </node>
     </group>
   </group>
 
@@ -264,6 +279,8 @@
       <arg name="enable_navigation_handoff_supervisor" value="true"/>
       <arg name="legacy_nav_launch" value="$(arg legacy_nav_launch)"/>
       <arg name="stop_integration_launch" value="$(arg stop_integration_launch)"/>
+      <arg name="legacy_nav_mode" value="$(arg navigation_mode)"/>
+      <arg name="stop_integration_nav_mode" value="$(arg navigation_mode)"/>
     </include>
     </group>
     <group unless="$(arg start_stop_stack)">
@@ -277,6 +294,8 @@
         <arg name="enable_navigation_handoff_supervisor" value="true"/>
         <arg name="legacy_nav_launch" value="$(arg legacy_nav_launch)"/>
         <arg name="stop_integration_launch" value=""/>
+        <arg name="legacy_nav_mode" value="$(arg navigation_mode)"/>
+        <arg name="stop_integration_nav_mode" value="$(arg navigation_mode)"/>
       </include>
     </group>
   </group>

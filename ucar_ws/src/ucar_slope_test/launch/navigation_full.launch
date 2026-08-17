@@ -1,0 +1,19 @@
+<launch>
+  <arg name="start_base" default="true"/>
+  <arg name="start_lidar" default="true"/>
+  <arg name="cmd_vel_topic" default="/cmd_vel"/>
+  <arg name="map_file" default="$(find ucar_fast_nav)/maps/002.yaml"/>
+
+  <group if="$(arg start_base)">
+    <include file="$(find ucar_controller)/launch/base_driver.launch"/>
+  </group>
+
+  <group if="$(arg start_lidar)">
+    <include file="$(find ydlidar)/launch/ydlidar.launch"/>
+  </group>
+
+  <include file="$(find ucar_fast_nav)/launch/navigation_stack.launch">
+    <arg name="cmd_vel_topic" value="$(arg cmd_vel_topic)"/>
+    <arg name="map_file" value="$(arg map_file)"/>
+  </include>
+</launch>

@@ -38,7 +38,8 @@ from line_follow_integration.runtime import (
 
 def yolo_command():
     return [
-        "rosrun", "line_follow_integration", "yolo_server.py",
+        "python3",
+        "/home/ucar/ucar_ws/src/line_follow_integration/scripts/yolo_direction_server.py",
         "__name:=phase3_yolo_server",
     ]
 
