@@ -303,7 +303,7 @@ public:
         }
         spoken = true;
         
-        std::string cmd = "python3 /home/ucar/ucar_ws/src/speech_command/scripts/tts_http.py \"" + text + "\" &";
+        std::string cmd = "python3 /home/ucar/ucar_ws_pro/src/speech_command/scripts/tts_http.py \"" + text + "\" &";
         int ret = system(cmd.c_str());
         if (ret == 0) {
             ROS_INFO("[SPEAK] %s", text.c_str());

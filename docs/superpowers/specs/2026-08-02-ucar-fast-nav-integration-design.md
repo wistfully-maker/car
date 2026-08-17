@@ -23,7 +23,7 @@
 - 不使用 AMCL，不启动 `/amcl`。
 - vendor bundle 中的 `dynamic_obstacle` 只是归档依赖，不启动、不适配、不验收。
 - 不实现二维码区之后的航点、避障、巡线或目标区域移动。
-- 不修改或覆盖队员的 `/home/ucar/ucar_ws/src/ucar_nav`。
+- 不修改或覆盖队员的 `/home/ucar/ucar_ws_pro/src/ucar_nav`。
 - 不把 `ucar_fast_nav` 的节点启停逻辑写进编排状态机。
 
 ## 3. 导航链的唯一实现
@@ -85,7 +85,7 @@ frame_id, map_sha256, x, y, yaw, position_tolerance, yaw_tolerance
 ```
 
 不在 `task_orchestrator` 中复制坐标。部署时仍以
-`/home/ucar/ucar_ws/src/ucar_fast_nav/config/pickup_goal.yaml` 为唯一航点来源。
+`/home/ucar/ucar_ws_pro/src/ucar_fast_nav/config/pickup_goal.yaml` 为唯一航点来源。
 
 ### 4.3 到达判定和过期防护
 

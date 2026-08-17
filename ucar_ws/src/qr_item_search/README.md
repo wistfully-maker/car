@@ -79,16 +79,16 @@ ssh ucar@192.168.1.109
 
 ```bash
 source /opt/ros/noetic/setup.bash
-cd ~/ucar_ws
+cd ~/ucar_ws_pro
 catkin_make
-source ~/ucar_ws/devel/setup.bash
+source ~/ucar_ws_pro/devel/setup.bash
 ```
 
 每个新终端至少执行：
 
 ```bash
 source /opt/ros/noetic/setup.bash
-source ~/ucar_ws/devel/setup.bash
+source ~/ucar_ws_pro/devel/setup.bash
 ```
 
 ## 6. 一键运行
@@ -97,7 +97,7 @@ source ~/ucar_ws/devel/setup.bash
 
 ```bash
 source /opt/ros/noetic/setup.bash
-source ~/ucar_ws/devel/setup.bash
+source ~/ucar_ws_pro/devel/setup.bash
 roslaunch qr_item_search qr_item_search.launch image_topic:=/usb_cam/image_raw
 ```
 
@@ -116,7 +116,7 @@ roslaunch qr_item_search qr_item_search.launch image_topic:=/usb_cam/image_raw
 
 ```bash
 source /opt/ros/noetic/setup.bash
-source ~/ucar_ws/devel/setup.bash
+source ~/ucar_ws_pro/devel/setup.bash
 roslaunch ucar_controller base_driver.launch
 ```
 
@@ -124,7 +124,7 @@ roslaunch ucar_controller base_driver.launch
 
 ```bash
 source /opt/ros/noetic/setup.bash
-source ~/ucar_ws/devel/setup.bash
+source ~/ucar_ws_pro/devel/setup.bash
 rosrun usb_cam usb_cam_node \
   _video_device:=/dev/video0 \
   _image_width:=640 \
@@ -138,7 +138,7 @@ rosrun usb_cam usb_cam_node \
 
 ```bash
 source /opt/ros/noetic/setup.bash
-source ~/ucar_ws/devel/setup.bash
+source ~/ucar_ws_pro/devel/setup.bash
 rosrun qr_item_search qr_scanner_node.py _image_topic:=/usb_cam/image_raw
 ```
 
@@ -146,7 +146,7 @@ rosrun qr_item_search qr_scanner_node.py _image_topic:=/usb_cam/image_raw
 
 ```bash
 source /opt/ros/noetic/setup.bash
-source ~/ucar_ws/devel/setup.bash
+source ~/ucar_ws_pro/devel/setup.bash
 rosrun qr_item_search item_search_controller_node.py
 ```
 
@@ -434,8 +434,8 @@ subst Q: /d
 小车端测试：
 
 ```bash
-cd ~/ucar_ws/src/qr_item_search
-PYTHONPATH=~/ucar_ws/src/qr_item_search/src \
+cd ~/ucar_ws_pro/src/qr_item_search
+PYTHONPATH=~/ucar_ws_pro/src/qr_item_search/src \
 python3 -m unittest discover -s test -p 'test_*.py' -q
 ```
 

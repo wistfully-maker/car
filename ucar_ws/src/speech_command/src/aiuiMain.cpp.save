@@ -232,10 +232,10 @@ void test_callback()
     system("roslaunch ucar_nav ucar_navigation.launch &");
 
     // 2、运行你的Python脚本，替换为你脚本真实绝对路径
-    system("python3 /home/ucar/ucar_ws/src/waterplus_map_tools/scripts/nav_waypoints_sequence.py ");
+    system("python3 /home/ucar/ucar_ws_pro/src/waterplus_map_tools/scripts/nav_waypoints_sequence.py ");
 
     // 3、运行扫描
-    system("roslaunch /home/ucar/ucar_ws/src/qr_item_search");
+    system("roslaunch /home/ucar/ucar_ws_pro/src/qr_item_search");
 }
 int main(int argc, char **argv)
 {

@@ -56,7 +56,7 @@ sign_detector:
   camera_center_x: 320.0
   camera_focal_px: 500.0
   # fake = 本地确定性后端（订阅 /task/delivery_sign_fake 注入）；
-  # vehicle = 车上 ~/ucar_ws/src/yolo_biao/infer.py + ~/ucar_ws/src/ocr/ocr_infer.py。
+  # vehicle = 车上 ~/ucar_ws_pro/src/yolo_biao/infer.py + ~/ucar_ws_pro/src/ocr/ocr_infer.py。
   backend: fake
   # vehicle 后端导入模块名（与车上文件契约一致）
   vehicle_backend_module: yolo_biao.infer

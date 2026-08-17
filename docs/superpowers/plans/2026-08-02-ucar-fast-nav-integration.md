@@ -127,7 +127,7 @@
 **Files:**
 - Verify all changed files
 - Deploy: `ucar_ws/src/task_orchestrator/`
-- Read only: `/home/ucar/ucar_ws/src/ucar_fast_nav/`
+- Read only: `/home/ucar/ucar_ws_pro/src/ucar_fast_nav/`
 
 - [ ] 运行 task_orchestrator、QR、LLM、speech 全部本地测试和 `git diff --check`。
 - [ ] 部署前只读检查小车 `ucar_fast_nav` 实际 launch/参数与交接快照一致，不覆盖它。

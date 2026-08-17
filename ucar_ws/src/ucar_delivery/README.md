@@ -143,7 +143,7 @@ mock /task/simulation_navigation_goal
 ## 7. 构建与源码命令（车端环境）
 
 ```bash
-cd ~/ucar_ws
+cd ~/ucar_ws_pro
 catkin_make --pkg ucar_delivery
 source devel/setup.bash
 rospack find ucar_delivery   # 确认安装
@@ -407,9 +407,9 @@ scan→map TF；空 frame、零/非法 stamp、陈旧 scan 都不参与估计。
 - **PC/Gazebo 仿真未接入**；`/task/sim_trigger` 与 `/task/sim_complete` 在本阶段
   **不存在**（stub 已移除），是未来契约；
 - 未接入竞争编排器；`velocity_arbiter` 不参与本阶段；
-- 车端契约已核对为 `~/ucar_ws/src/yolo_biao/infer.py` 的
+- 车端契约已核对为 `~/ucar_ws_pro/src/yolo_biao/infer.py` 的
   `YoloDetector.predict(frame)`（输出 `[x1,y1,x2,y2,confidence]` 列表）与
-  `~/ucar_ws/src/ocr/ocr_infer.py` 的 `RapidOcrInfer.predict(crop)`（输出
+  `~/ucar_ws_pro/src/ocr/ocr_infer.py` 的 `RapidOcrInfer.predict(crop)`（输出
   `(text, confidence)`）。适配器按置信度选择 YOLO 框、裁剪后实际执行 OCR，并生成
   `timestamp/target/confidence/bbox/ocr_text/ocr_confidence`；模块、类或签名不符时
   启动即 fail-fast。OCR 的“电子产品加工车间”通过显式别名映射到协议名称

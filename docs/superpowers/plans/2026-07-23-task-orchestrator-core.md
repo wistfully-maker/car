@@ -761,7 +761,7 @@ git commit -m "feat: adapt recognized speech into task requests"
 调用方式：
 
 ```text
-/home/ucar/ucar_ws/src/speech_command/scripts/tts_http.py <text>
+/home/ucar/ucar_ws_pro/src/speech_command/scripts/tts_http.py <text>
 ```
 
 使用参数列表，不使用 `shell=True`。超时时间从 ROS 参数读取。

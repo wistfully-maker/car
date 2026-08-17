@@ -106,7 +106,7 @@ Codex 在 `53bc2cd` 上重新运行完整测试、`compileall` 与 `git diff --c
 
 ## 7. 实车验收与部署（Codex 执行，DeepSeek 未执行）
 
-1. 提交审查与本地全量回归（`PYTHONPATH=~/ucar_ws/src/qr_item_search/src python3 -m unittest discover -s test -p 'test_*.py' -q`）。
+1. 提交审查与本地全量回归（`PYTHONPATH=~/ucar_ws_pro/src/qr_item_search/src python3 -m unittest discover -s test -p 'test_*.py' -q`）。
 2. 备份车端旧包；catkin 编译；只开相机的实时画面验证（`start_debug_stream:=true`）。
 3. 只读节点检查：确认 QR launch 未启动/重配 usb_cam，`decode_scale` 仅在 scanner。
 4. 空旷地安全运行：一圈空载验证持续扫码 + 各站停靠 + 无相机超时误报。

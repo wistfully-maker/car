@@ -25,8 +25,8 @@
 
 ```bash
 source /opt/ros/noetic/setup.bash
-source /home/ucar/ucar_ws/devel/setup.bash
-cd /home/ucar/ucar_ws
+source /home/ucar/ucar_ws_pro/devel/setup.bash
+cd /home/ucar/ucar_ws_pro
 ./src/task_orchestrator/scripts/start_competition.sh
 ```
 
@@ -98,7 +98,7 @@ rostopic pub -1 /task/cancel std_msgs/String \
 # 本机（无需 ROS）：
 python -m unittest discover -s ucar_ws/src/task_orchestrator/test -p "test_*.py"
 # 车上（Linux 完整环境，164 项全过）：
-cd ~/ucar_ws/src/task_orchestrator && python3 -m unittest discover -s test -p "test_*.py"
+cd ~/ucar_ws_pro/src/task_orchestrator && python3 -m unittest discover -s test -p "test_*.py"
 ```
 
 带 ROS 的手工协议模拟见 `task_orchestrator/test/manual_simulation.md`。
@@ -159,7 +159,7 @@ cd ~/ucar_ws/src/task_orchestrator && python3 -m unittest discover -s test -p "t
 ## 6. 编译
 
 ```bash
-cd ~/ucar_ws && source /opt/ros/noetic/setup.bash
+cd ~/ucar_ws_pro && source /opt/ros/noetic/setup.bash
 catkin_make --pkg ucar_avoid
 ```
 

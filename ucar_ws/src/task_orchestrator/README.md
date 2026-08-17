@@ -75,13 +75,13 @@ stop 导航栈：实物车间识别、动态避障导航与停车后回传 `/tas
 ```bash
 ssh ucar@192.168.1.109
 source /opt/ros/noetic/setup.bash
-cd /home/ucar/ucar_ws
-source /home/ucar/ucar_ws/devel/setup.bash
+cd /home/ucar/ucar_ws_pro
+source /home/ucar/ucar_ws_pro/devel/setup.bash
 rospack find task_orchestrator
-chmod +x /home/ucar/ucar_ws/src/task_orchestrator/scripts/start_competition.sh
+chmod +x /home/ucar/ucar_ws_pro/src/task_orchestrator/scripts/start_competition.sh
 ```
 
-`rospack find` 应指向 `/home/ucar/ucar_ws/src/task_orchestrator`。每个新 SSH 终端都重新执行两条
+`rospack find` 应指向 `/home/ucar/ucar_ws_pro/src/task_orchestrator`。每个新 SSH 终端都重新执行两条
 `source`；不要依赖交互 shell 的历史环境。
 
 ### 3.2 安全创建 Spark secret
@@ -115,8 +115,8 @@ stat -c '%U %a %n' ~/.config/ucar/spark_api_password
 
 ```bash
 source /opt/ros/noetic/setup.bash
-source /home/ucar/ucar_ws/devel/setup.bash
-cd /home/ucar/ucar_ws
+source /home/ucar/ucar_ws_pro/devel/setup.bash
+cd /home/ucar/ucar_ws_pro
 ./src/task_orchestrator/scripts/start_competition.sh
 ```
 
@@ -124,7 +124,7 @@ cd /home/ucar/ucar_ws
 
 ```bash
 source /opt/ros/noetic/setup.bash
-source /home/ucar/ucar_ws/devel/setup.bash
+source /home/ucar/ucar_ws_pro/devel/setup.bash
 rosnode cleanup
 ```
 
@@ -615,7 +615,7 @@ WAITING_SIMULATION_SPEECH
 
 第三阶段巡线起点、相机参数与超时来自
 `line_follow_integration/config/phase3.yaml`（小车部署路径
-`/home/ucar/ucar_ws/src/line_follow_integration/config/phase3.yaml`），由根 launch
+`/home/ucar/ucar_ws_pro/src/line_follow_integration/config/phase3.yaml`），由根 launch
 通过 `phase3_config` 参数转发；**修改 YAML 必须重启根 launch**，不修改 Python。
 物理相机保持 1020x720 唯一配置；YOLO 使用原始图像；巡线使用派生的 640x480 图像
 （`/line_follow/image_raw`）。根 launch 通过 `start_line_follow` 开关包含

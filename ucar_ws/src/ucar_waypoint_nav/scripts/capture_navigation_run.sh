@@ -6,7 +6,7 @@ OUTPUT_ROOT="${1:-/home/ucar/navigation_runs}"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 RUN_DIR="${OUTPUT_ROOT}/${STAMP}"
 PACKAGE_DIR="$(rospack find ucar_waypoint_nav)"
-MAP_IMAGE="${2:-/home/ucar/ucar_ws/src/ucar_nav/maps/map.pgm}"
+MAP_IMAGE="${2:-/home/ucar/ucar_ws_pro/src/ucar_nav/maps/map.pgm}"
 
 mkdir -p "${RUN_DIR}"
 rosparam dump "${RUN_DIR}/rosparams.yaml"
@@ -19,7 +19,7 @@ sleep 2
 kill "${TF_PID}" 2>/dev/null || true
 
 git -C "${PACKAGE_DIR}" rev-parse HEAD > "${RUN_DIR}/git_commit.txt" 2>&1 || \
-  git -C /home/ucar/ucar_ws rev-parse HEAD > "${RUN_DIR}/git_commit.txt" 2>&1 || true
+  git -C /home/ucar/ucar_ws_pro rev-parse HEAD > "${RUN_DIR}/git_commit.txt" 2>&1 || true
 sha256sum "${MAP_IMAGE}" > "${RUN_DIR}/map_sha256.txt"
 
 rosbag record -O "${RUN_DIR}/navigation.bag" \

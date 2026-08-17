@@ -9,7 +9,7 @@ import rospy
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
 
-MODEL = "/home/ucar/ucar_ws/src/yolo_turn/best.pt"
+MODEL = "/home/ucar/ucar_ws_pro/src/yolo_turn/best.pt"
 CONF  = 0.5
 INTERVAL = 1.5  # 每1.5秒更新一次结果
 NAMES = {0: "red_light", 1: "straight", 2: "left_turn", 3: "right_turn"}

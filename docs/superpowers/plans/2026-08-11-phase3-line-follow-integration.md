@@ -183,7 +183,7 @@ timeouts:
 runtime:
   yolo_result_file: /tmp/yolo_result.txt
   stop_done_file: /tmp/stop_done.txt
-  yolo_model: /home/ucar/ucar_ws/src/yolo_turn/best.pt
+  yolo_model: /home/ucar/ucar_ws_pro/src/yolo_turn/best.pt
   yolo_model_sha256: cb1c5db5da5db75fe40000410295970f2d7fb6a59d9600f82a22d836829e1cdd
 ```
 
@@ -727,7 +727,7 @@ Import byte-for-byte:
 E:\follow_v1\follow_v1\follow_left_v4.py  -> scripts/follow_left_v4.py
 E:\follow_v1\follow_v1\follow_right_v4.py -> scripts/follow_right_v4.py
 E:\follow_v1\follow_v1\follow_mid_v4.py   -> scripts/follow_mid_v4.py
-ucar@192.168.1.109:/home/ucar/ucar_ws/src/car_server/yolo_server.py -> scripts/yolo_server.py
+ucar@192.168.1.109:/home/ucar/ucar_ws_pro/src/car_server/yolo_server.py -> scripts/yolo_server.py
 ```
 
 Write the four lowercase hashes above to `SOURCE_SNAPSHOT.sha256`. Do not import `auto_drive_v3.py`; `line_follow_supervisor_node.py` replaces its direction/process role and prevents its duplicate TTS/false-success behavior. Do not import `start_all_yolo.launch`.
@@ -753,7 +753,7 @@ route_command = [
 ]
 ```
 
-Before starting YOLO, verify `/home/ucar/ucar_ws/src/yolo_turn/best.pt` exists and its SHA-256 equals `cb1c5db5da5db75fe40000410295970f2d7fb6a59d9600f82a22d836829e1cdd`. Require a raw frame within 5 seconds, and require a derived frame before starting the route. Publish `waiting_signal`, then `direction_selected`; once the direction is locked, terminate the owned YOLO child before starting the route and publishing `following`. Publish `success` only for a fresh stop marker. Forward candidate Twist messages only while the derived frame age is at most 0.5 seconds. On a stale derived frame, publish zero immediately and drop candidates; resume if frames recover within 3 seconds, otherwise fail. On failure/cancel/shutdown, publish zero first, terminate only owned live children, wait briefly, kill only those still-owned children, and publish one correlated failure.
+Before starting YOLO, verify `/home/ucar/ucar_ws_pro/src/yolo_turn/best.pt` exists and its SHA-256 equals `cb1c5db5da5db75fe40000410295970f2d7fb6a59d9600f82a22d836829e1cdd`. Require a raw frame within 5 seconds, and require a derived frame before starting the route. Publish `waiting_signal`, then `direction_selected`; once the direction is locked, terminate the owned YOLO child before starting the route and publishing `following`. Publish `success` only for a fresh stop marker. Forward candidate Twist messages only while the derived frame age is at most 0.5 seconds. On a stale derived frame, publish zero immediately and drop candidates; resume if frames recover within 3 seconds, otherwise fail. On failure/cancel/shutdown, publish zero first, terminate only owned live children, wait briefly, kill only those still-owned children, and publish one correlated failure.
 
 - [ ] **Step 5: Run contract tests and compile checks**
 
@@ -1070,7 +1070,7 @@ left_turn
 right_turn
 straight
 任务完成
-/home/ucar/ucar_ws/src/line_follow_integration/config/phase3.yaml
+/home/ucar/ucar_ws_pro/src/line_follow_integration/config/phase3.yaml
 D:\program_sec\智能车\.worktrees\phase3-line-follow-integration\ucar_ws\src\line_follow_integration\config\phase3.yaml
 ```
 
@@ -1164,4 +1164,4 @@ git add -- ucar_ws/src/task_orchestrator/HANDOFF_TO_CODEX.md
 git commit -m "docs(phase3): record verified implementation handoff"
 ```
 
-After this plan is complete, implementation stops before deployment. The next separate operation is: review diff -> back up vehicle packages -> deploy to `/home/ucar/ucar_ws/src` -> catkin build -> no-motion topic simulation -> staged supervised vehicle test.
+After this plan is complete, implementation stops before deployment. The next separate operation is: review diff -> back up vehicle packages -> deploy to `/home/ucar/ucar_ws_pro/src` -> catkin build -> no-motion topic simulation -> staged supervised vehicle test.

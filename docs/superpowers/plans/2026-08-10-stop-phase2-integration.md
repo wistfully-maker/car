@@ -21,7 +21,7 @@ baseline ancestor: 77e853a767152d7e877b736af6390605c841e6d2
 ```
 
 Before Task 1, Codex—not DeepSeek—must import the exact vehicle directory
-`/home/ucar/ucar_ws/src/stop` into `ucar_ws/src/stop`, generate
+`/home/ucar/ucar_ws_pro/src/stop` into `ucar_ws/src/stop`, generate
 `ucar_ws/src/stop/VEHICLE_SNAPSHOT.sha256`, and commit the untouched snapshot as
 `chore(stop): import verified vehicle package snapshot`. DeepSeek must stop if that
 commit, directory, or manifest is absent.

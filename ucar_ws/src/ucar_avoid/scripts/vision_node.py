@@ -10,8 +10,8 @@ from sensor_msgs.msg import Image
 from std_msgs.msg import String, Float32, Bool
 from geometry_msgs.msg import Point
 
-sys.path.append('/home/ucar/ucar_ws/src/yolo')
-sys.path.append('/home/ucar/ucar_ws/src/ocr')
+sys.path.append('/home/ucar/ucar_ws_pro/src/yolo')
+sys.path.append('/home/ucar/ucar_ws_pro/src/ocr')
 
 try:
     from yolo_infer import YoloDetector

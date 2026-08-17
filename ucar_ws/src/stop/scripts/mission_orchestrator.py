@@ -148,7 +148,7 @@ phase2_ack_timeout = 60.0
 # tts_http.py 相对于本脚本的路径（适配机器人部署路径）
 _TTS_SCRIPT_CANDIDATES = [
     os.path.join(os.path.dirname(__file__), '../../speech_command/scripts/tts_http.py'),
-    '/home/ucar/ucar_ws/src/speech_command/scripts/tts_http.py',
+    '/home/ucar/ucar_ws_pro/src/speech_command/scripts/tts_http.py',
 ]
 
 

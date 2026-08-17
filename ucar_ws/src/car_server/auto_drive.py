@@ -7,12 +7,12 @@ YOLO检测→选道巡线→停车→语音播报，一键完成
 import subprocess, sys, time, os, signal, cv2, numpy as np
 
 # ========== 配置 ==========
-LEFT_FULL   = "/home/ucar/ucar_ws/src/car_server/ros_line_follow_left_full.py"
-RIGHT_FULL  = "/home/ucar/ucar_ws/src/car_server/ros_line_follow_right_full.py"
-MIDDLE      = "/home/ucar/ucar_ws/src/car_server/ros_line_follow_v18_mid.py"
-TTS_SCRIPT  = "/home/ucar/ucar_ws/src/speech_command/scripts/tts_http.py"
+LEFT_FULL   = "/home/ucar/ucar_ws_pro/src/car_server/ros_line_follow_left_full.py"
+RIGHT_FULL  = "/home/ucar/ucar_ws_pro/src/car_server/ros_line_follow_right_full.py"
+MIDDLE      = "/home/ucar/ucar_ws_pro/src/car_server/ros_line_follow_v18_mid.py"
+TTS_SCRIPT  = "/home/ucar/ucar_ws_pro/src/speech_command/scripts/tts_http.py"
 
-MODEL_PATH  = "/home/ucar/ucar_ws/src/yolo_turn/best.pt"
+MODEL_PATH  = "/home/ucar/ucar_ws_pro/src/yolo_turn/best.pt"
 CONF        = 0.5
 DETECT_TIME = 3.0   # YOLO检测秒数
 NAMES       = {0: "red_light", 1: "straight", 2: "left_turn", 3: "right_turn"}

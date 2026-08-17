@@ -33,7 +33,7 @@ D:\program_sec\智能车\.worktrees\phase3-line-follow-integration\ucar_ws\src\l
 部署到小车后的绝对路径：
 
 ```text
-/home/ucar/ucar_ws/src/line_follow_integration/config/phase3.yaml
+/home/ucar/ucar_ws_pro/src/line_follow_integration/config/phase3.yaml
 ```
 
 现场调整第三阶段巡线起点、相机参数或超时只修改此 YAML 并**重启根 launch**；不得在
@@ -136,7 +136,7 @@ supervisor 只终止自己通过 `subprocess.Popen` 创建并记录 PID 的子�
 YOLO 模型不提交 Git：
 
 ```text
-/home/ucar/ucar_ws/src/yolo_turn/best.pt
+/home/ucar/ucar_ws_pro/src/yolo_turn/best.pt
 sha256: cb1c5db5da5db75fe40000410295970f2d7fb6a59d9600f82a22d836829e1cdd
 ```
 

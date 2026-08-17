@@ -191,7 +191,7 @@ D:\program_sec\智能车\.worktrees\phase3-line-follow-integration\ucar_ws\src\l
 计划部署到小车后的绝对路径：
 
 ```text
-/home/ucar/ucar_ws/src/line_follow_integration/config/phase3.yaml
+/home/ucar/ucar_ws_pro/src/line_follow_integration/config/phase3.yaml
 ```
 
 默认内容至少包括：

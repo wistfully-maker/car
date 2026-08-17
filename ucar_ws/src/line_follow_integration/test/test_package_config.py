@@ -80,7 +80,7 @@ class OperatorDocumentationTests(unittest.TestCase):
             "right_turn",
             "straight",
             "任务完成",
-            "/home/ucar/ucar_ws/src/line_follow_integration/config/phase3.yaml",
+            "/home/ucar/ucar_ws_pro/src/line_follow_integration/config/phase3.yaml",
             "D:\\program_sec\\智能车\\.worktrees\\phase3-line-follow-integration\\ucar_ws\\src\\line_follow_integration\\config\\phase3.yaml",
         ):
             self.assertIn(required, readme)

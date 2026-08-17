@@ -4,7 +4,7 @@ from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
 from rknnlite.api import RKNNLite
 logging._nameToLevel.update({"CRITICAL":50,"FATAL":50,"ERROR":40,"WARN":30,"WARNING":30,"INFO":20,"DEBUG":10,"NOTSET":0})
-rknn=RKNNLite(); rknn.load_rknn("/home/ucar/ucar_ws/src/turn_yolo/turn_yolo_480.rknn"); rknn.init_runtime(core_mask=RKNNLite.NPU_CORE_0_1_2)
+rknn=RKNNLite(); rknn.load_rknn("/home/ucar/ucar_ws_pro/src/turn_yolo/turn_yolo_480.rknn"); rknn.init_runtime(core_mask=RKNNLite.NPU_CORE_0_1_2)
 br=CvBridge(); f=[None]
 def cb(m):
     try: f[0]=br.imgmsg_to_cv2(m,"bgr8")

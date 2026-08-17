@@ -34,7 +34,7 @@ voice_adapter:
 tts_bridge:
   command:
     - python3
-    - /home/ucar/ucar_ws/src/speech_command/scripts/tts_http.py
+    - /home/ucar/ucar_ws_pro/src/speech_command/scripts/tts_http.py
   timeout: 30.0
 
 fast_nav_adapter:

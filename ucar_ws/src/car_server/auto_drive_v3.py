@@ -9,10 +9,10 @@
 
 import rospy, os, time, subprocess, signal
 
-LEFT   = "/home/ucar/ucar_ws/src/car_server/follow_left_v4.py"
-RIGHT  = "/home/ucar/ucar_ws/src/car_server/follow_right_v4.py"
-MID    = "/home/ucar/ucar_ws/src/car_server/follow_mid_v4.py"
-TTS    = "/home/ucar/ucar_ws/src/speech_command/scripts/tts_http.py"
+LEFT   = "/home/ucar/ucar_ws_pro/src/car_server/follow_left_v4.py"
+RIGHT  = "/home/ucar/ucar_ws_pro/src/car_server/follow_right_v4.py"
+MID    = "/home/ucar/ucar_ws_pro/src/car_server/follow_mid_v4.py"
+TTS    = "/home/ucar/ucar_ws_pro/src/speech_command/scripts/tts_http.py"
 YOLO_FILE = "/tmp/yolo_result.txt"
 STOP_FILE = "/tmp/stop_done.txt"
 

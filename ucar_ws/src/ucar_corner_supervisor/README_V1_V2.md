@@ -3,7 +3,7 @@
 对应小车目录：
 
 ```text
-/home/ucar/ucar_ws/src/ucar_corner_supervisor
+/home/ucar/ucar_ws_pro/src/ucar_corner_supervisor
 ```
 
 当前连接命令：
@@ -61,7 +61,7 @@ navigation_with_corner_supervisor_*.launch
 
 ```bash
 ssh ucar@10.234.15.42
-source /home/ucar/ucar_ws/devel/setup.bash
+source /home/ucar/ucar_ws_pro/devel/setup.bash
 
 rosnode list | sort
 ps -eo pid,args | grep -E \
@@ -101,7 +101,7 @@ rosnode cleanup
 
 ```bash
 ssh ucar@10.234.15.42
-source /home/ucar/ucar_ws/devel/setup.bash
+source /home/ucar/ucar_ws_pro/devel/setup.bash
 roslaunch ucar_nav robot_base_bringup.launch start_camera:=false
 ```
 
@@ -123,7 +123,7 @@ rosrun tf tf_echo odom base_link
 
 ```bash
 ssh ucar@10.234.15.42
-source /home/ucar/ucar_ws/devel/setup.bash
+source /home/ucar/ucar_ws_pro/devel/setup.bash
 roslaunch ucar_corner_supervisor \
   navigation_with_corner_supervisor_legacy_v1.launch
 ```
@@ -132,7 +132,7 @@ roslaunch ucar_corner_supervisor \
 
 ```bash
 ssh ucar@10.234.15.42
-source /home/ucar/ucar_ws/devel/setup.bash
+source /home/ucar/ucar_ws_pro/devel/setup.bash
 roslaunch ucar_corner_supervisor \
   navigation_with_corner_supervisor_v2.launch
 ```
@@ -326,7 +326,7 @@ ps -eo pid,args | grep -E \
 文件：
 
 ```text
-/home/ucar/ucar_ws/src/ucar_corner_supervisor/config/corner_supervisor_legacy_v1.yaml
+/home/ucar/ucar_ws_pro/src/ucar_corner_supervisor/config/corner_supervisor_legacy_v1.yaml
 ```
 
 | 参数 | 冻结值 | 含义 |
@@ -357,7 +357,7 @@ V1 没有 V2 的矩形车身旋转保护，也不能可靠维护多个紧邻拐�
 文件：
 
 ```text
-/home/ucar/ucar_ws/src/ucar_corner_supervisor/config/corner_supervisor.yaml
+/home/ucar/ucar_ws_pro/src/ucar_corner_supervisor/config/corner_supervisor.yaml
 ```
 
 共用参数含义与 V1 相同。额外参数：
@@ -394,7 +394,7 @@ V1 没有 V2 的矩形车身旋转保护，也不能可靠维护多个紧邻拐�
 当前 profile：
 
 ```text
-/home/ucar/ucar_ws/src/ucar_nav/config/profiles/navfn_teb_corner.yaml
+/home/ucar/ucar_ws_pro/src/ucar_nav/config/profiles/navfn_teb_corner.yaml
 ```
 
 加载文件：
@@ -507,16 +507,16 @@ Windows 同步：
 ```powershell
 scp -r `
   D:\program_sec\智能车\.worktrees\corner-supervisor\ucar_ws\src\ucar_corner_supervisor `
-  ucar@10.234.15.42:/home/ucar/ucar_ws/src/
+  ucar@10.234.15.42:/home/ucar/ucar_ws_pro/src/
 ```
 
 小车构建：
 
 ```bash
-cd /home/ucar/ucar_ws
+cd /home/ucar/ucar_ws_pro
 source /opt/ros/noetic/setup.bash
 catkin_make --pkg ucar_corner_supervisor
-source /home/ucar/ucar_ws/devel/setup.bash
+source /home/ucar/ucar_ws_pro/devel/setup.bash
 ```
 
 部署前关闭正在运行的本包节点，部署后重启才能加载新代码和 YAML。

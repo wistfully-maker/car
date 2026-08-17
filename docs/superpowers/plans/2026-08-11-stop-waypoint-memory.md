@@ -252,8 +252,8 @@
 ### Task 6: Review, back up, deploy, and verify on the vehicle without motion
 
 **Files:**
-- Deploy only changed stop source/test/documentation files to `/home/ucar/ucar_ws/src/stop`
-- Create a timestamped backup under `/home/ucar/ucar_ws/deploy_backups/`
+- Deploy only changed stop source/test/documentation files to `/home/ucar/ucar_ws_pro/src/stop`
+- Create a timestamped backup under `/home/ucar/ucar_ws_pro/deploy_backups/`
 
 - [ ] **Step 1: Review the complete branch diff**
 
@@ -261,7 +261,7 @@
 
 - [ ] **Step 2: Create a timestamped vehicle backup with a short manifest**
 
-  Back up the current `/home/ucar/ucar_ws/src/stop` before overwriting. Record source branch, commit, timestamp, purpose, and changed file list. Do not delete earlier backups.
+  Back up the current `/home/ucar/ucar_ws_pro/src/stop` before overwriting. Record source branch, commit, timestamp, purpose, and changed file list. Do not delete earlier backups.
 
 - [ ] **Step 3: Deploy the minimal changed file set**
 
@@ -269,7 +269,7 @@
 
 - [ ] **Step 4: Run vehicle tests and build**
 
-  Run remotely from `/home/ucar/ucar_ws`:
+  Run remotely from `/home/ucar/ucar_ws_pro`:
 
   ```bash
   python -m unittest discover -s src/stop/test -p 'test_*.py' -v

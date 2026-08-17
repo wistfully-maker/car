@@ -7,7 +7,7 @@
 
 ## 1. 车端快照与冻结
 
-- 来源：`ucar@192.168.1.109:/home/ucar/ucar_ws/src/stop`（Codex 导入，DeepSeek 禁止 SSH/SCP）；
+- 来源：`ucar@192.168.1.109:/home/ucar/ucar_ws_pro/src/stop`（Codex 导入，DeepSeek 禁止 SSH/SCP）；
 - 快照清单：`VEHICLE_SNAPSHOT.sha256`（每个文件的 SHA-256，车端独立读取后本地复核）；
 - 冻结对象：`scripts/models/*.rknn`、`scripts/models/ppocr_keys_v1.txt`、
   `scripts/ocr/*`、`scripts/ocr_native_node.py`、`scripts/precision_park.py`、

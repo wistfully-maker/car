@@ -35,7 +35,7 @@ ucar_navigation.launch
 小车部署路径：
 
 ```text
-/home/ucar/ucar_ws/src/ucar_nav
+/home/ucar/ucar_ws_pro/src/ucar_nav
 ```
 
 关键文件：
@@ -83,24 +83,24 @@ ssh ucar@172.20.10.4
 ```bash
 stamp="$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$HOME/ucar_nav_backups"
-cp -a ~/ucar_ws/src/ucar_nav \
+cp -a ~/ucar_ws_pro/src/ucar_nav \
   "$HOME/ucar_nav_backups/ucar_nav-${stamp}"
 printf '%s\n' "$HOME/ucar_nav_backups/ucar_nav-${stamp}"
 
 staging="$(mktemp -d /tmp/ucar-nav-deploy.XXXXXX)"
 tar -xzf /tmp/ucar_nav-deploy.tar.gz -C "$staging"
 rsync -a --delete "$staging/ucar_nav/" \
-  "$HOME/ucar_ws/src/ucar_nav/"
+  "$HOME/ucar_ws_pro/src/ucar_nav/"
 ```
 
 `rsync --delete` 只允许将已经核对的暂存包同步到明确的
-`/home/ucar/ucar_ws/src/ucar_nav/`，不得对 `src/` 或工作空间根目录执行。
+`/home/ucar/ucar_ws_pro/src/ucar_nav/`，不得对 `src/` 或工作空间根目录执行。
 
 ### 3.3 编译
 
 ```bash
 source /opt/ros/noetic/setup.bash
-cd ~/ucar_ws
+cd ~/ucar_ws_pro
 catkin_make --pkg ucar_nav
 source devel/setup.bash
 rospack find ucar_nav
@@ -109,7 +109,7 @@ rospack find ucar_nav
 最后一条应输出：
 
 ```text
-/home/ucar/ucar_ws/src/ucar_nav
+/home/ucar/ucar_ws_pro/src/ucar_nav
 ```
 
 ## 4. 启动前冲突检查
@@ -118,7 +118,7 @@ rospack find ucar_nav
 
 ```bash
 source /opt/ros/noetic/setup.bash
-source ~/ucar_ws/devel/setup.bash
+source ~/ucar_ws_pro/devel/setup.bash
 
 rosnode list
 rosnode ping -c 1 /base_driver
@@ -151,7 +151,7 @@ launch 终端按 `Ctrl+C`。
 
 ```bash
 source /opt/ros/noetic/setup.bash
-source ~/ucar_ws/devel/setup.bash
+source ~/ucar_ws_pro/devel/setup.bash
 
 roslaunch ucar_nav ucar_navigation.launch \
   start_robot_base:=true \
@@ -188,7 +188,7 @@ roslaunch ucar_nav ucar_navigation.launch \
 
 ```bash
 source /opt/ros/noetic/setup.bash
-source ~/ucar_ws/devel/setup.bash
+source ~/ucar_ws_pro/devel/setup.bash
 roslaunch ucar_nav robot_base_bringup.launch \
   start_base:=true \
   start_lidar:=true \
@@ -199,7 +199,7 @@ roslaunch ucar_nav robot_base_bringup.launch \
 
 ```bash
 source /opt/ros/noetic/setup.bash
-source ~/ucar_ws/devel/setup.bash
+source ~/ucar_ws_pro/devel/setup.bash
 roslaunch ucar_nav navigation_stack.launch
 ```
 
@@ -209,7 +209,7 @@ roslaunch ucar_nav navigation_stack.launch
 
 ```bash
 roslaunch ucar_nav navigation_stack.launch \
-  map_file:=/home/ucar/ucar_ws/src/ucar_nav/maps/map.yaml
+  map_file:=/home/ucar/ucar_ws_pro/src/ucar_nav/maps/map.yaml
 ```
 
 当前默认地图是 `maps/map.yaml`。不要在没有确认地图方向、原点和现场对应关系时随意
@@ -549,7 +549,7 @@ TEB 负责局部轨迹，并由 `teb_lateral_mode_controller` 根据前方路径
 
 ```bash
 source /opt/ros/noetic/setup.bash
-source ~/ucar_ws/devel/setup.bash
+source ~/ucar_ws_pro/devel/setup.bash
 
 roslaunch ucar_nav navigation_stack.launch \
   navigation_profile:=navfn_teb_corner \

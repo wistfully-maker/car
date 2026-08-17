@@ -554,7 +554,7 @@ Expected: FAIL，`start_competition.sh` 不存在。
 set -euo pipefail
 
 source /opt/ros/noetic/setup.bash
-source /home/ucar/ucar_ws/devel/setup.bash
+source /home/ucar/ucar_ws_pro/devel/setup.bash
 
 launch_args=("$@")
 owns_arg() {
@@ -614,7 +614,7 @@ python ucar_ws/src/task_orchestrator/test/test_competition_bringup.py -v
 ```
 
 ```bash
-bash -n ~/ucar_ws/src/task_orchestrator/scripts/start_competition.sh
+bash -n ~/ucar_ws_pro/src/task_orchestrator/scripts/start_competition.sh
 ```
 
 Expected: Python 测试 `OK`，`bash -n` 退出码 0。
@@ -790,7 +790,7 @@ git status --short
 
 ```bash
 source /opt/ros/noetic/setup.bash
-source ~/ucar_ws/devel/setup.bash
+source ~/ucar_ws_pro/devel/setup.bash
 rosnode list
 rostopic info /cmd_vel
 ps -eo pid,ppid,args | grep -E '[r]oslaunch|[m]ove_base|[u]sb_cam|[s]peech_command'
@@ -801,22 +801,22 @@ ps -eo pid,ppid,args | grep -E '[r]oslaunch|[m]ove_base|[u]sb_cam|[s]peech_comma
 - [ ] **Step 2: 备份小车旧编排包并部署**
 
 ```bash
-cp -a ~/ucar_ws/src/task_orchestrator \
-  ~/ucar_ws/src/task_orchestrator.pre-full-bringup-20260801
+cp -a ~/ucar_ws_pro/src/task_orchestrator \
+  ~/ucar_ws_pro/src/task_orchestrator.pre-full-bringup-20260801
 ```
 
 Windows:
 
 ```powershell
 scp -r .\ucar_ws\src\task_orchestrator `
-  ucar@172.20.10.4:/home/ucar/ucar_ws/src/
+  ucar@172.20.10.4:/home/ucar/ucar_ws_pro/src/
 ```
 
 - [ ] **Step 3: 构建并执行车端测试**
 
 ```bash
 source /opt/ros/noetic/setup.bash
-cd ~/ucar_ws
+cd ~/ucar_ws_pro
 catkin_make --pkg task_orchestrator
 source devel/setup.bash
 python3 -m unittest discover \

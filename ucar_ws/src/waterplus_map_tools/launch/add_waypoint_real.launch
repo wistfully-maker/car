@@ -1,6 +1,6 @@
 <launch>
   <!-- 地图服务 -->
-  <node name="map_server" pkg="map_server" type="map_server" args="/home/ucar/ucar_ws/src/ucar_nav/maps/map.yaml" />
+  <node name="map_server" pkg="map_server" type="map_server" args="/home/ucar/ucar_ws_pro/src/ucar_nav/maps/map.yaml" />
 
   <!-- 加载航点专用RViz配置，自带打点工具栏 -->
   <node name="rviz" pkg="rviz" type="rviz" args="-d $(find waterplus_map_tools)/rviz/editwaypoints.rviz"/>

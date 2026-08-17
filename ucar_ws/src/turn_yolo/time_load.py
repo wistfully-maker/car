@@ -1,7 +1,7 @@
 
 import time
 from rknnlite.api import RKNNLite
-M = "/home/ucar/ucar_ws/src/turn_yolo/turn_yolo_480_cls.rknn"
+M = "/home/ucar/ucar_ws_pro/src/turn_yolo/turn_yolo_480_cls.rknn"
 
 t0=time.time(); rk=RKNNLite(); rk.load_rknn(M); t1=time.time()
 rk.init_runtime(core_mask=RKNNLite.NPU_CORE_0_1_2); t2=time.time()

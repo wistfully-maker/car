@@ -15,9 +15,9 @@
 **检查位置：**
 
 - 本地：`D:\program_sec\智能车\.worktrees\phase3-line-follow-integration`
-- 车端：`/home/ucar/ucar_ws/src/task_orchestrator`
-- 车端未回同步修改：`/home/ucar/ucar_ws/src/line_follow_integration/scripts/follow_left_v5.py`
-- 车端未回同步修改：`/home/ucar/ucar_ws/src/line_follow_integration/scripts/follow_right_v5.py`
+- 车端：`/home/ucar/ucar_ws_pro/src/task_orchestrator`
+- 车端未回同步修改：`/home/ucar/ucar_ws_pro/src/line_follow_integration/scripts/follow_left_v5.py`
+- 车端未回同步修改：`/home/ucar/ucar_ws_pro/src/line_follow_integration/scripts/follow_right_v5.py`
 
 - [ ] 记录本地 `git status --short`、分支和 HEAD；起点应包含 `b6ebdca86e977334b70bc17a24e37b3223fbe895`。
 - [ ] 记录车端两个 V5 文件哈希。它们已经去掉“前停车线后 0.15 m/s 限速”，尚未回同步到本地。
@@ -151,10 +151,10 @@ git status --short
 
 ## 任务 8：车端备份与白名单部署
 
-- [ ] 在 `/home/ucar/ucar_ws/backups/` 创建带北京时间戳和说明的 `task_orchestrator` 备份。
+- [ ] 在 `/home/ucar/ucar_ws_pro/backups/` 创建带北京时间戳和说明的 `task_orchestrator` 备份。
 - [ ] 再次记录车端两个 V5 哈希，确认部署包不包含 `line_follow_integration`。
-- [ ] 只覆盖 `/home/ucar/ucar_ws/src/task_orchestrator` 中本任务修改的白名单文件。
-- [ ] 编译 `task_orchestrator` 及必要依赖，source `/home/ucar/ucar_ws/devel/setup.bash`。
+- [ ] 只覆盖 `/home/ucar/ucar_ws_pro/src/task_orchestrator` 中本任务修改的白名单文件。
+- [ ] 编译 `task_orchestrator` 及必要依赖，source `/home/ucar/ucar_ws_pro/devel/setup.bash`。
 - [ ] 先用 `gazebo_phase_enabled:=false` 验证旧流程没有回归，再用 true 做 topic 级模拟。
 - [ ] 不在无人看护时触发真实底盘流程。
 

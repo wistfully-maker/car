@@ -52,7 +52,7 @@ stop/
 ## 构建
 
 ```bash
-cd ~/ucar_ws
+cd ~/ucar_ws_pro
 catkin_make --pkg stop
 source devel/setup.bash
 ```

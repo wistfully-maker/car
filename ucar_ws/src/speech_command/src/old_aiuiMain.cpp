@@ -231,7 +231,7 @@ void test_callback()
     system("roslaunch ucar_nav ucar_navigation.launch &");
 
     // 2、运行你的Python脚本，替换为你脚本真实绝对路径
-    system("python3 /home/ucar/ucar_ws/src/waterplus_map_tools/scripts/nav_waypoints_sequence.py &");
+    system("python3 /home/ucar/ucar_ws_pro/src/waterplus_map_tools/scripts/nav_waypoints_sequence.py &");
 
     // 3、启动二维码识别模块
     system("roslaunch qr_item_search qr_item_search.launch &");

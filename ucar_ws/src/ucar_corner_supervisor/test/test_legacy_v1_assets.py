@@ -86,7 +86,7 @@ class LegacyV1Tests(unittest.TestCase):
         for required in (
             "navigation_with_corner_supervisor_legacy_v1.launch",
             "navigation_with_corner_supervisor_v2.launch",
-            "source /home/ucar/ucar_ws/devel/setup.bash",
+            "source /home/ucar/ucar_ws_pro/devel/setup.bash",
             "robot_base_bringup.launch",
             "/initialpose",
             "36 元素协方差",

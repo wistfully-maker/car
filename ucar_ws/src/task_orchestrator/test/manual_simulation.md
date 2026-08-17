@@ -26,7 +26,7 @@ rostopic info /cmd_vel
 
 ```bash
 source /opt/ros/noetic/setup.bash
-source ~/ucar_ws/devel/setup.bash
+source ~/ucar_ws_pro/devel/setup.bash
 roslaunch task_orchestrator task_orchestrator.launch \
   enable_tts_bridge:=false \
   enable_fast_nav_adapter:=false \

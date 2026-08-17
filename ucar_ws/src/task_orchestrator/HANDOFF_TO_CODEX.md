@@ -242,12 +242,12 @@ branch:   codex/stop-phase2-integration
 第三阶段新增 `line_follow_integration` 包（相机适配、导航适配、巡线监管器）并扩展
 `task_orchestrator` 状态机与仲裁器。四个冻结源脚本逐一从权威来源导入并核对 SHA-256
 （见 `SOURCE_SNAPSHOT.sha256`）：三个 V4 巡线脚本来自本地 `E:\follow_v1\follow_v1`，
-`yolo_server.py` 来自小车 `/home/ucar/ucar_ws/src/car_server/yolo_server.py`（只读
+`yolo_server.py` 来自小车 `/home/ucar/ucar_ws_pro/src/car_server/yolo_server.py`（只读
 SSH 取得）。未导入 `auto_drive_v3.py`（含 TTS 与假成功逻辑），未导入
 `start_all_yolo.launch`。YOLO 模型不提交 Git：
 
 ```text
-/home/ucar/ucar_ws/src/yolo_turn/best.pt
+/home/ucar/ucar_ws_pro/src/yolo_turn/best.pt
 sha256: cb1c5db5da5db75fe40000410295970f2d7fb6a59d9600f82a22d836829e1cdd
 ```
 
@@ -272,7 +272,7 @@ line_follow=125` 严格大于内部 300/30/120 秒。
 ```text
 仓库相对: ucar_ws/src/line_follow_integration/config/phase3.yaml
 本地绝对: D:\program_sec\智能车\.worktrees\phase3-line-follow-integration\ucar_ws\src\line_follow_integration\config\phase3.yaml
-小车部署: /home/ucar/ucar_ws/src/line_follow_integration/config/phase3.yaml
+小车部署: /home/ucar/ucar_ws_pro/src/line_follow_integration/config/phase3.yaml
 ```
 
 ### 14.4 子进程与故障纪律
@@ -286,7 +286,7 @@ task_orchestrator 播报，匹配回执后进入 COMPLETE。
 
 本地 TDD 任务 1～9 全部完成（每任务 RED→GREEN→单独提交，最终证据见 14.6）。
 **尚未部署、未 catkin 编译、未实车验收**；车端下一步顺序：审查 diff → 备份车端包 →
-部署到 `/home/ucar/ucar_ws/src` → catkin build → 无运动 topic 模拟 → 分级看护实车验收。
+部署到 `/home/ucar/ucar_ws_pro/src` → catkin build → 无运动 topic 模拟 → 分级看护实车验收。
 
 ### 14.6 最终验证证据（任务 9，2026-08-11）
 
@@ -347,7 +347,7 @@ Linux（LF）上不受影响。
 - 三个 V4 巡线脚本的 PID/旋转/停车参数在实车场地未复测。
 
 部署顺序（下一步，Codex 执行）：代码审查 → 全量回归 → 车端备份 →
-部署到 `/home/ucar/ucar_ws/src` → catkin build → 无运动 topic 模拟 →
+部署到 `/home/ucar/ucar_ws_pro/src` → catkin build → 无运动 topic 模拟 →
 分级看护实车验收（导航起点 → 图像验证 → 方向锁定 → 单放 `/cmd_vel/line_follow`
 → 最终停车线 → 全流程）。
 

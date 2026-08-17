@@ -2,7 +2,7 @@
 
 ## 目标
 
-保留车端 `/home/ucar/ucar_ws/src/stop` 已经实车跑通的固定航点、TEB 动态避障、OCR 车间识别、LiDAR PCA 对正、白框停车和连续两阶段顺序，将它以最小改造接入 `task_orchestrator` 第一部分。
+保留车端 `/home/ucar/ucar_ws_pro/src/stop` 已经实车跑通的固定航点、TEB 动态避障、OCR 车间识别、LiDAR PCA 对正、白框停车和连续两阶段顺序，将它以最小改造接入 `task_orchestrator` 第一部分。
 
 自动流程终点为：
 

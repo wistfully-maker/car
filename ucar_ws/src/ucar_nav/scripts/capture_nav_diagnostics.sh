@@ -20,9 +20,9 @@ kill "${tf_pid}" 2>/dev/null || true
 wait "${tf_pid}" 2>/dev/null || true
 
 {
-  echo "git_commit=$(git -C "$HOME/ucar_ws/src/ucar_nav" rev-parse HEAD 2>/dev/null || echo untracked)"
-  echo "map_sha256=$(sha256sum "$HOME/ucar_ws/src/ucar_nav/maps/map.yaml" | awk '{print $1}')"
-  echo "image_sha256=$(sha256sum "$HOME/ucar_ws/src/ucar_nav/maps/map.pgm" | awk '{print $1}')"
+  echo "git_commit=$(git -C "$HOME/ucar_ws_pro/src/ucar_nav" rev-parse HEAD 2>/dev/null || echo untracked)"
+  echo "map_sha256=$(sha256sum "$HOME/ucar_ws_pro/src/ucar_nav/maps/map.yaml" | awk '{print $1}')"
+  echo "image_sha256=$(sha256sum "$HOME/ucar_ws_pro/src/ucar_nav/maps/map.pgm" | awk '{print $1}')"
 } >"${output_dir}/manifest.txt"
 
 printf '%s\n' "${output_dir}"

@@ -1113,15 +1113,15 @@ git commit -m "feat: launch configurable QR item search"
 ### Task 9: Deploy to the Car and Perform Stationary Integration Tests
 
 **Files:**
-- Copy local `ucar_ws/src/qr_item_search/` to car path `/home/ucar/ucar_ws/src/qr_item_search/`.
+- Copy local `ucar_ws/src/qr_item_search/` to car path `/home/ucar/ucar_ws_pro/src/qr_item_search/`.
 
 - [ ] **Step 1: Obtain approval for car changes**
 
 Before running any command, report that deployment will:
 
-- add `/home/ucar/ucar_ws/src/qr_item_search`;
+- add `/home/ucar/ucar_ws_pro/src/qr_item_search`;
 - install `python3-pyzbar`;
-- rebuild `/home/ucar/ucar_ws`;
+- rebuild `/home/ucar/ucar_ws_pro`;
 - not change or upgrade OpenCV.
 
 Proceed only after explicit user approval.
@@ -1143,9 +1143,9 @@ Expected: `pyzbar OK`.
 Run locally:
 
 ```bash
-scp -r ucar_ws/src/qr_item_search ucar:/home/ucar/ucar_ws/src/
+scp -r ucar_ws/src/qr_item_search ucar:/home/ucar/ucar_ws_pro/src/
 ssh ucar \
-  "source /opt/ros/noetic/setup.bash && cd /home/ucar/ucar_ws && catkin_make"
+  "source /opt/ros/noetic/setup.bash && cd /home/ucar/ucar_ws_pro && catkin_make"
 ```
 
 Expected: catkin build exits 0.
@@ -1157,10 +1157,10 @@ Run:
 ```bash
 ssh ucar \
   "source /opt/ros/noetic/setup.bash && \
-   source /home/ucar/ucar_ws/devel/setup.bash && \
-   PYTHONPATH=/home/ucar/ucar_ws/src/qr_item_search/src \
+   source /home/ucar/ucar_ws_pro/devel/setup.bash && \
+   PYTHONPATH=/home/ucar/ucar_ws_pro/src/qr_item_search/src \
    python3 -m unittest discover \
-   -s /home/ucar/ucar_ws/src/qr_item_search/test \
+   -s /home/ucar/ucar_ws_pro/src/qr_item_search/test \
    -p 'test_*.py' -v"
 ```
 
@@ -1298,7 +1298,7 @@ Run on the car:
 
 ```bash
 source /opt/ros/noetic/setup.bash
-source /home/ucar/ucar_ws/devel/setup.bash
+source /home/ucar/ucar_ws_pro/devel/setup.bash
 rostopic hz /usb_cam/image_raw
 rostopic hz /odom
 rostopic echo -n 1 /qr_item_search/state

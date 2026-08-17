@@ -262,7 +262,7 @@ public:
         }
         spoken = true;
         
-        std::string cmd = "python3 /home/ucar/ucar_ws/src/speech_command/scripts/tts_http.py \"" + text + "\" &";
+        std::string cmd = "python3 /home/ucar/ucar_ws_pro/src/speech_command/scripts/tts_http.py \"" + text + "\" &";
         int ret = system(cmd.c_str());
         if (ret == 0) {
             ROS_INFO("Speaking: %s", text.c_str());
@@ -402,7 +402,7 @@ public:
         if (stopped) {
             sim_task_complete = true;
             std::string speech_text = "仿真任务已完成，已将" + SIM_CARGO + "放入" + SIM_WAREHOUSE;
-            std::string cmd = "python3 /home/ucar/ucar_ws/src/speech_command/scripts/tts_http.py \"" + speech_text + "\" &";
+            std::string cmd = "python3 /home/ucar/ucar_ws_pro/src/speech_command/scripts/tts_http.py \"" + speech_text + "\" &";
             system(cmd.c_str());
             ROS_INFO("========================================");
             ROS_INFO("  🎉 SIM TASK COMPLETE!");

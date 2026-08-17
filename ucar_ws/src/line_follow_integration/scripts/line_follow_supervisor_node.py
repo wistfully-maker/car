@@ -39,7 +39,7 @@ from line_follow_integration.runtime import (
 def yolo_command():
     return [
         "python3",
-        "/home/ucar/ucar_ws/src/line_follow_integration/scripts/yolo_direction_server.py",
+        "/home/ucar/ucar_ws_pro/src/line_follow_integration/scripts/yolo_direction_server.py",
         "__name:=phase3_yolo_server",
     ]
 
@@ -73,7 +73,7 @@ class LineFollowSupervisor:
             "stop_done_file", "/tmp/stop_done.txt"
         )
         self._yolo_model = runtime.get(
-            "yolo_model", "/home/ucar/ucar_ws/src/yolo_turn/best.pt"
+            "yolo_model", "/home/ucar/ucar_ws_pro/src/yolo_turn/best.pt"
         )
         self._yolo_model_sha256 = runtime.get(
             "yolo_model_sha256",

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROS_SETUP="${ROS_SETUP:-/opt/ros/noetic/setup.bash}"
-WORKSPACE_SETUP="${WORKSPACE_SETUP:-/home/ucar/ucar_ws/devel/setup.bash}"
+WORKSPACE_SETUP="${WORKSPACE_SETUP:-/home/ucar/ucar_ws_pro/devel/setup.bash}"
 SPARK_SECRET_FILE="${SPARK_SECRET_FILE:-${HOME}/.config/ucar/spark_api_password}"
 BASE_DEVICE="/dev/ttyS0"
 LIDAR_DEVICE="/dev/ttyS4"
@@ -10,7 +10,7 @@ CAMERA_DEVICE="/dev/video0"
 SPEECH_DEVICE="/dev/ttyS3"
 # 第三阶段 YOLO 模型：路径与哈希必须与
 # line_follow_integration/config/phase3.yaml 的 runtime 段一致。
-YOLO_MODEL="${YOLO_MODEL:-/home/ucar/ucar_ws/src/yolo_turn/best.pt}"
+YOLO_MODEL="${YOLO_MODEL:-/home/ucar/ucar_ws_pro/src/yolo_turn/best.pt}"
 YOLO_MODEL_SHA256="${YOLO_MODEL_SHA256:-cb1c5db5da5db75fe40000410295970f2d7fb6a59d9600f82a22d836829e1cdd}"
 
 die() { echo "ERROR: $*" >&2; exit 2; }

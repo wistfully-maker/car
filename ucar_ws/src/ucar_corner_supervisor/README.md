@@ -58,16 +58,16 @@ rostopic info /cmd_vel
 在 Windows 仓库根目录部署时，只复制新包，禁止整目录覆盖 `ucar_nav`：
 
 ```powershell
-scp -r .worktrees\corner-supervisor\ucar_ws\src\ucar_corner_supervisor ucar@10.234.15.42:/home/ucar/ucar_ws/src/
+scp -r .worktrees\corner-supervisor\ucar_ws\src\ucar_corner_supervisor ucar@10.234.15.42:/home/ucar/ucar_ws_pro/src/
 ```
 
 在小车上编译：
 
 ```bash
 ssh ucar@10.234.15.42
-cd /home/ucar/ucar_ws
+cd /home/ucar/ucar_ws_pro
 catkin_make
-source /home/ucar/ucar_ws/devel/setup.bash
+source /home/ucar/ucar_ws_pro/devel/setup.bash
 rospack find ucar_corner_supervisor
 ```
 
@@ -85,7 +85,7 @@ rospack find ucar_corner_supervisor
 4. 启动本包：
 
    ```bash
-   source /home/ucar/ucar_ws/devel/setup.bash
+   source /home/ucar/ucar_ws_pro/devel/setup.bash
    roslaunch ucar_corner_supervisor corner_supervisor.launch
    ```
 
@@ -150,7 +150,7 @@ rostopic info /cmd_vel
 全部比赛参数位于：
 
 ```text
-/home/ucar/ucar_ws/src/ucar_corner_supervisor/config/corner_supervisor.yaml
+/home/ucar/ucar_ws_pro/src/ucar_corner_supervisor/config/corner_supervisor.yaml
 ```
 
 修改后重启本节点生效，不需要重启底盘和导航栈。

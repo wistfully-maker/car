@@ -4,5 +4,5 @@ service udev reload
 sleep 2
 service udev restart
 
-echo 'source /home/ucar/ucar_ws/devel/setup.bash' >> /home/ucar/.bashrc # 小车底盘
+echo 'source /home/ucar/ucar_ws_pro/devel/setup.bash' >> /home/ucar/.bashrc # 小车底盘
 

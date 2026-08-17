@@ -9,7 +9,7 @@ from rknnlite.api import RKNNLite
 logging._nameToLevel.update({"CRITICAL": 50, "FATAL": 50, "ERROR": 40, "WARN": 30,
                              "WARNING": 30, "INFO": 20, "DEBUG": 10, "NOTSET": 0})
 
-MODEL = "/home/ucar/ucar_ws/src/turn_yolo/turn_yolo_480_cls.rknn"
+MODEL = "/home/ucar/ucar_ws_pro/src/turn_yolo/turn_yolo_480_cls.rknn"
 NAMES = {0: "straight", 1: "left", 2: "right", 3: "red"}
 
 rknn = RKNNLite()

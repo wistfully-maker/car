@@ -7,9 +7,9 @@
 
 ```text
 patches/speech_command/AIUITester.cpp
-  -> /home/ucar/ucar_ws/src/speech_command/src/AIUITester.cpp
+  -> /home/ucar/ucar_ws_pro/src/speech_command/src/AIUITester.cpp
 patches/speech_command/competition_command_gate.h
-  -> /home/ucar/ucar_ws/src/speech_command/src/competition_command_gate.h
+  -> /home/ucar/ucar_ws_pro/src/speech_command/src/competition_command_gate.h
 ```
 
 部署前必须备份小车原文件；部署后执行 `catkin_make`，并完成至少三轮连续

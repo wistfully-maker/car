@@ -11,7 +11,7 @@
 ```text
 branch: codex/navigation-safety
 worktree: D:\program_sec\智能车\.worktrees\navigation-safety
-car package: /home/ucar/ucar_ws/src/ucar_nav
+car package: /home/ucar/ucar_ws_pro/src/ucar_nav
 ```
 
 ## 2. 当前架构
@@ -67,8 +67,8 @@ stop_time_buffer: 0.40 s
 默认：
 
 ```text
-/home/ucar/ucar_ws/src/ucar_nav/maps/map.yaml
-/home/ucar/ucar_ws/src/ucar_nav/maps/map.pgm
+/home/ucar/ucar_ws_pro/src/ucar_nav/maps/map.yaml
+/home/ucar/ucar_ws_pro/src/ucar_nav/maps/map.pgm
 ```
 
 原始校验值：
@@ -116,7 +116,7 @@ map.pgm:
 
 ## 8. 小车备份与部署记录
 
-安全基线已部署至 `/home/ucar/ucar_ws/src/ucar_nav`。原导航包备份位于：
+安全基线已部署至 `/home/ucar/ucar_ws_pro/src/ucar_nav`。原导航包备份位于：
 
 ```text
 /home/ucar/ucar_nav_backups/ucar_nav-pre-dwa-20260727-01
@@ -142,7 +142,7 @@ map.pgm:
 ```bash
 stamp="$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$HOME/ucar_nav_backups"
-cp -a ~/ucar_ws/src/ucar_nav \
+cp -a ~/ucar_ws_pro/src/ucar_nav \
   "$HOME/ucar_nav_backups/ucar_nav-${stamp}"
 ```
 

@@ -12,7 +12,7 @@ from task_orchestrator.tts_runner import TtsBridgeLogic
 
 DEFAULT_COMMAND = [
     "python3",
-    "/home/ucar/ucar_ws/src/speech_command/scripts/tts_http.py",
+    "/home/ucar/ucar_ws_pro/src/speech_command/scripts/tts_http.py",
 ]
 
 

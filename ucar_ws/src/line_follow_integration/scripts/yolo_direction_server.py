@@ -49,7 +49,7 @@ class YoloDirectionServer:
         rospy.init_node("yolo_direction_server", anonymous=True)
         self.model_path = rospy.get_param(
             "~model_path",
-            "/home/ucar/ucar_ws/src/turn_yolo/turn_yolo_480_cls.rknn",
+            "/home/ucar/ucar_ws_pro/src/turn_yolo/turn_yolo_480_cls.rknn",
         )
         self.conf_threshold = float(rospy.get_param("~conf_threshold", 0.6))
         self.vote_window = int(rospy.get_param("~vote_window", 3))

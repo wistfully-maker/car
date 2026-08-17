@@ -102,7 +102,7 @@ auto_drive_v3.py   31353702cf6146bcb021bb0586c8a9f2bdc9ccc7ff2ab46f327b919fa15ef
 车端 YOLO 源：
 
 ```text
-ucar@192.168.1.109:/home/ucar/ucar_ws/src/car_server/yolo_server.py
+ucar@192.168.1.109:/home/ucar/ucar_ws_pro/src/car_server/yolo_server.py
 sha256: 9d7010328a636742c1c60012cd6c4f0c78ae3cfc2ab4cf57c815ec88de4e9a51
 ```
 
@@ -111,7 +111,7 @@ sha256: 9d7010328a636742c1c60012cd6c4f0c78ae3cfc2ab4cf57c815ec88de4e9a51
 YOLO 模型不提交到 Git：
 
 ```text
-/home/ucar/ucar_ws/src/yolo_turn/best.pt
+/home/ucar/ucar_ws_pro/src/yolo_turn/best.pt
 sha256: cb1c5db5da5db75fe40000410295970f2d7fb6a59d9600f82a22d836829e1cdd
 ```
 

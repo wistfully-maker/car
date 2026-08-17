@@ -15,7 +15,7 @@ _RKNNInferSession.__call__ = dbg
 _inject_rknn()
 from rapidocr_onnxruntime import RapidOCR
 import cv2
-img = cv2.imread('/home/ucar/ucar_ws/src/images/sign/daily/angle_1/shot_1.jpg')
+img = cv2.imread('/home/ucar/ucar_ws_pro/src/images/sign/daily/angle_1/shot_1.jpg')
 ocr = RapidOCR()
 r = ocr(cv2.flip(img, 1))
 boxes, _ = r

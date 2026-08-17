@@ -47,7 +47,7 @@ yolo7 — 单进程，单摄像头，双 NPU 模型协作，完全自包含
 
 === 小车部署 ===
 
-  目录: ~/ucar_ws/src/yolo7/
+  目录: ~/ucar_ws_pro/src/yolo7/
   依赖: pip install rknnlite rapidocr_onnxruntime opencv-python numpy
         # librknnrt.so 已预装于 /usr/lib/
 """

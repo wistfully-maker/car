@@ -1452,7 +1452,7 @@ Expected:
 On U-CAR-02:
 
 ```bash
-cd ~/ucar_ws
+cd ~/ucar_ws_pro
 catkin_make
 source devel/setup.bash
 rostest qr_item_search qr_item_search.test

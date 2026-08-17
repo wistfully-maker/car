@@ -38,16 +38,16 @@ TEB横移模式转发器和其他导航栈，保证只有`/move_base`发布正�
 ## 3. 编译
 
 ```bash
-cd /home/ucar/ucar_ws
+cd /home/ucar/ucar_ws_pro
 catkin_make --pkg ucar_waypoint_nav
-source /home/ucar/ucar_ws/devel/setup.bash
+source /home/ucar/ucar_ws_pro/devel/setup.bash
 ```
 
 每个新终端都需要：
 
 ```bash
 source /opt/ros/noetic/setup.bash
-source /home/ucar/ucar_ws/devel/setup.bash
+source /home/ucar/ucar_ws_pro/devel/setup.bash
 ```
 
 ## 4. 启动前检查
@@ -231,11 +231,11 @@ rosnode kill /move_base /amcl /map_server
 
 ```bash
 rosrun ucar_waypoint_nav derive_sparse_waypoints.py \
-  --map /home/ucar/ucar_ws/src/ucar_nav/maps/map.yaml \
+  --map /home/ucar/ucar_ws_pro/src/ucar_nav/maps/map.yaml \
   --start 0 0 0 \
   --goal -1.40219 -0.627908 -3.0878 \
-  --output /home/ucar/ucar_ws/src/ucar_waypoint_nav/config/pickup_waypoints.yaml \
-  --preview /home/ucar/ucar_ws/src/ucar_waypoint_nav/config/pickup_waypoints.ppm
+  --output /home/ucar/ucar_ws_pro/src/ucar_waypoint_nav/config/pickup_waypoints.yaml \
+  --preview /home/ucar/ucar_ws_pro/src/ucar_waypoint_nav/config/pickup_waypoints.ppm
 ```
 
 参数：

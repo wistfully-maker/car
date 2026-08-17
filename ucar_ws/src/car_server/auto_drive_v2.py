@@ -6,10 +6,10 @@
 
 import subprocess, sys, time, os, signal
 
-LEFT   = "/home/ucar/ucar_ws/src/car_server/ros_line_follow_v21_left.py"
-RIGHT  = "/home/ucar/ucar_ws/src/car_server/ros_line_follow_right_v2.py"
-MIDDLE = "/home/ucar/ucar_ws/src/car_server/ros_line_follow_v22_mid.py"
-TTS    = "/home/ucar/ucar_ws/src/speech_command/scripts/tts_http.py"
+LEFT   = "/home/ucar/ucar_ws_pro/src/car_server/ros_line_follow_v21_left.py"
+RIGHT  = "/home/ucar/ucar_ws_pro/src/car_server/ros_line_follow_right_v2.py"
+MIDDLE = "/home/ucar/ucar_ws_pro/src/car_server/ros_line_follow_v22_mid.py"
+TTS    = "/home/ucar/ucar_ws_pro/src/speech_command/scripts/tts_http.py"
 R_FILE = "/tmp/yolo_result.txt"
 
 

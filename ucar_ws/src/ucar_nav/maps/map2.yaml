@@ -1,4 +1,4 @@
-image: /home/ucar/ucar_ws/maps/my_map.pgm
+image: /home/ucar/ucar_ws_pro/maps/my_map.pgm
 resolution: 0.050000
 origin: [-13.800000, -12.200000, 0.000000]
 negate: 0

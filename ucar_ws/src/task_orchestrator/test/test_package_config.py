@@ -513,7 +513,7 @@ class PackageConfigTests(unittest.TestCase):
             "right_turn",
             "straight",
             "任务完成",
-            "/home/ucar/ucar_ws/src/line_follow_integration/config/phase3.yaml",
+            "/home/ucar/ucar_ws_pro/src/line_follow_integration/config/phase3.yaml",
         ):
             self.assertIn(required, readme + manual)
         self.assertIn("phase3.launch", manual)

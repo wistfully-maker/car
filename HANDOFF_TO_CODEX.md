@@ -61,7 +61,7 @@ stop：
 
 ## 5. 车端 stop 快照
 
-- 来源：`ucar@192.168.1.109:/home/ucar/ucar_ws/src/stop`（Codex 导入）
+- 来源：`ucar@192.168.1.109:/home/ucar/ucar_ws_pro/src/stop`（Codex 导入）
 - 清单：`ucar_ws/src/stop/VEHICLE_SNAPSHOT.sha256`
 - 冻结文件（字节级校验，测试锁定）：`scripts/models/*.rknn`（ppocrv4_det/rec）、
   `scripts/models/ppocr_keys_v1.txt`、`scripts/ocr/*`、`scripts/ocr_native_node.py`、
