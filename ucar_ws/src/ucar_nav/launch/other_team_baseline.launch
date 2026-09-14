@@ -1,0 +1,66 @@
+<launch>
+  <arg name="map_file" default="$(find ucar_nav)/maps/map.yaml"/>
+  <arg name="start_map_server" default="true"/>
+  <arg name="start_amcl" default="true"/>
+  <arg name="start_move_base" default="true"/>
+  <arg name="apply_first_run_limits" default="true"/>
+
+  <group if="$(arg start_map_server)">
+    <node name="map_server"
+          pkg="map_server"
+          type="map_server"
+          args="$(arg map_file)"
+          output="screen">
+      <param name="frame_id" value="map"/>
+    </node>
+  </group>
+
+  <group if="$(arg start_amcl)">
+    <node name="amcl"
+          pkg="amcl"
+          type="amcl"
+          output="screen">
+      <rosparam command="load"
+                file="$(find ucar_nav)/config/baselines/other_team/amcl.yaml"/>
+    </node>
+  </group>
+
+  <group if="$(arg start_move_base)">
+    <param name="/move_base/base_global_planner"
+           value="global_planner/GlobalPlanner"/>
+    <param name="/move_base/base_local_planner"
+           value="teb_local_planner/TebLocalPlannerROS"/>
+
+    <rosparam command="load"
+              file="$(find ucar_nav)/config/baselines/other_team/move_base.yaml"
+              ns="/move_base"/>
+    <rosparam command="load"
+              file="$(find ucar_nav)/config/baselines/other_team/costmap_common.yaml"
+              ns="/move_base/global_costmap"/>
+    <rosparam command="load"
+              file="$(find ucar_nav)/config/baselines/other_team/costmap_common.yaml"
+              ns="/move_base/local_costmap"/>
+    <rosparam command="load"
+              file="$(find ucar_nav)/config/baselines/other_team/global_planner.yaml"
+              ns="/move_base"/>
+    <rosparam command="load"
+              file="$(find ucar_nav)/config/baselines/other_team/teb.yaml"
+              ns="/move_base"/>
+    <rosparam command="load"
+              file="$(find ucar_nav)/config/baselines/other_team/local_costmap.yaml"
+              ns="/move_base"/>
+    <rosparam command="load"
+              file="$(find ucar_nav)/config/baselines/other_team/global_costmap.yaml"
+              ns="/move_base"/>
+    <rosparam command="load"
+              file="$(find ucar_nav)/config/baselines/other_team/first_run_limits.yaml"
+              ns="/move_base"
+              if="$(arg apply_first_run_limits)"/>
+
+    <node name="move_base"
+          pkg="move_base"
+          type="move_base"
+          output="screen"
+          respawn="false"/>
+  </group>
+</launch>

@@ -1,0 +1,11 @@
+# July 21 legacy baseline.  The astar_planner plugin must be installed on robot.
+profile: legacy_0721_dwa
+map: maps/map.yaml
+global_planner: astar_planner/AstarPlannerRos
+local_planner: dwa_local_planner/DWAPlannerROS
+parameter_files:
+  - config/legacy/0721/dwa.yaml
+  - config/legacy/0721/common.yaml
+  - config/legacy/0721/local.yaml
+  - config/legacy/0721/global.yaml
+  - config/legacy/0721/move_base.yaml

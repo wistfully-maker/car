@@ -1,0 +1,11 @@
+profile: navfn_teb_corner
+map: maps/map.yaml
+global_planner: navfn/NavfnROS
+local_planner: teb_local_planner/TebLocalPlannerROS
+parameter_files:
+  - config/global_planners/navfn.yaml
+  - config/local_planners/teb_corner_safe.yaml
+  - config/costmap/common_teb.yaml
+  - config/costmap/global_teb.yaml
+  - config/costmap/local_teb.yaml
+  - config/move_base_teb.yaml

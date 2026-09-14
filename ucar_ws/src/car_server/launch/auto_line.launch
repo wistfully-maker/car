@@ -1,0 +1,6 @@
+<launch>
+    <!-- 加载真正底层电机驱动（原始ucar_controller包） -->
+    <include file="$(find ucar_controller)/launch/base_driver.launch" ></include>
+</launch>
+
+

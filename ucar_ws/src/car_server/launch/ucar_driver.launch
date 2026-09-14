@@ -1,0 +1,5 @@
+<launch>
+    <!-- 底盘底层驱动 -->
+    <node pkg="car_server" type="car_server.py" name="line_control_server" output="screen"/>
+</launch>
+

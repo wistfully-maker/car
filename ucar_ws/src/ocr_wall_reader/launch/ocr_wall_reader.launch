@@ -1,0 +1,44 @@
+<launch>
+  <!-- ================================================================= -->
+  <!--  OCR Wall Text Reader                                               -->
+  <!--                                                                    -->
+  <!--  Parameters explained:                                             -->
+  <!--    api_key         – API Key (required)                             -->
+  <!--    secret_key      – Secret Key (required)                          -->
+  <!--    image_topic     – camera image topic to subscribe                -->
+  <!--    preprocess      – enable CLAHE + sharpen before OCR              -->
+  <!--    request_timeout – HTTP timeout for API calls                     -->
+  <!--    publish_annotated – also publish image with detection boxes      -->
+  <!-- ================================================================= -->
+
+  <arg name="api_key"          default="7gsRpZtR0no2F1PVDANYfpMd"/>
+  <arg name="secret_key"       default="tq4m4WFriFtEBMA8G74NfJvnvsRJyKpI"/>
+  <arg name="image_topic"      default="/usb_cam/image_raw"/>
+  <arg name="preprocess"       default="true"/>
+  <arg name="request_timeout"  default="5.0"/>
+  <arg name="flip_code"          default="1"/>   <!-- 0=none, 1=horizontal, -1=both -->
+  <arg name="publish_annotated" default="false"/>
+
+  <!-- USB camera -->
+  <node name="usb_cam" pkg="usb_cam" type="usb_cam_node" output="screen">
+    <param name="video_device"   value="/dev/video0"/>
+    <param name="image_width"    value="640"/>
+    <param name="image_height"   value="480"/>
+    <param name="pixel_format"   value="yuyv"/>
+    <param name="camera_frame_id" value="usb_cam"/>
+    <param name="io_method"      value="mmap"/>
+  </node>
+
+  <!-- OCR wall reader -->
+  <node pkg="ocr_wall_reader" type="ocr_wall_reader.py"
+        name="ocr_wall_reader" output="screen">
+    <param name="api_key"           value="$(arg api_key)"/>
+    <param name="secret_key"        value="$(arg secret_key)"/>
+    <param name="image_topic"       value="$(arg image_topic)"/>
+    <param name="preprocess"        value="$(arg preprocess)"/>
+    <param name="request_timeout"   value="$(arg request_timeout)"/>
+    <param name="publish_annotated" value="$(arg publish_annotated)"/>
+  </node>
+
+</launch>
+

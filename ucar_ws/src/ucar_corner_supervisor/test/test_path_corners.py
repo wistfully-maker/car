@@ -1,0 +1,141 @@
+#!/usr/bin/env python3
+
+import math
+from pathlib import Path
+import sys
+import unittest
+
+
+PACKAGE_SOURCE = Path(__file__).resolve().parents[1] / "src"
+sys.path.insert(0, str(PACKAGE_SOURCE))
+
+from ucar_corner_supervisor.path_corners import (
+    CornerQueue,
+    extract_corner_plan,
+)
+
+
+def extract(points, minimum_length=0.08, simplify_tolerance=0.04):
+    return extract_corner_plan(
+        points,
+        simplify_tolerance=simplify_tolerance,
+        min_corner_angle=math.radians(45.0),
+        min_segment_length=minimum_length,
+        max_fit_residual=0.08,
+        same_turn_merge_distance=0.05,
+    )
+
+
+class PathCornerTests(unittest.TestCase):
+    def test_straight_path_has_no_corners(self):
+        self.assertEqual(extract([(0, 0), (0.5, 0), (1.0, 0)]), [])
+
+    def test_single_right_angle_uses_stable_corridor_headings(self):
+        corners = extract([(0, 0), (1, 0), (1, 1)])
+        self.assertEqual(len(corners), 1)
+        self.assertAlmostEqual(corners[0].entry_heading, 0.0, delta=0.03)
+        self.assertAlmostEqual(
+            corners[0].exit_heading, math.pi / 2.0, delta=0.03
+        )
+        self.assertTrue(corners[0].confident)
+
+    def test_grid_jitter_does_not_change_corridor_headings(self):
+        points = [
+            (0.0, 0.00),
+            (0.2, 0.01),
+            (0.4, -0.01),
+            (0.6, 0.01),
+            (0.8, 0.00),
+            (1.0, 0.00),
+            (1.01, 0.2),
+            (0.99, 0.4),
+            (1.01, 0.6),
+            (1.0, 0.8),
+        ]
+        corners = extract(points)
+        self.assertEqual(len(corners), 1)
+        self.assertAlmostEqual(corners[0].entry_heading, 0.0, delta=0.08)
+        self.assertAlmostEqual(
+            corners[0].exit_heading, math.pi / 2.0, delta=0.08
+        )
+
+    def test_short_connector_preserves_opposite_turns(self):
+        points = [(0, 0), (1, 0), (1, 0.25), (2, 0.25)]
+        corners = extract(points)
+        self.assertEqual(len(corners), 2)
+        self.assertGreater(corners[0].turn_angle, 0.0)
+        self.assertLess(corners[1].turn_angle, 0.0)
+        self.assertAlmostEqual(
+            corners[0].exit_heading, math.pi / 2.0, delta=0.03
+        )
+        self.assertAlmostEqual(corners[1].exit_heading, 0.0, delta=0.03)
+
+    def test_short_connector_preserves_same_direction_turns(self):
+        points = [(0, 0), (1, 0), (1, 0.25), (0.7, 0.25)]
+        corners = extract(points)
+        self.assertEqual(len(corners), 2)
+        self.assertGreater(corners[0].turn_angle, 0.0)
+        self.assertGreater(corners[1].turn_angle, 0.0)
+
+    def test_ten_centimeter_connector_preserves_same_direction_turns(self):
+        points = [(0, 0), (1, 0), (1, 0.10), (0.7, 0.10)]
+        corners = extract(points)
+        self.assertEqual(len(corners), 2)
+        self.assertTrue(all(corner.confident for corner in corners))
+
+    def test_too_short_connector_marks_both_adjacent_fits_unreliable(self):
+        points = [(0, 0), (1, 0), (1, 0.05), (2, 0.05)]
+        corners = extract(points, simplify_tolerance=0.02)
+        self.assertEqual(len(corners), 2)
+        self.assertFalse(corners[0].confident)
+        self.assertFalse(corners[1].confident)
+
+    def test_corner_distances_are_ordered_along_path(self):
+        points = [(0, 0), (1, 0), (1, 0.3), (2, 0.3)]
+        corners = extract(points)
+        self.assertLess(corners[0].path_distance, corners[1].path_distance)
+
+    def test_point_density_does_not_change_corner_solution(self):
+        sparse = [(0, 0), (1, 0), (1, 1)]
+        dense = (
+            [(index / 20.0, 0.0) for index in range(21)]
+            + [(1.0, index / 100.0) for index in range(1, 101)]
+        )
+        sparse_corner = extract(sparse)[0]
+        dense_corner = extract(dense)[0]
+        self.assertAlmostEqual(
+            sparse_corner.path_distance,
+            dense_corner.path_distance,
+            delta=0.03,
+        )
+        self.assertAlmostEqual(
+            sparse_corner.exit_heading,
+            dense_corner.exit_heading,
+            delta=0.03,
+        )
+
+    def test_sparse_path_is_resampled_before_line_fitting(self):
+        corner = extract([(0, 0), (1, 0), (1, 1)])[0]
+        self.assertGreaterEqual(corner.entry_fit.point_count, 10)
+        self.assertGreaterEqual(corner.exit_fit.point_count, 10)
+
+    def test_replan_after_first_turn_keeps_second_corner_active(self):
+        points = [(0, 0), (1, 0), (1, 0.10), (2, 0.10)]
+        original = extract(points)
+        queue = CornerQueue(match_distance=0.25, match_heading=0.35)
+        queue.replace(original)
+        first_identity = queue.current_identity()
+        queue.complete_current()
+
+        shifted_replan = extract(
+            [(0.02, 0), (1.03, 0.01), (1.02, 0.11), (2.0, 0.10)]
+        )
+        queue.replace(shifted_replan)
+
+        self.assertEqual(queue.remaining_count(), 1)
+        self.assertNotEqual(queue.current_identity(), first_identity)
+        self.assertLess(queue.current().turn_angle, 0.0)
+
+
+if __name__ == "__main__":
+    unittest.main()

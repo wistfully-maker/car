@@ -1,0 +1,14 @@
+<launch>
+  <!-- 地图服务 -->
+  <node name="map_server" pkg="map_server" type="map_server" args="/home/ucar/ucar_ws/src/ucar_nav/maps/map.yaml" />
+
+  <!-- 加载航点专用RViz配置，自带打点工具栏 -->
+  <node name="rviz" pkg="rviz" type="rviz" args="-d $(find waterplus_map_tools)/rviz/editwaypoints.rviz"/>
+
+  <!-- 雷达TF坐标变换 -->
+  <node name="base_to_laser_broadcaster" pkg="tf2_ros" type="static_transform_publisher" args="0.15 0.1 0 0 0 0 base_link base_laser_link" />
+
+  <!-- 航点编辑核心节点 -->
+  <node name="wp_edit_node" pkg="waterplus_map_tools" type="wp_edit_node" output="screen" />
+</launch>
+

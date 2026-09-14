@@ -1,0 +1,161 @@
+/env python3
+# 双白线居中巡线 + 岔路口白线扩张检测 自动左转逻辑
+# 修复：摄像头读帧失败空帧崩溃问题
+import cv2
+import numpy as np
+import rospy
+from geometry_msgs.msg import Twist
+from sensor_msgs.msg import Image
+from cv_bridge import CvBridge
+
+# ========== 参数配置区（所有调试在这里修改）==========
+FRAME_W = 640
+FRAME_H = 480
+CENTER_X = FRAME_W // 2
+BASE_SPEED = 0.09          # 基础前进速度
+
+# PID 参数
+Kp = 0.0035
+Ki = 0.00008
+Kd = 0.0008
+integral = 0
+last_error = 0
+
+# HSV白线阈值（沿用你标定好的值）
+LOWER_WHITE = np.array([0, 0, 121])
+UPPER_WHITE = np.array([179, 13, 233])
+
+# 形态学滤波核
+kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+
+# 轮廓最小面积：过滤噪点
+MIN_AREA = 15
+# 岔路口判定阈值：左右白线间距变化量
+DIST_JUDGE_THRESHOLD = 60
+# 岔路口固定左转偏移量（正数左转，负数右转）
+TURN_LEFT_OFFSET = 0.12
+# 保存上一帧白线间距
+last_line_distance = 0
+
+bridge = CvBridge()
+
+def find_left_line(mask, search_top_ratio=0.03):
+    """左半区域，从底向上搜索左边界白线"""
+    h, w = mask.shape
+    mid_w = w // 2
+    search_top = int(h * search_top_ratio)
+    for y in range(h - 1, search_top, -1):
+        row_img = mask[y:y+1, 0:mid_w]
+        res = cv2.findContours(row_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if len(res) == 3:
+            _, contours, _ = res
+        else:
+            contours, _ = res
+        for cnt in contours:
+            M = cv2.moments(cnt)
+            if M["m00"] > MIN_AREA:
+                cx = int(M["m10"] / M["m00"])
+                return cx
+    return None
+
+def find_right_line(mask, search_top_ratio=0.03):
+    """右半区域，从底向上搜索右边界白线"""
+    h, w = mask.shape
+    mid_w = w // 2
+    search_top = int(h * search_top_ratio)
+    for y in range(h - 1, search_top, -1):
+        row_img = mask[y:y+1, mid_w:w]
+        res = cv2.findContours(row_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if len(res) == 3:
+            _, contours, _ = res
+        else:
+            contours, _ = res
+        for cnt in contours:
+            M = cv2.moments(cnt)
+            if M["m00"] > MIN_AREA:
+                cx = int(M["m10"] / M["m00"]) + mid_w
+                return cx
+    return None
+
+def get_track_middle(mask):
+    global last_line_distance
+    left_x = find_left_line(mask)
+    right_x = find_right_line(mask)
+
+    if left_x is not None and right_x is not None:
+        current_dist = right_x - left_x
+        mid = (left_x + right_x) / 2.0
+        # 判断：白线间距变大，判定到达岔路口，触发左转标记
+        is_cross_road = False
+        if last_line_distance != 0 and (current_dist - last_line_distance) > DIST_JUDGE_THRESHOLD:
+            is_cross_road = True
+
+        last_line_distance = current_dist
+        print(f"【识别正常】左={left_x}, 右={right_x}, 中线={mid:.1f},间距={current_dist},岔口={is_cross_road}")
+        return mid, is_cross_road
+    else:
+        print("【警告】无法同时找到左右白线！")
+        return None, False
+
+def main():
+    global integral, last_error
+    rospy.init_node("local_follow_node")
+    pub_cmd = rospy.Publisher("/cmd_vel", Twist, queue_size=5)
+    pub_mask = rospy.Publisher("/vision/mask", Image, queue_size=2)
+    pub_frame = rospy.Publisher("/vision/roi", Image, queue_size=2)
+    twist = Twist()
+    twist.linear.x = BASE_SPEED
+
+    cap = cv2.VideoCapture(0)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, FRAME_W)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_H)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+    if not cap.isOpened():
+        rospy.logerr("摄像头打开失败！")
+        return
+    rospy.loginfo("【升级版本】中线巡线 + 岔路口自动左转程序启动")
+
+    while not rospy.is_shutdown():
+        ret, frame = cap.read()
+        # =========修复核心：空帧直接跳过，防止崩溃=========
+        if not ret or frame is None:
+            rospy.logwarn("摄像头读取帧失败，跳过当前帧")
+            continue
+
+        blur = cv2.GaussianBlur(frame, (5, 5), 0)
+        hsv = cv2.cvtColor(blur, cv2.COLOR_BGR2HSV)
+        mask = cv2.inRange(hsv, LOWER_WHITE, UPPER_WHITE)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+
+        target_middle, cross_flag = get_track_middle(mask)
+
+        if target_middle is None:
+            twist.angular.z = 0
+        else:
+            error = target_middle - CENTER_X
+            integral += error
+            diff = error - last_error
+            steer = Kp * error + Ki * integral + Kd * diff
+            # 核心新增逻辑：检测岔路口，叠加固定左转偏移
+            if cross_flag:
+                steer += TURN_LEFT_OFFSET
+                print("=====检测到岔路口，执行左转=====")
+
+            twist.angular.z = steer
+            last_error = error
+            print(f"基准中心={CENTER_X}, error={error:.2f}, steer输出={steer:.3f}\n")
+
+        pub_cmd.publish(twist)
+        pub_mask.publish(bridge.cv2_to_imgmsg(mask, "mono8"))
+        pub_frame.publish(bridge.cv2_to_imgmsg(frame, "bgr8"))
+
+    cap.release()
+
+if __name__ == "__main__":
+    try:
+        main()
+    except rospy.ROSInterruptException:
+        pass
+

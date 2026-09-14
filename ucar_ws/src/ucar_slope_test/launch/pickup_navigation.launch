@@ -1,0 +1,19 @@
+<launch>
+    <arg name="start_base" default="true"/>
+    <arg name="start_lidar" default="true"/>
+    <arg name="cmd_vel_topic" default="/cmd_vel"/>
+    <arg name="map_file" default="/home/ucar/ucar_ws/src/ucar_fast_nav/maps/002.yaml"/>
+
+    <rosparam command="load"
+        file="/home/ucar/ucar_ws/src/ucar_fast_nav/config/pickup_goal.yaml"
+        ns="/ucar_fast_nav"/>
+
+    <include file="/home/ucar/ucar_ws/src/ucar_fast_nav/launch/navigation_full.launch">
+        <arg name="start_base" value="true"/>
+        <arg name="start_lidar" value="true"/>
+        <arg name="cmd_vel_topic" value="/cmd_vel"/>
+        <arg name="map_file" value="/home/ucar/ucar_ws/src/ucar_fast_nav/maps/002.yaml"/>
+    </include>
+
+    <node pkg="ucar_avoid" type="slope_intervention.py" name="slope_intervention" output="screen"/>
+</launch>

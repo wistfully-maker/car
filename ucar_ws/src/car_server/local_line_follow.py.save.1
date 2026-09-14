@@ -1,0 +1,122 @@
+import cv2
+import numpy as np
+import serial
+import time
+
+# ====================== 【固定参数，直接确认】======================
+# PC端调好HSV（Vmin做容错下调）
+LOWER_WHITE = np.array([0, 0, 155])
+UPPER_WHITE = np.array([40, 41, 231])
+# ROI裁切比例，和电脑调参严格统一
+CUT_RATIO = 0.55
+# 8邻域连通域最小面积阈值，过滤碎白点
+MIN_AREA = 40
+# PID参数，现场可以微调
+KP = 0.35
+KD = 0.08
+# 麦克纳姆轮串口（根据你小车修改设备名 /dev/ttyUSB0 or /dev/ttyACM0）
+SERIAL_DEV = "/dev/ttyUSB0"
+BAUDRATE = 115200
+# =================================================================
+
+# PID全局变量
+last_error = 0
+
+# 打开摄像头
+cap = cv2.VideoCapture(0)
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+# 打开串口
+try:
+    ser = serial.Serial(SERIAL_DEV, BAUDRATE, timeout=0.05)
+    print("✅ 串口连接成功")
+except Exception as e:
+    print("⚠️ 串口打开失败，仅运行视觉调试", e)
+    ser = None
+
+def send_speed(turn):
+    """
+    turn: 偏移修正量，范围 [-100 ~ 100]
+    向前基础速度固定60，左右叠加转向
+    【重要：根据你小车串口协议自行修改发送格式！】
+    """
+    if ser is None:
+        return
+    base_speed = 60
+    left = max(min(base_speed - turn, 100), -100)
+    right = max(min(base_speed + turn, 100), -100)
+    # =========这里务必替换成你的小车通讯协议！========
+    cmd = f"L{int(left)}R{int(right)}\n"
+    ser.write(cmd.encode())
+
+while True:
+    ret, frame = cap.read()
+    if not ret:
+        print("摄像头读取失败")
+        break
+
+    h_img, w_img = frame.shape[:2]
+    # ROI裁剪：丢弃画面上半部分
+    y_start = int(h_img * CUT_RATIO)
+    frame_roi = frame[y_start:h_img, :]
+
+    # 预处理
+    blur = cv2.GaussianBlur(frame_roi, (5, 5), 0)
+    hsv = cv2.cvtColor(blur, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(hsv, LOWER_WHITE, UPPER_WHITE)
+
+    # 形态学闭运算，填补白线缝隙
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+
+    # ====================== 8邻域连通域检测 ======================
+    # connectivity=8 → 8邻域！核心配置
+    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
+
+    valid_centers = []
+    # label[0]是黑色背景，跳过，从1开始遍历
+    for i in range(1, num_labels):
+        area = stats[i, cv2.CC_STAT_AREA]
+        if area > MIN_AREA:
+            cx, cy = centroids[i]
+            valid_centers.append([cx, cy])
+
+    # 筛选左右两条白线
+    left_line = None
+    right_line = None
+    if len(valid_centers) >= 2:
+        valid_centers.sort(key=lambda p: p[0])
+        left_line = valid_centers[0]
+        right_line = valid_centers[-1]
+
+    target_x = w_img / 2
+    error = 0
+    if left_line is not None and right_line is not None:
+        # 两条白线中点
+        mid_x = (left_line[0] + right_line[0]) / 2
+        error = mid_x - target_x
+
+    # PID计算转向量
+    pid_out = KP * error + KD * (error - last_error)
+    last_error = error
+    pid_out = max(min(pid_out, 100), -100)
+
+    send_speed(pid_out)
+
+    # 调试可视化（比赛正式运行可以注释下面两行降低负载）
+    cv2.imshow("mask", mask)
+    cv2.imshow("roi", frame_roi)
+
+    key = cv2.waitKey(1) & 0xFF
+    if key == ord('q'):
+        break
+
+# 资源释放
+cap.release()
+cv2.destroyAllWindows()
+if ser is not None:
+    ser.close()
+print("程序退出")
+

@@ -1,0 +1,12 @@
+# P1-6 TODO: 确认此地图是否为正式场地地图 (official_map_v1)
+# 必须在真车测试前确认:
+#   1. 地图方向是否正确
+#   2. 地图原点是否与当前场地一致
+#   3. AMCL初始位姿是否能正确匹配
+image: 002.pgm
+resolution: 0.050000
+origin: [-12.200000, -12.200000, 0.000000]
+negate: 0
+occupied_thresh: 0.65
+free_thresh: 0.196
+

@@ -1,0 +1,102 @@
+timeouts:
+  dependency_ready: 120.0
+  pickup_navigation: 300.0
+  qr_search: 120.0
+  llm_classification: 120.0
+  speech: 60.0
+  delivery_navigation: 300.0
+  simulation_navigation: 300.0
+  # 电脑端内部任务 300 秒；外层多留 30 秒处理网络与回传。
+  gazebo: 330.0
+  # 第三阶段外层超时严格大于 line_follow_integration 内部 300/30/120 秒。
+  line_navigation: 310.0
+  line_direction: 35.0
+  line_follow: 125.0
+  cancel_ack: 15.0
+
+# 仿真阶段开关：false 时实物配送完成即 complete（第一部分验收状态）；
+# true 时实物停车确认后发布 /task/simulation_navigation_goal，
+# 等待 /task/simulation_arrived 后完成。
+simulation_phase_enabled: false
+
+# 电脑 Gazebo 软门控。子 launch 默认关闭，总 launch 显式开启。
+gazebo_phase_enabled: false
+
+gazebo_tcp_bridge:
+  bind_host: 0.0.0.0
+  port: 1525
+  allowed_client_ip: ""
+  max_frame_bytes: 8192
+
+voice_adapter:
+  debounce_seconds: 2.0
+
+tts_bridge:
+  command:
+    - python3
+    - /home/ucar/ucar_ws/src/speech_command/scripts/tts_http.py
+  timeout: 30.0
+
+fast_nav_adapter:
+  action_timeout: 300.0
+  settle_time: 0.5
+  linear_stop_threshold: 0.03
+  angular_stop_threshold: 0.05
+
+readiness_gate:
+  message_max_age: 3.0
+  check_period: 1.0
+  tf_timeout: 0.05
+  action_wait_timeout: 0.05
+  log_interval: 10.0
+  map_frame: map
+  odom_frame: odom
+  base_frame: base_link
+  laser_frame: laser_frame
+
+  lidar_loc_node: /lidar_loc
+  amcl_node: /amcl
+  global_planner_param: /move_base/base_global_planner
+  local_planner_param: /move_base/base_local_planner
+
+velocity_arbiter:
+  source_timeout: 0.3
+  check_period: 0.05
+  max_linear_abs: 1.0
+  max_angular_abs: 2.0
+
+# 导航栈交接：有界重试、近零验证与总时限（由 NavigationHandoff 校验）。
+navigation_handoff:
+  cancel_retries: 3
+  cancel_timeout: 3.0
+  stop_stable_duration: 0.75
+  linear_stop_threshold: 0.02
+  angular_stop_threshold: 0.05
+  odom_max_age: 0.5
+  legacy_exit_retries: 5
+  legacy_exit_timeout: 10.0
+  readiness_retries: 30
+  readiness_poll_period: 1.0
+  total_timeout: 90.0
+
+# 交接 supervisor 专用配置：仅管理它自己启动并持有句柄的导航 launch。
+navigation_handoff_supervisor:
+  legacy_nav_launch: ""
+  stop_integration_launch: ""
+  legacy_nodes: [/lidar_loc, /move_base, /map_server]
+  initial_pose_frame: map
+  initial_pose_x: -1.40219
+  initial_pose_y: -0.627908
+  initial_pose_yaw: 0.053792653589793
+  initial_pose_covariance: 0.1
+  pose_snapshot_timeout: 0.2
+  pose_snapshot_retries: 3
+  readiness_max_age: 3.0
+  readiness_action_wait_timeout: 0.05
+  readiness_tf_timeout: 0.05
+  amcl_node: /amcl
+  ocr_node: /ocr_native_node
+  image_topic: /usb_cam/image_raw
+  odom_frame: odom
+  base_frame: base_link
+  laser_frame: laser_frame

@@ -1,0 +1,144 @@
+<launch>
+  <arg name="enable_task_orchestrator" default="true"/>
+  <arg name="enable_voice_adapter" default="true"/>
+  <arg name="enable_tts_bridge" default="true"/>
+  <arg name="enable_fast_nav_adapter" default="false"/>
+  <arg name="enable_readiness_gate" default="false"/>
+  <arg name="enable_velocity_arbiter" default="false"/>
+  <arg name="enable_navigation_handoff_supervisor" default="false"/>
+  <arg name="enable_gazebo_bridge_server" default="false"/>
+  <arg name="simulation_phase_enabled" default="false"/>
+  <arg name="gazebo_phase_enabled" default="false"/>
+  <arg name="gazebo_bridge_bind_host" default="0.0.0.0"/>
+  <arg name="gazebo_bridge_port" default="1525"/>
+  <arg name="gazebo_bridge_allowed_client_ip" default=""/>
+  <arg name="gazebo_bridge_max_frame_bytes" default="8192"/>
+  <arg name="legacy_nav_launch"
+       default="$(find task_orchestrator)/launch/legacy_navigation_include.launch"/>
+  <arg name="stop_integration_launch"
+       default="$(find stop)/launch/mission_integration.launch"/>
+  <!-- 导航模式透传（differential 默认不传额外参数；omni 由根 launch 注入）。
+       空串 = 不向 roslaunch 命令追加任何参数。 -->
+  <arg name="legacy_nav_mode" default=""/>
+  <arg name="stop_integration_nav_mode" default=""/>
+
+  <!-- 阶段超时：competition_full.launch 显式覆盖；默认值镜像
+       orchestrator.yaml，私有 <param> 在 rosparam load 之后覆盖同 key。 -->
+  <arg name="timeout_dependency_ready" default="120.0"/>
+  <arg name="timeout_pickup_navigation" default="300.0"/>
+  <arg name="timeout_qr_search" default="120.0"/>
+  <arg name="timeout_llm_classification" default="120.0"/>
+  <arg name="timeout_speech" default="60.0"/>
+  <arg name="timeout_gazebo" default="330.0"/>
+  <!-- 第三阶段外层超时，严格大于 line_follow_integration 内部 300/30/120 秒。
+       phase3_config 由根 launch 转发；默认指向 line_follow_integration 的
+       phase3.yaml，避免在本 launch 复制 pose 字面量。 -->
+  <arg name="timeout_line_navigation" default="310.0"/>
+  <arg name="timeout_line_direction" default="35.0"/>
+  <arg name="timeout_line_follow" default="125.0"/>
+  <arg name="phase3_config"
+       default="$(find line_follow_integration)/config/phase3.yaml"/>
+
+  <node pkg="task_orchestrator"
+        type="task_orchestrator_node.py"
+        name="task_orchestrator"
+        output="screen"
+        if="$(arg enable_task_orchestrator)">
+    <rosparam command="load"
+              file="$(find task_orchestrator)/config/orchestrator.yaml"/>
+    <!-- 第三阶段巡线起点与内部超时来自 line_follow_integration 的 phase3.yaml，
+         不在本 launch 复制 pose 字面量。 -->
+    <rosparam command="load" file="$(arg phase3_config)"/>
+    <param name="timeouts/dependency_ready"
+           value="$(arg timeout_dependency_ready)"/>
+    <param name="timeouts/pickup_navigation"
+           value="$(arg timeout_pickup_navigation)"/>
+    <param name="timeouts/qr_search" value="$(arg timeout_qr_search)"/>
+    <param name="timeouts/llm_classification"
+           value="$(arg timeout_llm_classification)"/>
+    <param name="timeouts/speech" value="$(arg timeout_speech)"/>
+    <param name="timeouts/gazebo" value="$(arg timeout_gazebo)"/>
+    <param name="timeouts/line_navigation"
+           value="$(arg timeout_line_navigation)"/>
+    <param name="timeouts/line_direction"
+           value="$(arg timeout_line_direction)"/>
+    <param name="timeouts/line_follow"
+           value="$(arg timeout_line_follow)"/>
+    <param name="simulation_phase_enabled"
+           value="$(arg simulation_phase_enabled)"/>
+    <param name="gazebo_phase_enabled"
+           value="$(arg gazebo_phase_enabled)"/>
+  </node>
+  <node pkg="task_orchestrator"
+        type="voice_task_adapter_node.py"
+        name="voice_task_adapter"
+        output="screen"
+        if="$(arg enable_voice_adapter)">
+    <rosparam command="load"
+              file="$(find task_orchestrator)/config/orchestrator.yaml"/>
+  </node>
+  <node pkg="task_orchestrator"
+        type="tts_bridge_node.py"
+        name="tts_bridge"
+        output="screen"
+        if="$(arg enable_tts_bridge)">
+    <rosparam command="load"
+              file="$(find task_orchestrator)/config/orchestrator.yaml"/>
+  </node>
+  <node pkg="task_orchestrator"
+        type="fast_nav_adapter_node.py"
+        name="fast_nav_adapter"
+        output="screen"
+        if="$(arg enable_fast_nav_adapter)">
+    <rosparam command="load"
+              file="$(find task_orchestrator)/config/orchestrator.yaml"/>
+  </node>
+  <node pkg="task_orchestrator"
+        type="system_readiness_gate_node.py"
+        name="readiness_gate"
+        output="screen"
+        if="$(arg enable_readiness_gate)">
+    <rosparam command="load"
+              file="$(find task_orchestrator)/config/orchestrator.yaml"/>
+  </node>
+  <node pkg="task_orchestrator"
+        type="velocity_arbiter_node.py"
+        name="velocity_arbiter"
+        output="screen"
+        if="$(arg enable_velocity_arbiter)">
+    <rosparam command="load"
+              file="$(find task_orchestrator)/config/orchestrator.yaml"/>
+  </node>
+  <node pkg="task_orchestrator"
+        type="navigation_handoff_supervisor_node.py"
+        name="navigation_handoff_supervisor"
+        output="screen"
+        if="$(arg enable_navigation_handoff_supervisor)">
+    <rosparam command="load"
+              file="$(find task_orchestrator)/config/orchestrator.yaml"/>
+    <param name="navigation_handoff_supervisor/legacy_nav_launch"
+           value="$(arg legacy_nav_launch)"/>
+    <param name="navigation_handoff_supervisor/stop_integration_launch"
+           value="$(arg stop_integration_launch)"/>
+    <param name="navigation_handoff_supervisor/legacy_nav_mode"
+           value="$(arg legacy_nav_mode)"/>
+    <param name="navigation_handoff_supervisor/stop_integration_nav_mode"
+           value="$(arg stop_integration_nav_mode)"/>
+  </node>
+  <node pkg="task_orchestrator"
+        type="gazebo_tcp_bridge_server_node.py"
+        name="gazebo_tcp_bridge_server"
+        output="screen"
+        if="$(arg enable_gazebo_bridge_server)">
+    <rosparam command="load"
+              file="$(find task_orchestrator)/config/orchestrator.yaml"/>
+    <param name="bind_host"
+           value="$(arg gazebo_bridge_bind_host)"/>
+    <param name="port"
+           value="$(arg gazebo_bridge_port)"/>
+    <param name="allowed_client_ip"
+           value="$(arg gazebo_bridge_allowed_client_ip)"/>
+    <param name="max_frame_bytes"
+           value="$(arg gazebo_bridge_max_frame_bytes)"/>
+  </node>
+</launch>

@@ -1,0 +1,11 @@
+profile: navfn_dwa_corner
+map: maps/map.yaml
+global_planner: navfn/NavfnROS
+local_planner: dwa_local_planner/DWAPlannerROS
+parameter_files:
+  - config/global_planners/navfn.yaml
+  - config/local_planners/dwa_corner_safe.yaml
+  - config/costmap/common.yaml
+  - config/costmap/global.yaml
+  - config/costmap/local.yaml
+  - config/move_base.yaml

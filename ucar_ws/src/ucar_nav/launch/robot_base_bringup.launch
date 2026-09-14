@@ -1,0 +1,21 @@
+<launch>
+  <arg name="start_base" default="true"/>
+  <arg name="start_lidar" default="true"/>
+  <arg name="start_camera" default="false"/>
+  <arg name="laser_x" default="0.07"/>
+  <arg name="laser_z" default="0.165"/>
+  <arg name="laser_yaw" default="-0.05"/>
+
+  <include if="$(arg start_base)"
+           file="$(find ucar_controller)/launch/base_driver.launch"/>
+
+  <include if="$(arg start_lidar)"
+           file="$(find ucar_nav)/launch/lidar_bringup.launch">
+    <arg name="laser_x" value="$(arg laser_x)"/>
+    <arg name="laser_z" value="$(arg laser_z)"/>
+    <arg name="laser_yaw" value="$(arg laser_yaw)"/>
+  </include>
+
+  <include if="$(arg start_camera)"
+           file="$(find usb_cam)/launch/usb_cam-test.launch"/>
+</launch>

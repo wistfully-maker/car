@@ -1,0 +1,30 @@
+pickup_teb:
+  # holonomic_robot 不在此文件：它是 TEB 启动时专用参数，
+  # dynamic_reconfigure 不支持运行时注入（车端实测会被拒绝）。
+  max_vel_x: 0.80
+  max_vel_x_backwards: 0.30
+  max_vel_y: 0.45
+  max_vel_theta: 1.20
+  acc_lim_x: 0.50
+  acc_lim_y: 0.50
+  acc_lim_theta: 1.50
+  weight_kinematics_nh: 1.0
+  weight_kinematics_forward_drive: 1.0
+  weight_optimaltime: 1.0
+  # 避障裕量：与差速基线一致（0.15/50/0.5/1.0）。实车实测加大裕量
+  # （0.25→0.18）都在弯道卡死，本赛道窄道真实间隙 0.12~0.20m，
+  # 只能用基线裕量；防蹭墙改靠全向横移机动，而非加大避障距离。
+  min_obstacle_dist: 0.15
+  inflation_dist: 0.5
+  weight_obstacle: 50.0
+  costmap_obstacles_behind_robot_dist: 1.0
+
+# 弯道降速档：全局路径前方出现急弯时由 omni_teb_applier 切换。
+# 实车依据：vx 0.5~0.6 平移 + vz 0.85~1.07 旋转过弯必蹭墙。
+pickup_corner_teb:
+  max_vel_x: 0.35
+  max_vel_x_backwards: 0.15
+  max_vel_y: 0.25
+  acc_lim_y: 0.40
+  max_vel_theta: 0.75
+  acc_lim_theta: 1.00

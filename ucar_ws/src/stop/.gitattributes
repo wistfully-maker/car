@@ -1,0 +1,5 @@
+/scripts/ocr_native_node.py text eol=lf
+/scripts/precision_park.py text eol=lf
+/scripts/scan_and_park.py text eol=lf
+/msg/BoundingBox.msg text eol=lf
+/msg/BoundingBoxes.msg text eol=lf

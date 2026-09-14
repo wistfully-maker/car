@@ -1,0 +1,35 @@
+<launch>
+  <!--
+    mission_light.launch —— 轻量版（依赖已有导航栈）
+
+    前提: 导航栈已运行 (map_server + AMCL + move_base + 驱动)
+    只启动 OCR 和任务编排节点
+
+    使用方式:
+      roslaunch stop mission_light.launch task_input:="食品，苹果；电子，手机"
+  -->
+
+  <arg name="task_input" default="食品，苹果；电子，手机" />
+
+  <!-- 自动初始位姿（0,0 则跳过，需手动 RViz 设） -->
+  <arg name="initial_pose_x"   default="0.0" />
+  <arg name="initial_pose_y"   default="0.0" />
+  <arg name="initial_pose_yaw" default="0.0" />
+
+  <!-- OCR 节点 -->
+  <node name="ocr_native_node" pkg="stop" type="ocr_native_node.py" output="screen" />
+
+  <!-- 任务编排节点 -->
+  <node name="mission_orchestrator" pkg="stop" type="mission_orchestrator.py" output="screen">
+    <param name="task_input"         value="$(arg task_input)" />
+    <param name="initial_pose_x"     value="$(arg initial_pose_x)" />
+    <param name="initial_pose_y"     value="$(arg initial_pose_y)" />
+    <param name="initial_pose_yaw"   value="$(arg initial_pose_yaw)" />
+    <param name="auto_start_delay"   value="3.0" />
+    <param name="max_rotations"      value="6" />
+    <param name="target_distance"    value="0.20" />
+    <param name="x_align_tolerance"  value="0.50" />
+    <param name="y_align_tolerance"  value="12" />
+  </node>
+
+</launch>

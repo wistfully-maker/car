@@ -1,0 +1,16 @@
+<launch>
+    <!-- 1. 地图服务器：加载已有的栅格地图 -->
+    <node name="map_server" pkg="map_server" type="map_server"
+          args="/home/ucar/map.yaml" />
+
+    <!-- 2. Rviz 可视化界面（此处使用空白配置，避免旧配置文件崩溃） -->
+    <node name="rviz" pkg="rviz" type="rviz"
+          args="-d $(find waterplus_map_tools)/rviz/empty.rviz" />
+
+    <!-- 3. 静态坐标变换：将激光雷达坐标系(base_laser_link)固定在机器人底盘(base_link)前方 -->
+    <node name="base_to_laser_broadcaster" pkg="tf2_ros" type="static_transform_publisher"
+          args="0.15 0 0.1 0 0 0 base_link base_laser_link" />
+
+    <!-- 4. 航点编辑节点（可添加/删除/保存航点） -->
+    <node name="wp_edit_node" pkg="waterplus_map_tools" type="wp_edit_node" output="screen" />
+</launch>
